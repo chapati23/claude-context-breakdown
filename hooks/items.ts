@@ -1,0 +1,601 @@
+// The items of one segment, built from the breakdown and the conversation,
+// with their titles, sizes and the text level 3 shows.
+
+import type {
+  ContextBreakdownList,
+  ContextBreakdownRow,
+  ContextBreakdownSegment,
+  ContextBreakdownSegmentId,
+  ContextBreakdownSort,
+} from '../types'
+import { apportion, baselineOf, isMemoryUnattributed, memorySegment } from './categories'
+import type { CategoryLike, MemoryFileLike } from './categories'
+import { blockChars, classifyBlock } from './classify'
+import type { BlockLike, MessageLike, SplitId } from './classify'
+import { loadedFileText } from './reminder'
+import { segmentDef } from './segments'
+import { DEFAULT_CHARS_PER_TOKEN, MAX_API_MESSAGES } from './snapshot'
+import { firstWords, hashText, shortenPath } from './text'
+
+/** Rows on one page of level 2. */
+export const LIST_PAGE_ROWS = 20
+
+/** The fields of the breakdown that items are built from. */
+export type ItemBreakdown = {
+  categories: readonly CategoryLike[]
+  memoryFiles?: readonly MemoryFileLike[] | null
+  mcpTools?: readonly { name: string; serverName: string; tokens: number; isLoaded: boolean }[] | null
+  agents?: readonly { agentType: string; source: string; tokens: number }[] | null
+  skills?: {
+    skillFrontmatter: readonly { name: string; source: string; pluginName?: string; tokens: number }[]
+  } | null
+}
+
+/** What items are built from; either part may be unreadable. */
+export type ItemData = {
+  breakdown: ItemBreakdown | null
+  messages: readonly MessageLike[] | null
+  /** The snapshot's ratio, for the estimates of conversation items. */
+  charsPerToken: number | null
+  /** The same snapshot's conversation segments, so level 2 adds up to level 1. */
+  segments?: readonly ContextBreakdownSegment[] | null
+}
+
+/** The list holds the newest messages only when it is this long. */
+export function isCutList(messages: readonly MessageLike[]): boolean {
+  return messages.length >= MAX_API_MESSAGES
+}
+
+const CUT_NOTE = `Only the newest ${MAX_API_MESSAGES.toLocaleString('en-US')} messages can be read: older items are not listed.`
+
+/** Which file comparison applies to an item at level 3. */
+export type DiskKind = 'memory' | 'read'
+
+export type Item = {
+  id: string
+  title: string
+  detail: string
+  tokens: number
+  /** Position in the conversation; baseline items count in list order. */
+  order: number
+  /** The file behind the item, as the engine named it. */
+  path: string | null
+  disk: DiskKind | null
+  /** The as-loaded text carries its own line numbers (a Read result). */
+  isNumbered: boolean
+  /** The as-loaded text, or null when it is not found; absent: no level 3. */
+  loaded: (() => string | null) | null
+  /** Why the as-loaded text may be missing, when the usual reason is wrong. */
+  missing?: string
+}
+
+export type ItemSet = {
+  items: Item[]
+  note: string | null
+}
+
+export function isBaseline(segment: ContextBreakdownSegmentId): boolean {
+  return segmentDef(segment).group === 'baseline'
+}
+
+/** Whether the segment's items have a time order to sort by. */
+export function canSort(segment: ContextBreakdownSegmentId): boolean {
+  return !isBaseline(segment) && segment !== 'conversation'
+}
+
+function tokensOf(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function stringField(input: Record<string, unknown>, name: string): string | null {
+  const value = input[name]
+
+  return typeof value === 'string' && value !== '' ? value : null
+}
+
+/** The file a tool call names, for the tools that take one. */
+export function toolPath(input: unknown): string | null {
+  const fields = asRecord(input)
+
+  return stringField(fields, 'file_path') ?? stringField(fields, 'notebook_path')
+}
+
+/** What a call did, in a few words: the path, the command's start, the pattern. */
+export function callSummary(name: string, input: unknown): string {
+  const fields = asRecord(input)
+  const path = toolPath(fields)
+  if (path !== null) {
+    return shortenPath(path)
+  }
+  if (name === 'Bash') {
+    return firstWords(stringField(fields, 'command') ?? '', 48)
+  }
+  for (const field of ['pattern', 'query', 'url', 'description', 'skill', 'command', 'prompt', 'path']) {
+    const value = stringField(fields, field)
+    if (value !== null) {
+      return firstWords(value, 48)
+    }
+  }
+
+  return ''
+}
+
+// Baseline segments: rows of the breakdown, with the engine's token figures.
+
+function categoryItem(category: CategoryLike, order: number): Item {
+  return {
+    id: `c:${hashText(category.name)}`,
+    title: category.name,
+    detail: '',
+    tokens: tokensOf(category.tokens),
+    order,
+    path: null,
+    disk: null,
+    isNumbered: false,
+    loaded: null,
+  }
+}
+
+function usedCategories(breakdown: ItemBreakdown, segment: ContextBreakdownSegmentId): CategoryLike[] {
+  return breakdown.categories.filter(
+    category => category.kind === 'used' && baselineOf(category.name) === segment,
+  )
+}
+
+function memoryItems(
+  breakdown: ItemBreakdown,
+  segment: ContextBreakdownSegmentId,
+  messages: readonly MessageLike[] | null,
+): Item[] {
+  // A cut list starts after the opening reminder, so no file's text is there.
+  const missing =
+    messages !== null && isCutList(messages)
+      ? 'The opening reminder is older than the newest messages and can no longer be read: shown from disk.'
+      : undefined
+
+  return (breakdown.memoryFiles ?? [])
+    .filter(file => memorySegment(file.type) === segment)
+    .map((file, order) => ({
+      id: `f:${hashText(file.path)}`,
+      title: shortenPath(file.path),
+      detail: '',
+      tokens: tokensOf(file.tokens),
+      order,
+      path: file.path,
+      disk: 'memory' as const,
+      isNumbered: false,
+      loaded: () => (messages === null ? null : loadedFileText(messages, file.path)),
+      ...(missing === undefined ? {} : { missing }),
+    }))
+}
+
+/** The engine's word for where a skill comes from, as a person says it. */
+function skillSource(source: string): string {
+  const words: Record<string, string> = {
+    userSettings: 'user',
+    projectSettings: 'project',
+    policySettings: 'managed',
+    syncedSkills: 'synced',
+  }
+
+  return words[source] ?? source
+}
+
+function baselineItems(segment: ContextBreakdownSegmentId, data: ItemData): ItemSet {
+  const { breakdown } = data
+  if (breakdown === null) {
+    return { items: [], note: 'The breakdown could not be read.' }
+  }
+  const items: Item[] = []
+  const push = (item: Omit<Item, 'order'>) => items.push({ ...item, order: items.length })
+  const plain = { path: null, disk: null, isNumbered: false, loaded: null }
+  const categories = usedCategories(breakdown, segment)
+
+  if (segment === 'mcp') {
+    const tools = (breakdown.mcpTools ?? []).filter(tool => tool.isLoaded)
+    for (const tool of tools) {
+      push({ id: `m:${hashText(tool.name)}`, title: tool.name, detail: tool.serverName, tokens: tokensOf(tool.tokens), ...plain })
+    }
+    for (const category of categories) {
+      if (tools.length === 0 || !category.name.startsWith('MCP tools')) {
+        push(categoryItem(category, 0))
+      }
+    }
+  } else if (segment === 'skills-agents') {
+    const skills = breakdown.skills?.skillFrontmatter ?? []
+    const agents = breakdown.agents ?? []
+    for (const skill of skills) {
+      push({
+        id: `s:${hashText(`${skill.source}:${skill.name}`)}`,
+        title: skill.name,
+        detail: skill.pluginName ?? skillSource(skill.source),
+        tokens: tokensOf(skill.tokens),
+        ...plain,
+      })
+    }
+    for (const agent of agents) {
+      push({ id: `g:${hashText(agent.agentType)}`, title: agent.agentType, detail: 'agent', tokens: tokensOf(agent.tokens), ...plain })
+    }
+    for (const category of categories) {
+      const isListed =
+        (category.name === 'Skills' && skills.length > 0) ||
+        (category.name === 'Custom agents' && agents.length > 0)
+      if (!isListed) {
+        push(categoryItem(category, 0))
+      }
+    }
+  } else {
+    // System, Other: the categories themselves; memory segments: the files.
+    for (const category of categories) {
+      push(categoryItem(category, 0))
+    }
+    // Without per-file figures, level 1 counts the memory files under Other.
+    if (segment === 'other' && isMemoryUnattributed(breakdown.memoryFiles)) {
+      for (const category of breakdown.categories) {
+        if (category.kind === 'used' && baselineOf(category.name) === 'memory' && tokensOf(category.tokens) > 0) {
+          push(categoryItem(category, 0))
+        }
+      }
+    }
+    for (const file of memoryItems(breakdown, segment, data.messages)) {
+      push(file)
+    }
+  }
+
+  return { items, note: items.length === 0 ? 'No items.' : null }
+}
+
+// Conversation segments: blocks of the messages, sized by characters.
+
+const ID_PREFIX: Record<SplitId, string> = {
+  'compaction-summary': 's',
+  'tool-results': 'r',
+  'skill-bodies': 'k',
+  'task-reports': 't',
+  injections: 'i',
+  prompts: 'p',
+  'claude-output': 'a',
+}
+
+function blocksOf(message: MessageLike): readonly BlockLike[] {
+  if (typeof message.content === 'string') {
+    return [{ type: 'text', text: message.content }]
+  }
+
+  return Array.isArray(message.content) ? message.content.filter(b => b && typeof b === 'object') : []
+}
+
+function textOf(block: BlockLike): string {
+  return typeof block.text === 'string' ? block.text : ''
+}
+
+/** A tool result's text: its string, or its text parts; null with none. */
+function resultText(block: BlockLike): string | null {
+  const content = block.content
+  if (typeof content === 'string') {
+    return content
+  }
+  if (!Array.isArray(content)) {
+    return null
+  }
+  const parts = content.map(part => {
+    const inner = asRecord(part)
+
+    return inner.type === 'text' && typeof inner.text === 'string' ? inner.text : `[${String(inner.type ?? 'block')}]`
+  })
+
+  return content.some(part => asRecord(part).type === 'text') ? parts.join('\n') : null
+}
+
+/** "Prompt hook: …", or the first line of a reminder, tags left out. */
+export function injectionTitle(text: string): string {
+  const hook = /<user-prompt-submit-hook>([\s\S]*?)(?:<\/user-prompt-submit-hook>|$)/.exec(text)
+  if (hook !== null) {
+    return `Prompt hook: ${firstWords(hook[1]!, 48)}`
+  }
+  const body = text.replace(/<\/?system-reminder>/g, '\n')
+  const line = body.split('\n').find(one => one.trim() !== '') ?? ''
+
+  return firstWords(line) || 'Reminder'
+}
+
+/** A task report's summary, else its status and id, else its first words. */
+export function taskTitle(text: string): string {
+  const tag = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text)?.[1]?.trim() ?? ''
+  const summary = tag('summary')
+  if (summary !== '') {
+    return firstWords(summary)
+  }
+  const status = tag('status')
+  const id = tag('task-id')
+  if (status !== '' || id !== '') {
+    return firstWords(`Task ${id} ${status}`)
+  }
+
+  return firstWords(text) || 'Task report'
+}
+
+/** A skill body is named after its folder, the last part of its base directory. */
+export function skillTitle(text: string): string {
+  const base = /Base directory for this skill:\s*(\S[^\n]*)/.exec(text)?.[1]?.trim()
+  const name = base?.replace(/[/\\]+$/, '').split(/[/\\]/).pop()
+
+  return name !== undefined && name !== '' ? name : firstWords(text)
+}
+
+/** A prompt's first words; a slash command or shell line by its own words. */
+export function promptTitle(text: string): string {
+  const command = /<command-name>([\s\S]*?)<\/command-name>/.exec(text)?.[1]?.trim()
+  if (command !== undefined && command !== '') {
+    const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1] ?? ''
+    const name = command.startsWith('/') ? command : `/${command}`
+
+    return firstWords(`${name} ${args}`)
+  }
+  const shell = /<bash-input>([\s\S]*?)<\/bash-input>/.exec(text)?.[1]
+  if (shell !== undefined) {
+    return firstWords(`! ${shell}`)
+  }
+  if (text.includes('<local-command-stdout>') || text.includes('<bash-stdout>')) {
+    return firstWords(`Output: ${text}`)
+  }
+
+  return firstWords(text)
+}
+
+/** Claude's message: its first words, or its tool call; the call as detail beside words. */
+function claudeTitle(blocks: readonly BlockLike[]): { title: string; detail: string } {
+  const words = blocks.map(textOf).find(text => text.trim() !== '')
+  const call = blocks.find(block => block.type === 'tool_use')
+  const callText =
+    call === undefined
+      ? ''
+      : `${String(call.name ?? 'tool')} ${callSummary(String(call.name ?? ''), call.input)}`.trim()
+  if (words !== undefined) {
+    return { title: firstWords(words), detail: callText }
+  }
+  if (callText !== '') {
+    return { title: callText, detail: '' }
+  }
+
+  return { title: blocks.some(block => block.type === 'thinking') ? 'Thinking' : 'Reply', detail: '' }
+}
+
+function claudeText(blocks: readonly BlockLike[]): string {
+  return blocks
+    .map(block => {
+      switch (block.type) {
+        case 'text':
+          return textOf(block)
+        case 'thinking':
+          return `[thinking]\n${typeof block.thinking === 'string' ? block.thinking : ''}`
+        case 'tool_use':
+          return `[${String(block.name ?? 'tool')}]\n${JSON.stringify(block.input ?? {}, null, 2)}`
+        default:
+          return `[${block.type}]`
+      }
+    })
+    .join('\n\n')
+}
+
+type ToolUse = { name: string; input: unknown }
+
+function toolUses(messages: readonly MessageLike[]): Map<string, ToolUse> {
+  const out = new Map<string, ToolUse>()
+  for (const message of messages) {
+    if (message.role !== 'assistant') {
+      continue
+    }
+    for (const block of blocksOf(message)) {
+      if (block.type === 'tool_use' && typeof block.id === 'string') {
+        out.set(block.id, { name: String(block.name ?? 'tool'), input: block.input })
+      }
+    }
+  }
+
+  return out
+}
+
+function conversationItems(segment: SplitId, data: ItemData): ItemSet {
+  const { messages } = data
+  if (messages === null) {
+    return { items: [], note: 'The messages could not be read.' }
+  }
+  const ratio = data.charsPerToken !== null && data.charsPerToken > 0 ? data.charsPerToken : DEFAULT_CHARS_PER_TOKEN
+  const memoryPaths = (data.breakdown?.memoryFiles ?? []).map(file => file.path)
+  const uses = segment === 'tool-results' ? toolUses(messages) : new Map<string, ToolUse>()
+  const items: Item[] = []
+  const sizes: number[] = []
+  const seen = new Map<string, number>()
+  let order = 0
+  const push = (item: Omit<Item, 'order' | 'tokens'>, chars: number) => {
+    // Equal texts get the same fingerprint; a count tells them apart.
+    const count = seen.get(item.id) ?? 0
+    seen.set(item.id, count + 1)
+    items.push({
+      ...item,
+      id: count === 0 ? item.id : `${item.id}~${count}`,
+      tokens: 0,
+      order,
+    })
+    sizes.push(chars)
+  }
+  const textItem = { detail: '', path: null, disk: null, isNumbered: false }
+
+  for (const message of messages) {
+    const blocks = blocksOf(message)
+    if (message.role === 'assistant') {
+      order += 1
+      if (segment === 'claude-output' && blocks.length > 0) {
+        const firstCall = blocks.find(block => block.type === 'tool_use' && typeof block.id === 'string')
+        const { title, detail } = claudeTitle(blocks)
+        push(
+          {
+            ...textItem,
+            id: `a:${firstCall === undefined ? hashText(blocks.map(textOf).join('\n')) : String(firstCall.id)}`,
+            title,
+            detail,
+            loaded: () => claudeText(blocks),
+          },
+          blocks.reduce((sum, block) => sum + blockChars(block), 0),
+        )
+      }
+      continue
+    }
+    const prompt: BlockLike[] = []
+    for (const block of blocks) {
+      order += 1
+      const id = classifyBlock(message.role, block, memoryPaths)
+      if (id !== segment) {
+        continue
+      }
+      if (id === 'prompts') {
+        prompt.push(block)
+        continue
+      }
+      if (id === 'tool-results') {
+        const use = typeof block.tool_use_id === 'string' ? uses.get(block.tool_use_id) : undefined
+        const text = resultText(block)
+        const name = use?.name ?? 'Tool result'
+        const path = use === undefined ? null : toolPath(use.input)
+        // A Read that gave an image or a PDF holds no text: the file is not
+        // text either, so it gets no level 3 and no disk view.
+        const isTextRead = name === 'Read' && text !== null
+        push(
+          {
+            id: `r:${typeof block.tool_use_id === 'string' ? block.tool_use_id : hashText(text ?? '')}`,
+            title: name,
+            detail: use === undefined ? '' : callSummary(name, use.input),
+            path,
+            disk: isTextRead && path !== null ? 'read' : null,
+            isNumbered: isTextRead,
+            loaded: text === null ? null : () => text,
+          },
+          blockChars(block),
+        )
+        continue
+      }
+      const text = textOf(block)
+      const title =
+        id === 'compaction-summary'
+          ? 'Compaction summary'
+          : id === 'skill-bodies'
+            ? skillTitle(text)
+            : id === 'task-reports'
+              ? taskTitle(text)
+              : injectionTitle(text)
+      push({ ...textItem, id: `${ID_PREFIX[id]}:${hashText(text)}`, title, loaded: () => text }, blockChars(block))
+    }
+    // The blocks a person sent in one message are one prompt.
+    if (prompt.length > 0) {
+      const texts = prompt.filter(block => block.type === 'text').map(textOf)
+      const kinds = prompt.filter(block => block.type !== 'text').map(block => block.type)
+      const first = texts.find(text => text.trim() !== '')
+      const kindTitle = kinds.length > 0 ? `${kinds[0]!.charAt(0).toUpperCase()}${kinds[0]!.slice(1)}` : 'Prompt'
+      push(
+        {
+          ...textItem,
+          id: `p:${hashText(`${texts.join('\n')}|${kinds.join(',')}`)}`,
+          title: first === undefined ? kindTitle : promptTitle(first),
+          detail: first !== undefined && kinds.length > 0 ? `+${kinds.length} ${kinds.length === 1 ? kinds[0] : 'attachments'}` : '',
+          loaded:
+            texts.length === 0
+              ? null
+              : () => prompt.map(block => (block.type === 'text' ? textOf(block) : `[${block.type}]`)).join('\n\n'),
+        },
+        prompt.reduce((sum, block) => sum + blockChars(block), 0),
+      )
+    }
+  }
+
+  // The segment's total shared out by characters, so the rows add up to it
+  // and per-item rounding cannot drift. The total is level 1's figure when
+  // it comes from the same messages, else the characters over the ratio.
+  const isCut = isCutList(messages)
+  const exact = sizes.reduce((sum, chars) => sum + chars, 0) / ratio
+  const measured = isCut ? undefined : data.segments?.find(one => one.id === segment)?.tokens
+  const total = measured !== undefined && Math.abs(measured - exact) < 1 ? measured : Math.round(exact)
+  const parts = apportion(total, sizes)
+  items.forEach((item, index) => {
+    item.tokens = parts[index] ?? 0
+  })
+
+  return { items, note: isCut ? CUT_NOTE : items.length === 0 ? 'No items.' : null }
+}
+
+/** The items of one segment. */
+export function buildItems(segment: ContextBreakdownSegmentId, data: ItemData): ItemSet {
+  if (segment === 'conversation') {
+    return { items: [], note: 'The messages could not be read when measured, so the conversation is one segment.' }
+  }
+  if (isBaseline(segment)) {
+    return baselineItems(segment, data)
+  }
+
+  return conversationItems(segment as SplitId, data)
+}
+
+/** Largest first (ties keep their order: older first), or newest first. */
+export function sortItems(items: readonly Item[], sort: ContextBreakdownSort): Item[] {
+  return [...items].sort((a, b) =>
+    sort === 'newest' ? b.order - a.order : b.tokens - a.tokens || a.order - b.order,
+  )
+}
+
+/** Which part of a row is the item's path, so a narrow pane cuts its head. */
+function pathIn(item: Item): ContextBreakdownRow['pathIn'] {
+  if (item.path === null) {
+    return null
+  }
+  const short = shortenPath(item.path)
+  if (item.title === short) {
+    return 'title'
+  }
+
+  return item.detail === short ? 'detail' : null
+}
+
+function rowOf(item: Item): ContextBreakdownRow {
+  return {
+    id: item.id,
+    title: item.title,
+    detail: item.detail,
+    pathIn: pathIn(item),
+    tokens: item.tokens,
+    isOpenable: item.loaded !== null || item.disk !== null,
+  }
+}
+
+/** One page of a segment's items, ready to store and draw. */
+export function listOf(
+  segment: ContextBreakdownSegmentId,
+  set: ItemSet,
+  sort: ContextBreakdownSort,
+  page: number,
+): ContextBreakdownList {
+  const order = canSort(segment) ? sort : 'size'
+  const sorted = sortItems(set.items, order)
+  const pages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_ROWS))
+  const index = Math.min(Math.max(0, Math.floor(page)), pages - 1)
+  const shown = sorted.slice(index * LIST_PAGE_ROWS, (index + 1) * LIST_PAGE_ROWS)
+  const tokens = sorted.reduce((sum, item) => sum + item.tokens, 0)
+  const shownTokens = shown.reduce((sum, item) => sum + item.tokens, 0)
+
+  return {
+    segment,
+    sort: order,
+    canSort: canSort(segment),
+    page: index,
+    pages,
+    rows: shown.map(rowOf),
+    items: sorted.length,
+    tokens,
+    hiddenItems: sorted.length - shown.length,
+    hiddenTokens: tokens - shownTokens,
+    note: set.note,
+  }
+}

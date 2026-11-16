@@ -1,0 +1,5 @@
+{
+  "name": "claude-context-breakdown",
+  "owner": { "name": "chapati23" },
+  "plugins": [{ "name": "context-breakdown", "source": "./" }]
+}

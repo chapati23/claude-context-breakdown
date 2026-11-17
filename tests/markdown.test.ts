@@ -127,6 +127,29 @@ describe('escaping', () => {
 })
 
 describe('pages of the formatted view', () => {
+  test('a page gets the link definitions it uses from other pages', () => {
+    const filler = Array.from({ length: 600 }, (_, k) => `Paragraph ${k + 1}.\n`)
+    const source = ['See the [documentation][Docs] and [notes].\n', ...filler, '[docs]: https://example.com/docs', '[notes]: https://example.com/notes', '[unused]: https://example.com/unused'].join('\n')
+    const pages = markdownPages(source)
+    expect(pages.length).toBeGreaterThan(1)
+    // Page 1 uses both labels (in any case) and holds neither definition.
+    expect(pages[0]!.text.endsWith('\n\n[docs]: https://example.com/docs\n[notes]: https://example.com/notes')).toBe(true)
+    // A page that uses no label gets nothing; the page that holds a definition does not get it twice.
+    const last = pages[pages.length - 1]!.text
+    expect(last.split('[docs]: https://example.com/docs').length).toBe(2)
+    expect(pages.every(page => page.text.length <= TREE_CHARS / 2 + 4000)).toBe(true)
+    // The line ranges still name the source lines only.
+    expect(pages[0]!.startLine).toBe(1)
+    expect(pages[pages.length - 1]!.endLine).toBe(source.split('\n').length)
+  })
+
+  test('definitions inside code are not link definitions, and one page stays as it is', () => {
+    const code = ['Use [x].\n', ...Array.from({ length: 600 }, (_, k) => `Line ${k + 1}.\n`), '```', '[x]: not-a-definition', '```'].join('\n')
+    expect(markdownPages(code)[0]!.text).not.toContain('[x]: not-a-definition')
+    const single = 'See [a][b].\n\n[b]: https://example.com'
+    expect(markdownPages(single)).toEqual([{ text: single, startLine: 1, endLine: 3 }])
+  })
+
   test('a short text is one page, as written; CRLF folds', () => {
     expect(markdownPages('# Title\n\nText')).toEqual([{ text: '# Title\n\nText', startLine: 1, endLine: 3 }])
     expect(markdownPages('a\r\n\r\n```\r\ncode\r\n```')).toEqual([{ text: 'a\n\n```\ncode\n```', startLine: 1, endLine: 5 }])

@@ -110,6 +110,9 @@ describe('listingBodies and keys', () => {
     expect(skills).not.toContain('system-reminder')
     expect(listingBodies(messages, 'mcp')).toHaveLength(1)
     expect(listingBodies([{ role: 'assistant', content: [{ type: 'text', text: SKILLS_REMINDER }] }], 'skills')).toEqual([])
+    // A listing pasted into a typed prompt is not the one Claude Code loaded.
+    const pasted = [{ role: 'user', content: [{ type: 'text', text: `Why is this here?\n${SKILLS_REMINDER}` }] }] as MessageLike[]
+    expect(listingBodies(pasted, 'skills')).toEqual([])
   })
 
   test('the keys come from the breakdown, and from nothing without one', () => {

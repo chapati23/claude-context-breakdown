@@ -387,6 +387,54 @@ function piecesOf(
   return pieces
 }
 
+/** The most characters of link definitions a page takes from other pages. */
+const DEFINITION_CHARS = 4000
+/** A link definition on one line: `[label]: target`. */
+const LINK_DEFINITION = /^ {0,3}\[([^\]\n]+)\]:\s*\S/
+/** Any bracket group: a reference's label, or the text of a shortcut reference. */
+const BRACKETS = /\[([^\]\n]+)\]/g
+
+function labelOf(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * Each page is drawn on its own, so a reference link (`[text][label]`) whose
+ * definition is on another page would draw as plain text. Every page gets
+ * the definitions it uses and does not hold, after its text; a definition
+ * draws nothing itself.
+ */
+function withDefinitions(pages: MarkdownPageText[], lines: readonly string[], inCode: readonly boolean[]): MarkdownPageText[] {
+  const definitions = new Map<string, string>()
+  lines.forEach((line, i) => {
+    const label = inCode[i] || line.length > 1000 ? undefined : LINK_DEFINITION.exec(line)?.[1]
+    // The first definition of a label is the one Markdown uses.
+    if (label !== undefined && !definitions.has(labelOf(label))) {
+      definitions.set(labelOf(label), line.trim())
+    }
+  })
+  if (definitions.size === 0) {
+    return pages
+  }
+
+  return pages.map(page => {
+    const own = new Set(page.text.split('\n').map(line => line.trim()))
+    const added: string[] = []
+    let chars = 0
+    for (const match of page.text.matchAll(BRACKETS)) {
+      const definition = definitions.get(labelOf(match[1]!))
+      if (definition === undefined || own.has(definition) || chars + definition.length > DEFINITION_CHARS) {
+        continue
+      }
+      own.add(definition)
+      added.push(definition)
+      chars += definition.length + 1
+    }
+
+    return added.length === 0 ? page : { ...page, text: `${page.text}\n\n${added.join('\n')}` }
+  })
+}
+
 /** One page of the formatted view: its Markdown and the source lines it starts and ends in (1-based). */
 export type MarkdownPageText = { text: string; startLine: number; endLine: number }
 
@@ -511,7 +559,11 @@ export function markdownPages(markdown: string): MarkdownPageText[] {
     i = end
   }
 
-  return pages.length > 0 ? pages : [{ text: '', startLine: 1, endLine: 1 }]
+  if (pages.length === 0) {
+    return [{ text: '', startLine: 1, endLine: 1 }]
+  }
+
+  return pages.length > 1 ? withDefinitions(pages, lines, inCode) : pages
 }
 
 /** The line at the same share of a text of `to` lines as `line` is of `from` lines. */

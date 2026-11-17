@@ -215,7 +215,9 @@ function textBlocks(messages: readonly MessageLike[]): string[] {
       continue
     }
     for (const block of message.content) {
-      if (block && block.type === 'text' && typeof block.text === 'string' && block.text.includes(OPEN)) {
+      // Only a block that opens with the tag is Claude Code's reminder (see
+      // baselinePart): a listing pasted into a prompt is not the one loaded.
+      if (block && block.type === 'text' && typeof block.text === 'string' && block.text.trimStart().startsWith(OPEN)) {
         out.push(block.text)
       }
     }

@@ -159,7 +159,6 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - The system prompt has no finer split, because Claude Code does not report one.
 - The mod does not show how the window grew over time.
 - The mod reads at most the newest 4,096 messages of a conversation. The pane says so when older items are not listed.
-- In the formatted view of an item with several pages, a reference-style link (`[text][ref]`) shows as plain text when its definition is on another page. The raw view shows both.
 - The mod reads a file from disk only when you open an item that has one. It never writes files and never sends content anywhere.
 
 ## Development

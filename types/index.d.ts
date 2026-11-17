@@ -41,6 +41,17 @@ export type ContextBreakdownDeferred = {
   tokens: number
 }
 
+/**
+ * One MCP server's tools that are not loaded: how many, and the estimated
+ * tokens their schemas take once loaded.
+ */
+export type ContextBreakdownServer = {
+  /** The server's name, without control characters. */
+  name: string
+  tools: number
+  tokens: number
+}
+
 /** One measurement, ready to draw. */
 export type ContextBreakdownSnapshot = {
   /** The window in tokens: the smaller of the compaction window and the model's. */
@@ -53,6 +64,8 @@ export type ContextBreakdownSnapshot = {
   conversation: ContextBreakdownSegment[]
   /** Categories that are not loaded into the window. */
   deferred: ContextBreakdownDeferred[]
+  /** The MCP servers with tools that are not loaded, largest first. */
+  notLoadedServers: ContextBreakdownServer[]
   /**
    * True while the conversation is estimated from characters, after a
    * compaction and before the next model response.
@@ -71,6 +84,12 @@ export type ContextBreakdownSort = 'size' | 'newest'
 
 /** Which text level 3 shows: as the model received it, or the file now. */
 export type ContextBreakdownSource = 'loaded' | 'disk'
+
+/**
+ * How level 3 draws the text: as formatted Markdown, or raw, the exact
+ * characters with line numbers.
+ */
+export type ContextBreakdownFormat = 'formatted' | 'raw'
 
 /** One row of level 2's visible page. */
 export type ContextBreakdownRow = {
@@ -119,17 +138,35 @@ export type ContextBreakdownContent = {
   /** True only when the comparison is sure the file changed since it loaded. */
   isChanged: boolean
   note: string | null
-  /** 0-based. */
+  /**
+   * The view shown. It holds while the item is open (pages, `v`, a refresh);
+   * an item that opens starts in its own default.
+   */
+  format: ContextBreakdownFormat
+  /** 0-based, in the pages of the view shown. */
   page: number
   pages: number
+  /**
+   * Where the page lies in the whole text, in the raw view's lines (1-based):
+   * the first and last line it shows, and the lines there are. The formatted
+   * view maps its own lines onto these, so both views say the same.
+   */
+  firstLine: number
+  lastLine: number
+  lines: number
   /** The first line's number for the gutter, or null for no gutter. */
   startLine: number | null
-  /** The visible page only. */
+  /** The visible page only: Markdown in the formatted view. */
   text: string
   /** A path the highlighter infers the language from, or null for plain text. */
   language: string | null
   /** The answer to the last copy or mention, until the next move. */
   notice: string | null
+  /**
+   * True when k crossed back into this page from the next one: the page
+   * opens at its end, and the ring starts on the control below the text.
+   */
+  atEnd: boolean
 }
 
 /**
@@ -145,15 +182,39 @@ export type ContextBreakdownView =
       level: 1
       /** Why the pane fell back here, e.g. an open item left the context. */
       note?: string
+      /** The segment b came back from: its row takes the focus ring. */
+      from?: ContextBreakdownSegmentId
     }
-  | { seq: number; gen: number; level: 2; list: ContextBreakdownList }
+  | {
+      seq: number
+      gen: number
+      level: 2
+      list: ContextBreakdownList
+      /** The item b came back from: its row takes the focus ring when it is on the page. */
+      from?: string
+    }
   | { seq: number; gen: number; level: 3; list: ContextBreakdownList; item: ContextBreakdownContent }
+
+/**
+ * The bar Button that holds the band's keyboard focus ring, so the band can
+ * name it. `load` ties it to one load of the mod's code: a value an earlier
+ * load wrote (before a reload) is ignored. `hold` names the focus move that
+ * wrote it: the timer that ends the chip clears only its own move's value.
+ */
+export type ContextBreakdownFocus = {
+  key: string
+  load: string
+  hold: number
+}
 
 declare module 'claude-code' {
   interface PluginState {
     'context-breakdown': {
       snapshot: Shaped<ContextBreakdownSnapshot | null>
       view: Shaped<ContextBreakdownView>
+      /** The Claude Code theme's name (the `/config` row `theme`), or null before it is read. */
+      theme: Shaped<string | null>
+      focus: Shaped<ContextBreakdownFocus | null>
     }
   }
 }

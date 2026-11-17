@@ -5,10 +5,11 @@ import type {
   ContextBreakdownSegment,
   ContextBreakdownSnapshot,
 } from '../types'
-import { apportion, splitCategories } from './categories'
+import { apportion, notLoadedServers, splitCategories } from './categories'
 import type { BreakdownLike } from './categories'
 import { countConversation, totalChars } from './classify'
 import type { ConversationChars, MessageLike } from './classify'
+import { baselineKeys } from './listing'
 import { SPLIT_IDS } from './segments'
 
 /** Characters per token when no measurement has given a ratio yet. */
@@ -91,8 +92,7 @@ export function sumTokens(segments: readonly ContextBreakdownSegment[]): number 
 export function nextSnapshot(input: SnapshotInput): ContextBreakdownSnapshot {
   const { breakdown, previous } = input
   const split = splitCategories(breakdown)
-  const memoryPaths = (breakdown.memoryFiles ?? []).map(file => file.path)
-  const chars = input.messages === null ? null : countConversation(input.messages, memoryPaths)
+  const chars = input.messages === null ? null : countConversation(input.messages, baselineKeys(breakdown))
   const window = windowOf(breakdown.rawMaxTokens, input.modelWindow)
 
   let staleTokens: number | null = null
@@ -110,6 +110,7 @@ export function nextSnapshot(input: SnapshotInput): ContextBreakdownSnapshot {
     reserve: split.reserve,
     baseline: split.baseline,
     deferred: split.deferred,
+    notLoadedServers: notLoadedServers(breakdown.mcpTools),
     measuredAt: input.now,
   }
 

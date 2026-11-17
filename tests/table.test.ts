@@ -1,0 +1,311 @@
+import { describe, expect, test } from 'claude-code/testing'
+
+import type { ContextBreakdownSnapshot } from '../types'
+import {
+  MAX_SERVER_ROWS,
+  SERVER_INDENT,
+  TABLE_MAX_COLUMNS,
+  columnHeader,
+  crumbFor,
+  figuresText,
+  largestOf,
+  lengthBar,
+  lengthBarParts,
+  lineFacts,
+  listFacts,
+  nameAndBarCells,
+  notLoadedRows,
+  rowCells,
+  serverTexts,
+  tableLayout,
+} from '../hooks/table'
+import { cellWidth } from '../hooks/text'
+import { paneHeading } from '../hooks/view'
+
+/** The session the critique looked at: 283k of 1M used, 33k reserve. */
+const REAL: ContextBreakdownSnapshot = {
+  window: 1_000_000,
+  reserve: 33_000,
+  baseline: [
+    { id: 'system', tokens: 24_300 },
+    { id: 'mcp', tokens: 5500 },
+    { id: 'global-instructions', tokens: 7900 },
+    { id: 'project-instructions', tokens: 0 },
+    { id: 'auto-memory', tokens: 976 },
+    { id: 'skills-agents', tokens: 9100 },
+  ],
+  conversation: [
+    { id: 'compaction-summary', tokens: 7800 },
+    { id: 'tool-results', tokens: 114_400 },
+    { id: 'injections', tokens: 65_000 },
+    { id: 'prompts', tokens: 2900 },
+    { id: 'claude-output', tokens: 45_000 },
+  ],
+  deferred: [],
+  notLoadedServers: [],
+  isEstimate: false,
+  staleTokens: null,
+  charsPerToken: 1,
+  measuredAt: 0,
+}
+const USED = 282_876
+
+describe('lengthBar', () => {
+  test('the largest row fills the bar', () => {
+    expect(lengthBar(114_400, 114_400, 12)).toBe('████████████')
+    expect(lengthBar(114_400, 114_400, 8)).toBe('████████')
+  })
+
+  test('the rest of a cell is an eighth block', () => {
+    // 65k of 114.4k in 12 cells: 54.5 eighths, 55 drawn: six cells and seven eighths.
+    expect(lengthBar(65_000, 114_400, 12)).toBe('██████▉     ')
+    expect(lengthBar(50, 100, 12)).toBe('██████      ')
+    expect(lengthBar(1, 16, 2)).toBe('▏ ')
+    expect(lengthBar(3, 16, 2)).toBe('▍ ')
+  })
+
+  test('a tiny row above zero gets one eighth; a zero row none', () => {
+    expect(lengthBar(1, 1_000_000, 12)).toBe(`▏${' '.repeat(11)}`)
+    expect(lengthBar(0, 114_400, 12)).toBe(' '.repeat(12))
+    expect(lengthBar(5, 0, 12)).toBe(' '.repeat(12))
+    expect(lengthBar(5, 10, 0)).toBe('')
+  })
+
+  test('the compaction summary draws whole cells in its texture and its rest as an eighth', () => {
+    expect(lengthBar(114_400, 114_400, 12, 'compaction-summary')).toBe('▓'.repeat(12))
+    expect(lengthBar(65_000, 114_400, 12, 'compaction-summary')).toBe('▓▓▓▓▓▓▉     ')
+    // Under one cell there is no texture to draw: the same eighth as a plain row.
+    expect(lengthBar(7800, 114_400, 12, 'compaction-summary')).toBe(`▉${' '.repeat(11)}`)
+    expect(lengthBar(1, 114_400, 12, 'compaction-summary')).toBe(`▏${' '.repeat(11)}`)
+  })
+
+  test('the bars keep the order of the tokens, the textured one too', () => {
+    // Eighths a bar draws: a whole cell (plain or textured) is eight.
+    const eighthsOf = (bar: string) =>
+      [...bar].reduce((sum, glyph) => sum + (glyph === '█' || glyph === '▓' ? 8 : Math.max(0, ' ▏▎▍▌▋▊▉'.indexOf(glyph))), 0)
+    const rows = [...REAL.baseline, ...REAL.conversation].sort((a, b) => a.tokens - b.tokens)
+    for (const cells of [4, 8, 12]) {
+      const drawn = rows.map(row => eighthsOf(lengthBar(row.tokens, 114_400, cells, row.id)))
+      for (let k = 1; k < drawn.length; k += 1) {
+        expect(drawn[k]!).toBeGreaterThanOrEqual(drawn[k - 1]!)
+      }
+    }
+    // Global instructions 7.9k against the summary's 7.8k in 4 cells: never shorter.
+    expect(eighthsOf(lengthBar(7900, 114_400, 4))).toBeGreaterThanOrEqual(eighthsOf(lengthBar(7800, 114_400, 4, 'compaction-summary')))
+  })
+
+  test('always as wide as asked', () => {
+    for (const cells of [1, 4, 8, 12]) {
+      for (const tokens of [0, 1, 999, 57_200, 114_400]) {
+        expect(cellWidth(lengthBar(tokens, 114_400, cells))).toBe(cells)
+      }
+    }
+  })
+})
+
+describe('lengthBarParts', () => {
+  // Three runs, so the pane can draw whole cells on their own colour and
+  // leave the padding uncoloured: a row Button is drawn inverted under the
+  // focus ring or the pointer.
+  test('whole cells, the eighth block and the padding apart', () => {
+    expect(lengthBarParts(65_000, 114_400, 12)).toEqual({ full: '██████', rest: '▉', pad: '     ' })
+    expect(lengthBarParts(114_400, 114_400, 4)).toEqual({ full: '████', rest: '', pad: '' })
+    expect(lengthBarParts(1, 16, 2)).toEqual({ full: '', rest: '▏', pad: ' ' })
+    expect(lengthBarParts(0, 114_400, 3)).toEqual({ full: '', rest: '', pad: '   ' })
+    expect(lengthBarParts(65_000, 114_400, 12, 'compaction-summary')).toEqual({ full: '▓▓▓▓▓▓', rest: '▉', pad: '     ' })
+  })
+})
+
+describe('tableLayout', () => {
+  // The real level 1: the widest name is "System prompt and built-in tools".
+  const WIDEST = 32
+
+  test('the widths at 24, 45, 64, 88 and 140 columns', () => {
+    expect(tableLayout(24, WIDEST)).toEqual({ mark: 0, lead: 3, name: 14, bar: 0, share: false })
+    expect(tableLayout(45, WIDEST)).toEqual({ mark: 3, lead: 0, name: 20, bar: 8, share: true })
+    for (const columns of [64, 88, 140]) {
+      expect(tableLayout(columns, WIDEST)).toEqual({ mark: 3, lead: 0, name: 32, bar: 12, share: true })
+      expect(rowCells(tableLayout(columns, WIDEST))).toBe(60)
+    }
+  })
+
+  test('the bar narrows before the names, and goes before the share', () => {
+    expect(tableLayout(49, WIDEST).bar).toBe(12)
+    expect(tableLayout(48, WIDEST).bar).toBe(11)
+    expect(tableLayout(34, WIDEST)).toMatchObject({ bar: 4, name: 13, share: true })
+    expect(tableLayout(33, WIDEST)).toMatchObject({ bar: 0, lead: 3, share: true })
+    expect(tableLayout(28, WIDEST)).toMatchObject({ bar: 0, share: false })
+  })
+
+  test('level 2 draws no swatch when the bar is dropped: the names get its cells', () => {
+    expect(tableLayout(24, WIDEST, false)).toEqual({ mark: 0, lead: 0, name: 17, bar: 0, share: false })
+    expect(tableLayout(33, WIDEST, false)).toEqual({ mark: 3, lead: 0, name: 17, bar: 0, share: true })
+    // With a bar there is never a swatch.
+    expect(tableLayout(88, WIDEST, false)).toEqual(tableLayout(88, WIDEST))
+    for (let columns = 20; columns <= 60; columns += 1) {
+      expect(rowCells(tableLayout(columns, 200, false))).toBeLessThan(columns)
+    }
+  })
+
+  test('a row never reaches the pane edge, and stops at the cap in a wide pane', () => {
+    for (let columns = 20; columns <= 160; columns += 1) {
+      for (const widest of [8, WIDEST, 200]) {
+        const cells = rowCells(tableLayout(columns, widest))
+        expect(cells).toBeLessThan(columns)
+        expect(cells).toBeLessThanOrEqual(TABLE_MAX_COLUMNS)
+      }
+    }
+    expect(rowCells(tableLayout(88, 200))).toBe(TABLE_MAX_COLUMNS)
+    expect(rowCells(tableLayout(140, 200))).toBe(TABLE_MAX_COLUMNS)
+  })
+})
+
+describe('figures and headings', () => {
+  const table = tableLayout(88, 32)
+
+  test('shares are of what is used; Free space and Reserve leave the share blank', () => {
+    expect(figuresText(table, 114_400, USED)).toBe('  114k   40%')
+    expect(figuresText(table, 976, USED)).toBe('   976  0.3%')
+    expect(figuresText(table, 2900, USED)).toBe('  2.9k  1.0%')
+    expect(figuresText(table, 684_124, null)).toBe('  684k      ')
+    expect(figuresText(tableLayout(24, 32), 114_400, USED)).toBe('  114k')
+  })
+
+  test('the column header says once what the share is, over the share column', () => {
+    const header = columnHeader(table, '1M window', '% of used')
+    expect(header.startsWith('1M window ')).toBe(true)
+    expect(header.endsWith('% of used')).toBe(true)
+    expect(cellWidth(header)).toBe(rowCells(table) - table.mark)
+    expect(columnHeader(tableLayout(24, 32), '1M window', '% of used')).toBe('1M window')
+  })
+
+  test('the heading says what is used and what is free before compaction', () => {
+    expect(paneHeading(REAL, 88)).toBe('283k used · 684k free before compaction')
+    expect(paneHeading(REAL, 30)).toBe('283k used · 684k free')
+    expect(paneHeading(REAL, 12)).toBe('283k used')
+    expect(paneHeading({ ...REAL, isEstimate: true }, 88)).toBe('~283k used · ~684k free before compaction')
+  })
+
+  test('the largest row is the first of the largest, never a zero one', () => {
+    expect(largestOf([...REAL.baseline, ...REAL.conversation])?.id).toBe('tool-results')
+    expect(largestOf([{ id: 'a', tokens: 5 }, { id: 'b', tokens: 5 }])?.id).toBe('a')
+    expect(largestOf([{ id: 'a', tokens: 0 }])).toBeNull()
+  })
+
+  test('the level 3 facts line says which lines of the whole item a page shows', () => {
+    expect(lineFacts({ firstLine: 1, lastLine: 400, lines: 1230, page: 0, pages: 4 })).toBe('lines 1-400 of 1,230')
+    // One page: the whole item shows, nothing to say.
+    expect(lineFacts({ firstLine: 1, lastLine: 300, lines: 300, page: 0, pages: 1 })).toBe('')
+    // Pages inside one long line: the page number tells them apart.
+    expect(lineFacts({ firstLine: 1, lastLine: 1, lines: 1, page: 1, pages: 3 })).toBe('line 1 of 1, page 2 of 3')
+  })
+
+  test('the level 2 facts line takes the longest form that fits', () => {
+    expect(listFacts('72 items', 'largest first', 0, 4, 88)).toBe('72 items · largest first · page 1 of 4')
+    expect(listFacts('72 items', 'largest first', 0, 4, 30)).toBe('72 items · page 1 of 4')
+    expect(listFacts('72 items', 'largest first', 0, 4, 24)).toBe('72 items · page 1 of 4')
+    expect(listFacts('72 items', 'largest first', 0, 4, 20)).toBe('72 items · 1/4')
+    expect(listFacts('72 items', 'largest first', 0, 4, 12)).toBe('72 items')
+    expect(listFacts('2 items', 'largest first', 0, 1, 24)).toBe('2 items · largest first')
+    expect(listFacts('2 items', null, 0, 1, 88)).toBe('2 items')
+    for (const columns of [16, 24, 45]) {
+      expect(cellWidth(listFacts('72 items', 'largest first', 3, 4, columns))).toBeLessThan(columns)
+    }
+  })
+
+  test('the level 2 breadcrumb carries the segment total and its share of what is used', () => {
+    expect(crumbFor('Context', 'Tool results', 'Tool results', 114_400, USED, false, 88)).toEqual({
+      trail: 'Context › ',
+      name: 'Tool results',
+      figures: '114k · 40% of used',
+    })
+    expect(crumbFor('Context', 'System prompt and built-in tools', 'System', 24_300, USED, false, 45)).toEqual({
+      trail: 'Context › ',
+      name: 'System',
+      figures: '24k · 8.6% of used',
+    })
+    expect(crumbFor('Context', 'Tool results', 'Tool results', 114_400, USED, true, 88).figures).toBe(
+      '~114k · ~40% of used',
+    )
+    expect(crumbFor('Context', 'Tool results', 'Tool results', 114_400, null, false, 88).figures).toBe('114k')
+    for (const columns of [16, 24, 45]) {
+      const crumb = crumbFor('Context', 'Tool results', 'Tool results', 114_400, USED, false, columns)
+      const width = cellWidth(crumb.trail) + 3 + cellWidth(crumb.name) + (crumb.figures === '' ? 0 : 2 + cellWidth(crumb.figures))
+      expect(width).toBeLessThan(columns)
+    }
+  })
+})
+
+describe('Not loaded by server', () => {
+  const isMcp = (name: string) => name.startsWith('MCP ')
+  const server = (name: string, tools: number, tokens: number) => ({ name, tools, tokens })
+  const DEFERRED = [
+    { name: 'MCP tools (deferred)', tokens: 130_000 },
+    { name: 'System tools (deferred)', tokens: 32_000 },
+  ]
+
+  test('puts the servers under MCP tools only', () => {
+    const servers = [server('tickets', 40, 90_000), server('notes', 12, 40_000)]
+
+    expect(notLoadedRows(DEFERRED, servers, isMcp)).toEqual([
+      { name: 'MCP tools (deferred)', tokens: 130_000, servers },
+      { name: 'System tools (deferred)', tokens: 32_000, servers: [] },
+    ])
+    expect(notLoadedRows(DEFERRED, [], isMcp)).toEqual([
+      { name: 'MCP tools (deferred)', tokens: 130_000, servers: [] },
+      { name: 'System tools (deferred)', tokens: 32_000, servers: [] },
+    ])
+  })
+
+  test('sums the servers past the eighth into one last row', () => {
+    const servers = Array.from({ length: 11 }, (_, i) => server(`server-${i}`, 2, 1000 * (11 - i)))
+    const rows = notLoadedRows(DEFERRED, servers, isMcp)[0]!.servers
+
+    expect(rows).toHaveLength(MAX_SERVER_ROWS + 1)
+    expect(rows.slice(0, MAX_SERVER_ROWS)).toEqual(servers.slice(0, MAX_SERVER_ROWS))
+    expect(rows[MAX_SERVER_ROWS]).toEqual({ name: '3 more servers', tools: 6, tokens: 3000 + 2000 + 1000 })
+    const nine = notLoadedRows(DEFERRED, servers.slice(0, 9), isMcp)[0]!.servers
+    expect(nine[MAX_SERVER_ROWS]).toEqual({ name: '1 more server', tools: 2, tokens: 3000 })
+    expect(notLoadedRows(DEFERRED, servers.slice(0, 8), isMcp)[0]!.servers).toEqual(servers.slice(0, 8))
+  })
+
+  test('keeps MCP tools with no figure of its own when it has servers', () => {
+    const servers = [server('notes', 3, 0)]
+    const zero = [{ name: 'MCP tools (deferred)', tokens: 0 }]
+
+    expect(notLoadedRows(zero, servers, isMcp)).toEqual([{ name: 'MCP tools (deferred)', tokens: null, servers }])
+    expect(notLoadedRows(zero, [], isMcp)).toEqual([])
+    // No such category at all: the servers get a row of that name.
+    expect(notLoadedRows([{ name: 'System tools (deferred)', tokens: 32_000 }], servers, isMcp)).toEqual([
+      { name: 'System tools (deferred)', tokens: 32_000, servers: [] },
+      { name: 'MCP tools', tokens: null, servers },
+    ])
+  })
+
+  test('a server row is as wide as the name and bar columns, indented, with the counts in one column', () => {
+    const servers = [
+      server('tickets', 130, 90_000),
+      server('a-server-name-far-too-long-for-any-pane-to-show-whole', 2, 400),
+      server('漢字のサーバー名がとても長いです', 1, 10),
+    ]
+    for (const columns of [24, 45, 68, 100]) {
+      const table = tableLayout(columns, 'System prompt and built-in tools'.length)
+      const texts = serverTexts(table, servers)
+      for (const text of texts) {
+        expect(cellWidth(text)).toBe(nameAndBarCells(table))
+        expect(text.slice(table.lead, table.lead + SERVER_INDENT)).toBe('  ')
+      }
+      const ends = texts.map(text => text.trimEnd().length)
+      expect(new Set(ends.slice(0, 2)).size).toBe(1)
+      expect(texts[1]).toMatch(/…/)
+    }
+    // Room enough: the count names its unit, singular for one.
+    const wide = serverTexts(tableLayout(68, 31), servers)
+    expect(wide[0]).toMatch(/^ {2}tickets +130 tools$/)
+    expect(wide[2]).toMatch(/ 1 tool$/)
+    // A narrow pane keeps the name and shows the number alone, on every row.
+    const narrow = serverTexts(tableLayout(24, 31), servers)
+    expect(narrow[0]).toMatch(/tickets +130$/)
+    expect(narrow[1]).toMatch(/ 2$/)
+  })
+})

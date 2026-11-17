@@ -37,16 +37,16 @@ The content that is in the window before the first prompt of a session: system p
 _Avoid_: Overhead, fixed cost, startup context
 
 **Conversation**:
-The content that enters the window after the session starts: prompts, replies, tool calls, tool results, and text that Claude Code injects.
+The content that enters the window after the session starts: prompts, replies, tool calls, tool results, and system notifications.
 _Avoid_: Messages, history, transcript
 
 **Item**:
 One concrete thing inside a segment, such as one instruction file, one tool result, or one skill body.
 _Avoid_: Entry, element, component
 
-**Injected text**:
-Text that Claude Code adds to the conversation without the user typing it, such as hook output, reminders, and tool-list updates.
-_Avoid_: Meta message, attachment, system message
+**System notification**:
+Text that Claude Code adds to the conversation without the user typing it, such as hook output, reminders, tool-list updates, and the output of local commands.
+_Avoid_: Injected text, meta message, attachment, system message
 
 **Compaction summary**:
 The summary that replaces the earlier conversation after a compaction.
@@ -57,6 +57,14 @@ _Avoid_: Compact message, recap
 **Bar**:
 The one-row picture of the whole window, drawn above the prompt, with one stretch per segment.
 _Avoid_: Meter, gauge, status line
+
+**Chip**:
+The small label beside a segment of the bar that gives the segment's name and size while the pointer or the keyboard focus is on it.
+_Avoid_: Tooltip, popover, hover title
+
+**Legend**:
+The text right of the bar's total that names the largest conversation segment and its share of what is used.
+_Avoid_: Key, caption
 
 **Pane**:
 The detail view that lists segments, then the items of one segment, then the content of one item.

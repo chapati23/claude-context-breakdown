@@ -6,6 +6,7 @@ import type { SessionUsage } from 'claude-code'
 
 import type {
   ContextBreakdownContent,
+  ContextBreakdownFormat,
   ContextBreakdownList,
   ContextBreakdownSegmentId,
   ContextBreakdownSnapshot,
@@ -14,15 +15,24 @@ import type {
   ContextBreakdownView,
 } from '../types'
 import type { MessageLike } from './classify'
-import { buildItems, listOf } from './items'
+import { NO_ITEMS, buildItems, isBaseline, listOf } from './items'
 import type { Item, ItemBreakdown, ItemData, ItemSet } from './items'
+import { defaultFormat, formattedSource, mappedLine, markdownPages, pageAtLine } from './markdown'
 import { compareFile, compareRead } from './reminder'
-import { displayText, textPage } from './text'
+import { displayText, firstWords, newlines, pageLines, textPage } from './text'
 
 export const LEVEL_1: ContextBreakdownView = { seq: 0, gen: 0, level: 1 }
 
 /** The level-1 line when an open item is no longer in the context. */
 export const GONE_NOTE = 'The item that was open is no longer in the context.'
+
+/** The level-1 line when every item of an open list left the context. */
+export const ITEMS_GONE_NOTE = 'The items that were open are no longer in the context.'
+
+/** The level-1 line for a `/ctx` word that names no segment. */
+export function noMatchNote(word: string): string {
+  return `No segment matches "${firstWords(word, 40)}".`
+}
 
 /** The engine calls a move makes, bound by the hook that asks. */
 export type NavIo = {
@@ -104,10 +114,34 @@ export function toLevel1(view: ContextBreakdownView): ContextBreakdownView {
   return { seq: view.seq + 1, gen: view.gen, level: 1 }
 }
 
-/** One level back: an item to its list, a list to the segments. */
+/** Level 1 with a line that says why; the next move clears it. */
+export function toLevel1With(note: string): (view: ContextBreakdownView) => ContextBreakdownView {
+  return view => ({ seq: view.seq + 1, gen: view.gen, level: 1, note })
+}
+
+/**
+ * Level 1 after a /clear: an open list or item of the conversation says it
+ * left the context. A baseline segment's items stay in the context, so its
+ * list or item goes back with no note.
+ */
+export function afterClear(view: ContextBreakdownView): ContextBreakdownView {
+  if (view.level === 1 || isBaseline(view.list.segment)) {
+    return toLevel1(view)
+  }
+
+  return toLevel1With(view.level === 2 ? ITEMS_GONE_NOTE : GONE_NOTE)(view)
+}
+
+/**
+ * One level back: an item to its list, a list to the segments. The row it
+ * came from is kept, so the ring goes back to it.
+ */
 export function back(view: ContextBreakdownView): ContextBreakdownView {
   if (view.level === 3) {
-    return { seq: view.seq + 1, gen: view.gen, level: 2, list: view.list }
+    return { seq: view.seq + 1, gen: view.gen, level: 2, list: view.list, from: view.item.id }
+  }
+  if (view.level === 2) {
+    return { seq: view.seq + 1, gen: view.gen, level: 1, from: view.list.segment }
   }
 
   return toLevel1(view)
@@ -126,6 +160,13 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
   const set = buildItems(view.list.segment, data)
   const list = listOf(view.list.segment, set, view.list.sort, view.list.page)
   if (view.level === 2) {
+    // Every item it listed left the context (a compaction, a /clear): an
+    // empty list would read as "~0 · No items", so say what happened. A list
+    // that could not be read keeps its own note.
+    if (view.list.items > 0 && set.items.length === 0 && set.note === NO_ITEMS) {
+      return { seq: view.seq, gen, level: 1, note: ITEMS_GONE_NOTE }
+    }
+
     return { ...view, gen, list }
   }
   const item = set.items.find(one => one.id === view.item.id)
@@ -170,14 +211,84 @@ export function isChangedOnDisk(item: Pick<Item, 'disk'>, loaded: string | null,
   return (item.disk === 'read' ? compareRead(loaded, disk) : compareFile(loaded, disk)) === 'changed'
 }
 
-/** The stored page of an item's text for one source. */
+/**
+ * Where a view opens: a page of it, or the place a page of the other view
+ * shows (its first line, `line` of `lines`), so a switch keeps the place.
+ */
+type Place = number | { line: number; lines: number }
+
+/** One page of one view; `startLine`, `endLine` and `lines` count that view's own lines. */
+type ViewPage = { page: number; pages: number; text: string; startLine: number; endLine: number; lines: number }
+
+/**
+ * One page of one view: `text` is the raw display text, `own` the text the
+ * formatted view is made from (the same, except for Claude's reply).
+ */
+function viewPage(
+  item: Item,
+  text: string,
+  own: string,
+  source: ContextBreakdownSource,
+  format: ContextBreakdownFormat,
+  place: Place,
+): ViewPage {
+  if (format === 'raw') {
+    const lines = text.split('\n').length
+    const page = typeof place === 'number' ? place : pageAtLine(pageLines(text), mappedLine(place.line, place.lines, lines))
+
+    return { ...textPage(text, page), lines }
+  }
+  const markdown = formattedSource(item, source, own)
+  const lines = markdown.split('\n').length
+  const pages = markdownPages(markdown)
+  const wanted =
+    typeof place === 'number'
+      ? place
+      : pageAtLine(
+          pages.map(one => one.startLine),
+          mappedLine(place.line, place.lines, lines),
+        )
+  const index = Math.min(Math.max(0, Math.floor(wanted)), pages.length - 1)
+  const shown = pages[index]!
+
+  return { page: index, pages: pages.length, text: shown.text, startLine: shown.startLine, endLine: shown.endLine, lines }
+}
+
+/** The lines a raw page counts: a last newline ends the last line, as a page drops it. */
+function rawLines(text: string): number {
+  return newlines(text.replace(/\n$/, '')) + 1
+}
+
+/** Where a page of either view lies in the raw view's lines of `raw`. */
+function lineRange(page: ViewPage, format: ContextBreakdownFormat, raw: string) {
+  const lines = rawLines(raw)
+  if (format === 'raw') {
+    return { firstLine: page.startLine, lastLine: page.endLine, lines }
+  }
+
+  return {
+    firstLine: mappedLine(page.startLine, page.lines, lines),
+    lastLine: mappedLine(page.endLine, page.lines, lines),
+    lines,
+  }
+}
+
+/**
+ * The stored page of an item's text for one source and view; without a
+ * view, the item's default. When `from` names a page of the other view, the
+ * page shown is the one that holds the line at `share` of that page (its
+ * first line by default), and `page` is unused.
+ */
 export function contentOf(
   item: Item,
   resolved: Resolved,
   source: ContextBreakdownSource,
   page: number,
   isChanged: boolean,
+  format?: ContextBreakdownFormat,
+  from?: { format: ContextBreakdownFormat; page: number; share?: number },
 ): ContextBreakdownContent {
+  const view = format ?? defaultFormat(item)
   const canToggle = item.disk !== null && item.path !== null && resolved.loaded !== null
   // Without the as-loaded text, a file is shown from disk.
   const shown: ContextBreakdownSource = resolved.loaded === null && item.disk !== null ? 'disk' : source
@@ -193,7 +304,17 @@ export function contentOf(
   if (shown === 'disk' && raw === null) {
     note = 'The file could not be read.'
   }
-  const text = textPage(displayText(raw ?? ''), page)
+  const shownText = displayText(raw ?? '')
+  // Claude's reply has a Markdown form of its own; a file on disk is itself.
+  const hasOwn = shown === 'loaded' && item.formatted !== undefined && (view === 'formatted' || from?.format === 'formatted')
+  const own = hasOwn ? displayText(item.formatted!()) : shownText
+  let place: Place = page
+  if (from !== undefined && from.format !== view) {
+    const before = viewPage(item, shownText, own, shown, from.format, from.page)
+    const line = Math.round(before.startLine + (from.share ?? 0) * (before.endLine - before.startLine))
+    place = { line, lines: before.lines }
+  }
+  const text = viewPage(item, shownText, own, shown, view, place)
   // A Read result as loaded numbers its own lines: no gutter, no highlighter.
   const isNumbered = shown === 'loaded' && item.isNumbered
   // Colour by the file's type only where the text is the file's own; an Edit
@@ -209,12 +330,15 @@ export function contentOf(
     canToggle,
     isChanged,
     note,
+    format: view,
     page: text.page,
     pages: text.pages,
-    startLine: isNumbered ? null : text.startLine,
+    ...lineRange(text, view, shownText),
+    startLine: isNumbered || view === 'formatted' ? null : text.startLine,
     text: text.text,
     language: isFileText ? item.path : null,
     notice: null,
+    atEnd: false,
   }
 }
 
@@ -298,10 +422,18 @@ export function openItem(io: NavIo, id: string): Promise<void> {
   })
 }
 
-/** The open item again: another page or source; `isFresh` compares again. */
+/** The open item again: another page, source or view; `isFresh` compares again. */
 function reopen(
   io: NavIo,
-  change: (item: ContextBreakdownContent) => { source: ContextBreakdownSource; page: number },
+  change: (item: ContextBreakdownContent) => {
+    source: ContextBreakdownSource
+    page: number
+    format?: ContextBreakdownFormat
+    /** Where in the page the window stands, 0 to 1: a switch of view opens the page that shows it. */
+    share?: number
+    /** The page opens at its end (k crossed back into it). */
+    atEnd?: boolean
+  },
   isFresh = false,
 ): Promise<void> {
   return retried(async () => {
@@ -313,26 +445,43 @@ function reopen(
     if (typeof found === 'string') {
       return found
     }
-    const { source, page } = change(base.item)
+    const { source, page, format = base.item.format, share = 0, atEnd = false } = change(base.item)
     const resolved = await resolveText(io, found.item, isFresh || source === 'disk')
     const isChanged = isFresh ? isChangedOnDisk(found.item, resolved.loaded, resolved.disk) : base.item.isChanged
     const list = listOf(base.list.segment, found.set, base.list.sort, base.list.page)
+    // A switch of view on the same source keeps the place, not the page number.
+    const from = source === base.item.source ? { format: base.item.format, page: base.item.page, share } : undefined
+    const item = { ...contentOf(found.item, resolved, source, page, isChanged, format, from), atEnd }
 
-    return commit(io, base, { ...base, list, item: contentOf(found.item, resolved, source, page, isChanged) })
+    return commit(io, base, { ...base, list, item })
   })
 }
 
-export function contentPage(io: NavIo, delta: number): Promise<void> {
-  return reopen(io, item => ({ source: item.source, page: item.page + delta }))
+/** Another page; `atEnd` when k crossed back into the previous one, which then opens at its end. */
+export function contentPage(io: NavIo, delta: number, atEnd = false): Promise<void> {
+  return reopen(io, item => ({ source: item.source, page: item.page + delta, atEnd }))
 }
 
 export function toggleSource(io: NavIo): Promise<void> {
   return reopen(io, item => ({ source: item.source === 'loaded' ? 'disk' : 'loaded', page: 0 }))
 }
 
+/**
+ * Formatted to raw and back; the page shown holds the line the window showed,
+ * at `share` of the last page (0, its top, when the window is not known).
+ */
+export function toggleFormat(io: NavIo, share = 0): Promise<void> {
+  return reopen(io, item => ({
+    source: item.source,
+    page: item.page,
+    format: item.format === 'formatted' ? 'raw' : 'formatted',
+    share,
+  }))
+}
+
 /** After `r` measured: level 3 reads its text and the file again. */
 export function refreshItem(io: NavIo): Promise<void> {
-  return reopen(io, item => ({ source: item.source, page: item.page }), true)
+  return reopen(io, item => ({ source: item.source, page: item.page, atEnd: item.atEnd }), true)
 }
 
 /** Shows the answer of a copy or a mention on the open item. */

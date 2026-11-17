@@ -11,7 +11,7 @@ import {
   windowOf,
 } from '../hooks/snapshot'
 import type { SnapshotBreakdown, SnapshotInput } from '../hooks/snapshot'
-import { bandModel, rowText, totalLabel } from '../hooks/view'
+import { bandModel, totalLabel } from '../hooks/view'
 
 const used = (name: string, tokens: number) => ({ name, tokens, kind: 'used' })
 
@@ -49,6 +49,30 @@ const tokensOf = (segments: { id: string; tokens: number }[], id: string) =>
   segments.find(segment => segment.id === id)?.tokens
 
 describe('nextSnapshot, measured', () => {
+  test('shares Messages out without the listings the baseline counts', () => {
+    const reminder = (body: string) => ({ type: 'text', text: `<system-reminder>\n${body}\n</system-reminder>` })
+    const opening: MessageLike[] = [
+      {
+        role: 'user',
+        content: [
+          reminder(`The following skills are available for use with the Skill tool:\n\n- demo: ${'d'.repeat(5000)}`),
+          reminder(`Available agent types for the Agent tool:\n- mine: ${'m'.repeat(5000)}`),
+          { type: 'text', text: 'p'.repeat(1000) },
+        ],
+      },
+      ...MESSAGES.slice(1),
+    ]
+    const snapshot = nextSnapshot(
+      input({ messages: opening, breakdown: { ...breakdown(1250), agents: [{ agentType: 'mine' }] } }),
+    )
+
+    // Only the agent listing's header is left of the 10,000 listing characters.
+    const header = '<system-reminder>\nAvailable agent types for the Agent tool:\n</system-reminder>'.length
+    expect(snapshot.charsPerToken).toBe((5000 + header) / 1250)
+    const prompts = tokensOf(snapshot.conversation, 'prompts')!
+    expect(Math.abs(prompts - (1000 / (5000 + header)) * 1250)).toBeLessThan(1)
+  })
+
   test('splits the Messages tokens by characters', () => {
     const snapshot = nextSnapshot(input({}))
 
@@ -61,6 +85,24 @@ describe('nextSnapshot, measured', () => {
     expect(usedTokens(snapshot)).toBe(21_250)
     expect(freeTokens(snapshot)).toBe(200_000 - 21_250 - 33_000)
     expect(snapshot.deferred).toEqual([{ name: 'MCP tools (deferred)', tokens: 9000 }])
+    expect(snapshot.notLoadedServers).toEqual([])
+  })
+
+  test('keeps the MCP servers whose tools are not loaded, and only those', () => {
+    const tools = [
+      { name: 'mcp__tickets__open', serverName: 'tickets', tokens: 5000, isLoaded: false },
+      { name: 'mcp__tickets__close', serverName: 'tickets', tokens: 3000, isLoaded: false },
+      { name: 'mcp__notes__search', serverName: 'notes', tokens: 1000, isLoaded: false },
+      { name: 'mcp__notes__write', serverName: 'notes', tokens: 700, isLoaded: true },
+    ]
+    const snapshot = nextSnapshot(input({ breakdown: { ...breakdown(1250), mcpTools: tools } }))
+
+    expect(snapshot.notLoadedServers).toEqual([
+      { name: 'tickets', tools: 2, tokens: 8000 },
+      { name: 'notes', tools: 1, tokens: 1000 },
+    ])
+    // The window's figures do not change: these tools are outside it.
+    expect(usedTokens(snapshot)).toBe(21_250)
   })
 
   test('shows one Conversation segment when the messages cannot be read', () => {
@@ -187,7 +229,8 @@ describe('view', () => {
   test('labels the total as used/window and percent', () => {
     const snapshot = nextSnapshot(input({ breakdown: { ...breakdown(75_000), rawMaxTokens: 1_000_000 }, modelWindow: 1_000_000 }))
 
-    expect(totalLabel(snapshot)).toBe('95k/1M 9%')
+    // 9.5% rounds up, as Claude Code's status line rounds.
+    expect(totalLabel(snapshot)).toBe('95k/1M 10%')
   })
 
   test('fits the bar and the label into the band', () => {
@@ -202,7 +245,7 @@ describe('view', () => {
   })
 
   test('shortens the label alone in a narrow band so the row never wraps', () => {
-    // 21k/200k 10%: 12 characters.
+    // 21k/200k 11%: 12 characters.
     const snapshot = nextSnapshot(input({}))
     for (let columns = 1; columns <= 20; columns += 1) {
       const { label, parts } = bandModel(snapshot, columns)
@@ -210,42 +253,9 @@ describe('view', () => {
 
       expect(bar + (parts.length > 0 ? 1 : 0) + label.length).toBeLessThan(Math.max(1, columns))
     }
-    expect(bandModel(snapshot, 13).label).toBe('21k/200k 10%')
+    expect(bandModel(snapshot, 13).label).toBe('21k/200k 11%')
     expect(bandModel(snapshot, 12).label).toBe('21k/200k')
     expect(bandModel(snapshot, 8).label).toBe('21k')
     expect(bandModel(snapshot, 3).label).toBe('')
-  })
-
-  test('lays a pane row into its columns', () => {
-    for (const columns of [24, 40, 80]) {
-      const { name, figures } = rowText('Project instructions', 9500, 200_000, columns)
-
-      expect(2 + 1 + name.length + figures.length).toBe(columns - 1)
-    }
-    expect(rowText('Tool results', 9500, 200_000, 80).figures).toBe('  9.5k  4.7%')
-    expect(rowText('Tool results', 9500, 200_000, 18).figures).toBe('  9.5k')
-  })
-
-  test('drops the share and uses the short name before cutting a name', () => {
-    const narrow = rowText('System prompt and built-in tools', 20_000, 1_000_000, 24, 'System')
-
-    expect(narrow.name.trim()).toBe('System')
-    expect(narrow.figures).toBe('   20k')
-    expect(rowText('System injections', 500, 1_000_000, 24, 'Injections').name.trim()).toBe('Injections')
-    expect(rowText('Tool results', 500, 1_000_000, 24, 'Tool results').name.trim()).toBe('Tool results')
-
-    const wide = rowText('System prompt and built-in tools', 20_000, 1_000_000, 80, 'System')
-    expect(wide.name.trim()).toBe('System prompt and built-in tools')
-    expect(wide.figures).toBe('   20k    2%')
-  })
-
-  test('keeps a row with no window in the token column', () => {
-    for (const columns of [24, 80]) {
-      const withShare = rowText('Free space', 101_000, 200_000, columns)
-      const noShare = rowText('MCP tools', 9000, null, columns)
-
-      expect(noShare.name.length + noShare.figures.length).toBe(withShare.name.length + withShare.figures.length)
-      expect(noShare.figures.trimEnd().length).toBe(withShare.figures.length - (columns >= 28 ? 6 : 0))
-    }
   })
 })

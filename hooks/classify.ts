@@ -2,6 +2,8 @@
 // into conversation segments and counts their characters.
 
 import type { ContextBreakdownConversationId } from '../types'
+import { NO_KEYS, baselinePart } from './listing'
+import type { BaselineKeys } from './listing'
 import { SPLIT_IDS } from './segments'
 
 export type SplitId = Exclude<ContextBreakdownConversationId, 'conversation'>
@@ -29,7 +31,28 @@ export const IMAGE_CHARS = 6000
 /** A PDF page is sized like an image; pages are guessed from the bytes. */
 const DOCUMENT_BYTES_PER_PAGE = 75_000
 
-const PROMPT_MARKERS = ['<local-command-stdout>', '<command-name>', '<bash-input>', '<bash-stdout>']
+/** A command line or shell line the person typed. */
+const PROMPT_MARKERS = ['<command-name>', '<bash-input>']
+
+/**
+ * Blocks that open with these are Claude Code's, not typed: the caveat it
+ * puts before a local command, and the output of that command or of a
+ * shell line.
+ */
+const OUTPUT_HEADS = [
+  '<local-command-caveat>',
+  '<local-command-stdout>',
+  '<local-command-stderr>',
+  '<bash-stdout>',
+  '<bash-stderr>',
+]
+
+/** Whether a user text block is a local command's caveat or output. */
+export function isCommandOutput(text: string): boolean {
+  const head = text.trimStart()
+
+  return OUTPUT_HEADS.some(tag => head.startsWith(tag))
+}
 
 export function emptyChars(): ConversationChars {
   const out = {} as ConversationChars
@@ -46,6 +69,10 @@ export function classifyUserText(text: string): SplitId {
   if (head.startsWith('<system-reminder>')) {
     return 'injections'
   }
+  // Checked before the other tags, which a command's output may quote.
+  if (isCommandOutput(text)) {
+    return 'injections'
+  }
   if (text.includes('<task-notification>')) {
     return 'task-reports'
   }
@@ -55,8 +82,9 @@ export function classifyUserText(text: string): SplitId {
   if (head.startsWith('This session is being continued from a previous conversation')) {
     return 'compaction-summary'
   }
-  // A slash command's line and output, or a shell line, is the person's own,
-  // even where the output quotes a hook's tag.
+  // A slash command's line or a shell line is the person's own, even where
+  // its arguments quote a hook's tag. A block that holds the line and its
+  // output together counts as the line.
   if (PROMPT_MARKERS.some(marker => text.includes(marker))) {
     return 'prompts'
   }
@@ -130,46 +158,106 @@ export function blockChars(block: BlockLike): number {
 }
 
 /**
- * The text of a reminder that carries a memory file's contents. Those files
- * are counted in the baseline already, so the conversation leaves them out.
+ * A block's segment and the characters it adds there. `outputOf` names the
+ * local command whose output the block is, when only its place tells so.
  */
-function isBaselineText(text: string, memoryPaths: readonly string[]): boolean {
-  if (memoryPaths.length === 0 || !text.trimStart().startsWith('<system-reminder>')) {
-    return false
+export type SortedBlock = { id: SplitId; chars: number; outputOf?: string }
+
+/**
+ * The command a local command's line names, or null when the block is not
+ * one. Claude Code writes a local command's line with `<command-name>`
+ * first; a prompt command or a skill opens with `<command-message>`, and its
+ * next block is the prompt it expands to, which stays as it is.
+ */
+export function localCommandOf(text: string): string | null {
+  const head = text.trimStart()
+  if (!head.startsWith('<command-name>')) {
+    return null
+  }
+  const name = /^<command-name>([\s\S]*?)<\/command-name>/.exec(head)?.[1]?.trim() ?? ''
+  if (name === '') {
+    return null
   }
 
-  return memoryPaths.some(path => text.includes(`Contents of ${path}`))
+  return name.startsWith('/') ? name : `/${name}`
 }
 
-/** Which segment one block belongs to, or null for baseline content. */
-export function classifyBlock(
+/**
+ * The local commands whose output comes with no tag at all: the API form
+ * gives `/context`'s report as plain Markdown. Only these: after a command
+ * that prints no block (`/clear`), the next plain text is a typed prompt.
+ */
+const PLAIN_OUTPUT_COMMANDS: readonly string[] = ['/context']
+
+/**
+ * Sorts the blocks of one message. A block of plain text right after the
+ * line of a command in PLAIN_OUTPUT_COMMANDS, in the same message, is that
+ * command's output, not text the person typed.
+ */
+export function sortMessage(
   role: string,
-  block: BlockLike,
-  memoryPaths: readonly string[] = [],
-): SplitId | null {
+  blocks: readonly BlockLike[],
+  keys: BaselineKeys = NO_KEYS,
+): (SortedBlock | null)[] {
+  let command: string | null = null
+
+  return blocks.map(block => {
+    const sorted = sortBlock(role, block, keys)
+    const after = command
+    command = null
+    if (sorted === null || role === 'assistant' || block.type !== 'text' || sorted.id !== 'prompts') {
+      return sorted
+    }
+    const text = typeof block.text === 'string' ? block.text : ''
+    const line = localCommandOf(text)
+    if (line !== null) {
+      command = PLAIN_OUTPUT_COMMANDS.includes(line) ? line : null
+      return sorted
+    }
+    if (after !== null && !PROMPT_MARKERS.some(marker => text.includes(marker))) {
+      return { id: 'injections', chars: sorted.chars, outputOf: after }
+    }
+
+    return sorted
+  })
+}
+
+/**
+ * Which segment one block belongs to and how many of its characters count
+ * there, or null for baseline content. Reminders the baseline counts already
+ * (memory files, the skills and MCP listings, custom agents' entries) are
+ * left out; a block that holds other text too counts only that text.
+ */
+export function sortBlock(role: string, block: BlockLike, keys: BaselineKeys = NO_KEYS): SortedBlock | null {
   if (role === 'assistant') {
-    return 'claude-output'
+    return { id: 'claude-output', chars: blockChars(block) }
   }
   if (block.type === 'tool_result') {
-    return 'tool-results'
+    return { id: 'tool-results', chars: blockChars(block) }
   }
   if (block.type === 'text') {
     const text = stringLength(block.text) > 0 ? (block.text as string) : ''
-    if (isBaselineText(text, memoryPaths)) {
+    const baseline = baselinePart(text, keys)
+    if (baseline.isWhole) {
       return null
     }
 
-    return classifyUserText(text)
+    return { id: classifyUserText(text), chars: text.length - baseline.chars }
   }
 
   // Images, documents and anything else a person attaches.
-  return 'prompts'
+  return { id: 'prompts', chars: blockChars(block) }
+}
+
+/** Which segment one block belongs to, or null for baseline content. */
+export function classifyBlock(role: string, block: BlockLike, keys: BaselineKeys = NO_KEYS): SplitId | null {
+  return sortBlock(role, block, keys)?.id ?? null
 }
 
 /** Characters per conversation segment over the whole conversation. */
 export function countConversation(
   messages: readonly MessageLike[],
-  memoryPaths: readonly string[] = [],
+  keys: BaselineKeys = NO_KEYS,
 ): ConversationChars {
   const out = emptyChars()
   for (const message of messages) {
@@ -179,13 +267,10 @@ export function countConversation(
         : Array.isArray(message.content)
           ? message.content
           : []
-    for (const block of blocks) {
-      if (!block || typeof block !== 'object') {
-        continue
-      }
-      const id = classifyBlock(message.role, block, memoryPaths)
-      if (id !== null) {
-        out[id] += blockChars(block)
+    const valid = blocks.filter(block => block && typeof block === 'object')
+    for (const sorted of sortMessage(message.role, valid, keys)) {
+      if (sorted !== null) {
+        out[sorted.id] += sorted.chars
       }
     }
   }

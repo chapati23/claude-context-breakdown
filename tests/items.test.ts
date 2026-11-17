@@ -111,6 +111,26 @@ describe('baseline items', () => {
     expect(buildItems('skills-agents', other).items.find(item => item.detail === 'tools')?.loaded).toBeNull()
   })
 
+  test('two plugins’ skills of the same name are two rows with ids of their own', () => {
+    const listing =
+      '<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- alpha:review: Reviews for alpha.\n- beta:review: Reviews for beta.\n</system-reminder>'
+    const breakdown = {
+      ...DATA.breakdown!,
+      skills: {
+        skillFrontmatter: [
+          { name: 'review', source: 'plugin', pluginName: 'alpha', tokens: 10 },
+          { name: 'review', source: 'plugin', pluginName: 'beta', tokens: 10 },
+        ],
+      },
+      agents: [],
+    }
+    const data = { ...DATA, breakdown, messages: [{ role: 'user', content: [{ type: 'text', text: listing }] }] as MessageLike[] }
+    const rows = buildItems('skills-agents', data).items.filter(item => item.title === 'review')
+    expect(rows.map(item => item.loaded?.())).toEqual(['- alpha:review: Reviews for alpha.', '- beta:review: Reviews for beta.'])
+    // An item is found by its id: equal ids would open the first row's entry.
+    expect(rows[0]!.id).not.toBe(rows[1]!.id)
+  })
+
   test('without a breakdown a baseline segment says so', () => {
     expect(buildItems('system', { ...DATA, breakdown: null })).toEqual({
       items: [],

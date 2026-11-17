@@ -244,7 +244,8 @@ function baselineItems(segment: ContextBreakdownSegmentId, data: ItemData): Item
       const names =
         skill.pluginName === undefined || skill.name.includes(':') ? [skill.name] : [`${skill.pluginName}:${skill.name}`]
       push({
-        id: `s:${hashText(`${skill.source}:${skill.name}`)}`,
+        // The plugin is part of the id: two plugins can name a skill alike.
+        id: `s:${hashText(`${skill.source}:${skill.pluginName ?? ''}:${skill.name}`)}`,
         title: skill.name,
         detail: skill.pluginName ?? skillSource(skill.source),
         tokens: tokensOf(skill.tokens),
@@ -335,7 +336,7 @@ function resultText(block: BlockLike): string | null {
 }
 
 /** The row detail of an injection whose block is partly counted in the baseline. */
-export const PART_IN_BASELINE = 'custom agents in Baseline'
+export const PART_IN_BASELINE = 'part in Baseline'
 
 /** "Prompt hook: …", "Output: …", or the first line of a reminder, tags left out. */
 export function injectionTitle(text: string): string {
@@ -570,7 +571,7 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
       // A summary and a skill body are written as Markdown; a report or an
       // injection is mostly tags around it.
       const markup: Markup = id === 'compaction-summary' || id === 'skill-bodies' ? 'prose' : 'text'
-      // Part of the block is counted in the baseline (custom agents' entries):
+      // Part of the block is counted in the baseline (a listing, custom agents' entries):
       // the text shows whole, the size is the rest, and the row says so.
       const detail = sorted.chars < blockChars(block) ? PART_IN_BASELINE : ''
       push({ ...textItem, id: `${ID_PREFIX[id]}:${hashText(text)}`, title, detail, markup, loaded: () => text }, sorted.chars)

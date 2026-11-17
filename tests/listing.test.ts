@@ -69,6 +69,10 @@ describe('baselinePart', () => {
     expect(baselinePart('Hello', KEYS)).toEqual({ chars: 0, isWhole: false })
   })
 
+  test('a listing pasted into a typed prompt counts: only a block that opens with the tag is a reminder', () => {
+    expect(baselinePart(`Why is this here?\n${SKILLS_REMINDER}`, KEYS)).toEqual({ chars: 0, isWhole: false })
+  })
+
   test('a memory file needs its own header line, not a mention', () => {
     const memory = '<system-reminder>\nContents of /home/user/project/CLAUDE.md (project instructions):\n\nRules.\n</system-reminder>'
     expect(baselinePart(memory, KEYS).isWhole).toBe(true)

@@ -159,6 +159,15 @@ describe('sortMessage', () => {
     )
   })
 
+  test('a prompt typed after a command that prints no block stays a prompt', () => {
+    // After /clear the first typed prompt follows the command line directly.
+    const clear = '<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>'
+    expect(sortMessage('user', [text(clear), text('Read the notes.')])).toEqual([
+      { id: 'prompts', chars: clear.length },
+      { id: 'prompts', chars: 'Read the notes.'.length },
+    ])
+  })
+
   test('the prompt a prompt command expands to stays a prompt', () => {
     const line = '<command-message>review is running…</command-message>\n<command-name>/review</command-name>\n<command-args>src</command-args>'
     expect(sortMessage('user', [text(line), text('Review the files in src.')]).map(one => one?.id)).toEqual([

@@ -181,7 +181,10 @@ export type BaselinePart = {
 }
 
 export function baselinePart(text: string, keys: BaselineKeys): BaselinePart {
-  if (!text.includes(OPEN)) {
+  // Claude Code sends a reminder as a block that opens with the tag. A
+  // reminder further in is text a person pasted: it is in the window, and
+  // it counts.
+  if (!text.trimStart().startsWith(OPEN)) {
     return { chars: 0, isWhole: false }
   }
   let chars = 0

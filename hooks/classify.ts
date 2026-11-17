@@ -183,10 +183,16 @@ export function localCommandOf(text: string): string | null {
 }
 
 /**
- * Sorts the blocks of one message. A local command's output can come with
- * no tag at all (the API form gives `/context`'s report as plain Markdown):
- * a block of plain text right after a local command's line, in the same
- * message, is that command's output, not text the person typed.
+ * The local commands whose output comes with no tag at all: the API form
+ * gives `/context`'s report as plain Markdown. Only these: after a command
+ * that prints no block (`/clear`), the next plain text is a typed prompt.
+ */
+const PLAIN_OUTPUT_COMMANDS: readonly string[] = ['/context']
+
+/**
+ * Sorts the blocks of one message. A block of plain text right after the
+ * line of a command in PLAIN_OUTPUT_COMMANDS, in the same message, is that
+ * command's output, not text the person typed.
  */
 export function sortMessage(
   role: string,
@@ -205,7 +211,7 @@ export function sortMessage(
     const text = typeof block.text === 'string' ? block.text : ''
     const line = localCommandOf(text)
     if (line !== null) {
-      command = line
+      command = PLAIN_OUTPUT_COMMANDS.includes(line) ? line : null
       return sorted
     }
     if (after !== null && !PROMPT_MARKERS.some(marker => text.includes(marker))) {

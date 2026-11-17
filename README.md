@@ -62,13 +62,13 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 
 ### Reading the bar
 
-- A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour.
+- A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour, and no gap after it.
 - Right of the bar is the total, then the largest conversation segment with its share of what is used: `364k/1M 36% · ▉ Tool results 40%`. The percent is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.
 - The keyboard chip goes away 4 seconds after the focus last moved, or at once when the focus moves into a pane, a prompt is sent, or you click a segment. Claude Code does not tell a mod when `Esc` or typing takes the keyboard back, so until then the chip can stay for up to 4 seconds. While it shows, pointing at another segment shows no chip.
 - A chip stays inside the bar when it fits there, on the right of its segment or else on the left. A chip that does not fit covers the total and the legend to the end of the row.
-- The segment under the focus or the pointer keeps its colour. Its last cell turns to a darker shade (a lighter one in a light theme), so you can see which segment it is.
-- A segment that is too small for a cell of its own shares a cell with its neighbour. The chip names both.
+- The segment under the focus or the pointer keeps its colour. Its last cell turns to a darker shade (a lighter one in a light theme), so you can see which segment it is. The compaction summary shows a thinner texture instead.
+- A segment that is too small for a cell of its own shares a cell with its neighbours. The chip names every segment of the cell, or the first one and how many more when space is short.
 - Baseline segments have cool colours and conversation segments have warm colours. Neighbours also differ in lightness, and the palette is tested for the two common forms of colour blindness. There is one palette for dark themes and one for light themes. The theme `auto` uses the dark palette, because a mod cannot read which one `auto` resolved to.
 
 ## Install
@@ -91,13 +91,13 @@ claude plugin install context-breakdown --marketplace chapati23/claude-context-b
 
 The bar is always visible above the prompt. The pane has three levels:
 
-1. **Segments.** Every segment with its tokens and its share of the window.
+1. **Segments.** Every segment with its tokens and its share of what is used.
 2. **Items.** The concrete things inside one segment: each instruction file, each tool result, each skill body, each prompt.
 3. **Content.** The text of one item as loaded, which is the text the model received.
 
 Open the pane:
 
-- `/ctx` opens the segments. When the pane is already open, `/ctx` only gives it the keyboard: it keeps the level, the item, the page and the place it shows. No control has the focus ring then, so the view does not move; `tab` puts the ring on the first control.
+- `/ctx` opens the segments. When the pane is already open, `/ctx` only gives it the keyboard: it keeps the level, the item, the page and the place it shows. No control has the focus ring then, so the view does not move; `tab` brings the ring back.
 - `/ctx <segment>` opens the items of one segment. It accepts the start of the segment's name, for example `/ctx tool` or `/ctx global`. When two names start the same way, the segment that comes first in the bar wins. A word that matches no segment opens the segments with a note, for example `No segment matches "foo".` The next move clears the note.
 - In the fullscreen layout, a click on a bar segment opens the items of that segment.
 
@@ -110,7 +110,7 @@ Keys in the pane:
 | `j`, `k` | All levels | Scroll down or up by one line. In a large item, `j` at the bottom of a page continues on the next page and `k` at the top goes back to the bottom of the previous page |
 | `b` | Items, content | Go back one level |
 | `s` | Items of a conversation segment | Switch between largest first and newest first |
-| `n`, `p` | Items, content | Next page, previous page. An item has pages only when it is longer than 500 lines or 40,000 characters |
+| `n`, `p` | Items, content | Next page, previous page. An item has pages only when it is longer than about 500 lines or 40,000 characters. The formatted view can start a new page slightly earlier |
 | `v` | Content of an item that has a file | Switch between the text as loaded and the file on disk |
 | `f` | Content | Switch between the formatted text and the raw text |
 | `c` | Content of an item that has a file | Copy the file's path |
@@ -134,7 +134,7 @@ Reading the pane:
 
 The content level shows the title, the facts line and the controls above the text, so the heading stays in view when an item or a page opens. A page that has a next page ends with a `Next page` button.
 
-The content level has two views. The formatted view draws Markdown as Claude's replies are drawn: bold headings, lists, tables, and code blocks. The raw view shows the exact characters with line numbers. Markdown files, skill bodies, prompts, Claude output, and the compaction summary open formatted. Tool results and injected text open raw.
+The content level has two views. The formatted view draws Markdown as Claude's replies are drawn: bold headings, lists, tables, and code blocks. The raw view shows the text as written, with line numbers. It leaves out terminal escape sequences and shows other control characters as `?`. Markdown files, skill bodies, prompts, Claude output, and the compaction summary open formatted. Tool results, task reports and system notifications open raw.
 
 Claude Code cuts a line of code after about 2,000 characters. So the raw view splits a line that is longer than 1,000 characters into pieces, and the facts line says `long lines split`. Where the view numbers the lines, each piece repeats its line's number, and the lines after it keep their numbers.
 
@@ -147,7 +147,7 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - Every number is an estimate. The mod reads Claude Code's summary breakdown and makes no request to the API. The summary estimates each baseline category locally. `/context` can count with the API, so a baseline category can differ from `/context` by a few hundred tokens. The total is the same, because both match the conversation to the last response's usage, and the conversation then differs by the same amount.
 - The sizes of the conversation segments are the mod's own estimate. It counts the characters of each kind of content and applies those shares to the engine's total for the conversation.
 - The size of a conversation item is its share of characters in its segment. The sizes of baseline items are the engine's own figures.
-- Claude Code sends the skills list, the MCP server instructions, the agent types and the memory files as reminders in the first message, and again after a compaction. Its breakdown counts them in the baseline, so the mod leaves them out of the conversation. Of the agent types, only the entries of custom agents are baseline; the built-in types stay under System notifications. Text after the skills list in the same reminder also stays under System notifications. Other reminders, such as the environment, the sandbox rules, the list of tools that load on demand and the date, are counted under System notifications, because no breakdown category names them. It is not known how Claude Code's own breakdown counts them.
+- Claude Code sends the skills list, the MCP server instructions, the agent types and the memory files as reminders in the first message, and again after a compaction. In live sessions its breakdown counted them in the baseline, so the mod leaves them out of the conversation. The API description does not state this. Of the agent types, only the entries of custom agents are baseline; the built-in types stay under System notifications. Text after the skills list in the same reminder also stays under System notifications. Other reminders, such as the environment, the sandbox rules, the list of tools that load on demand and the date, are counted under System notifications, because no breakdown category names them. It is not known how Claude Code's own breakdown counts them.
 - The output of a local command counts under System notifications, also where it has no tag: in the form the mod reads, the report of `/context` comes as plain text right after the command line.
 - In the items of Skills list and custom agents, a skill or agent opens its entry as loaded. The MCP server instructions open as loaded too. A row opens only when the conversation still holds its reminder.
 - Directly after a compaction, Claude Code has no new measurement until the next model response. Until then the mod estimates the conversation from its text and marks the total with `~`.
@@ -159,6 +159,7 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - The system prompt has no finer split, because Claude Code does not report one.
 - The mod does not show how the window grew over time.
 - The mod reads at most the newest 4,096 messages of a conversation. The pane says so when older items are not listed.
+- In the formatted view of an item with several pages, a reference-style link (`[text][ref]`) shows as plain text when its definition is on another page. The raw view shows both.
 - The mod reads a file from disk only when you open an item that has one. It never writes files and never sends content anywhere.
 
 ## Development

@@ -743,8 +743,8 @@ function keysLine(
  * line before the first measurement. `isFocused` is whether the pane holds
  * the keyboard (`e.props.isFocused`); `surface` picks how the hint says to
  * get it. `keepsPlace`: `/ctx` only gave an open pane the keyboard, so no
- * element takes the ring as it does; the engine would bring that element
- * into view and move the window off the place the person left it.
+ * element asks for the ring here. The engine still gives the pane a ring
+ * and brings it into view; the `/ctx` hook then puts the window back.
  */
 export function paneTree(
   el: Ui,

@@ -166,7 +166,8 @@ export const register: Register = on => {
   // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items.
   // `/ctx` alone on an open pane only gives it the keyboard: it is the one
   // key path to a pane that lost it (ctrl+x tab reaches the bar only). Its
-  // trees then take no ring (`keepsPlace`), so the window does not move.
+  // trees then name no ring of their own (`keepsPlace`), and the hook puts
+  // the window back where it stood (below).
   on('command.run', { command: 'ctx' }, async ($, e) => {
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
@@ -194,9 +195,48 @@ export const register: Register = on => {
     } else if (!isOpen) {
       await quietly(update($, viewAtom, toLevel1))
     }
+    // A pane that takes the keyboard gets its ring back on a control, and the
+    // engine brings that control into view (seen live: the window jumped to
+    // the controls above the text). So read where the window stands first
+    // (`measure`), and put it back after the open (`place`), as f does.
+    const held: { share: number | null } = { share: null }
+    if (keepsPlace && link !== 'absent') {
+      await lane.run(async () => {
+        const measure = steps.push(0, 'measure')
+        try {
+          let answer: { deny?: string } | null = null
+          try {
+            answer = await $.ui.scroll(STEP_SCROLL)
+          } catch {
+            answer = null
+          }
+          link = learnLink(link, measure, answer, shownOffset)
+          held.share = measure.seen ? measure.share : null
+        } finally {
+          steps.drop(measure)
+        }
+      })
+    }
     try {
       // Focus so the keys work at once; no closeOnEscape: the pane stays.
       await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
+      const { share } = held
+      if (share !== null) {
+        // The ring first, and wait for it: a window put back before the
+        // engine has brought the ring into view is moved again.
+        const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
+        if (key !== null) {
+          await quietly($.ui.focus({ requestId: PANE_ID, key }))
+        }
+        await lane.run(async () => {
+          const place = steps.push(0, 'place', share)
+          try {
+            await $.ui.scroll(STEP_SCROLL)
+          } finally {
+            steps.drop(place)
+          }
+        })
+      }
       // An open pane keeps its window: the new level starts at the top. Asked
       // from this hook, the scroll also tells whether the `ui.scroll` hook
       // sees ours, at no cost: the top is where it goes either way. A pane

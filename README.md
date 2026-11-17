@@ -67,6 +67,7 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.
 - The keyboard chip goes away 4 seconds after the focus last moved, or at once when the focus moves into a pane, a prompt is sent, or you click a segment. Claude Code does not tell a mod when `Esc` or typing takes the keyboard back, so until then the chip can stay for up to 4 seconds. While it shows, pointing at another segment shows no chip.
 - A chip stays inside the bar when it fits there, on the right of its segment or else on the left. A chip that does not fit covers the total and the legend to the end of the row.
+- A chip covers the cells beside its segment, all but the nearest one. While the pointer is on a chip, that chip stays, because Claude Code counts a chip as part of its segment. Move the pointer along the bar cell by cell, or off the bar and back, to see another segment's chip.
 - The segment under the focus or the pointer keeps its colour. Its last cell turns to a darker shade (a lighter one in a light theme), so you can see which segment it is. The compaction summary shows a thinner texture instead.
 - A segment that is too small for a cell of its own shares a cell with its neighbours. The chip names every segment of the cell, or the first one and how many more when space is short.
 - Baseline segments have cool colours and conversation segments have warm colours. Neighbours also differ in lightness, and the palette is tested for the two common forms of colour blindness. There is one palette for dark themes and one for light themes. The theme `auto` uses the dark palette, because a mod cannot read which one `auto` resolved to.
@@ -97,8 +98,8 @@ The bar is always visible above the prompt. The pane has three levels:
 
 Open the pane:
 
-- `/ctx` opens the segments. When the pane is already open, `/ctx` only gives it the keyboard: it keeps the level, the item, the page and the place it shows. No control has the focus ring then, so the view does not move; `tab` brings the ring back.
-- `/ctx <segment>` opens the items of one segment. It accepts the start of the segment's name, for example `/ctx tool` or `/ctx global`. When two names start the same way, the segment that comes first in the bar wins. A word that matches no segment opens the segments with a note, for example `No segment matches "foo".` The next move clears the note.
+- `/ctx` opens the segments. When the pane is already open, `/ctx` only gives it the keyboard: it keeps the level, the item, the page and the place it shows. The focus ring is then on the first control or row, which can be above the rows in view; `tab` moves the ring and brings it into view.
+- `/ctx <segment>` opens the items of one segment. It accepts the start of the segment's name, for example `/ctx tool` or `/ctx global`. When two names start the same way, the segment that comes first in the bar wins. A word that matches no segment opens the segments with a note, for example `No segment matches "foo".` The note goes away when you open a segment.
 - In the fullscreen layout, a click on a bar segment opens the items of that segment.
 
 Keys in the pane:
@@ -118,7 +119,7 @@ Keys in the pane:
 | `r` | All levels | Measure again |
 | `x` | All levels | Close the pane |
 
-The keys work while the pane has the keyboard. `/ctx` gives it the keyboard; after a click on the bar, click the pane or run `/ctx`. (`ctrl+x` then `tab` moves the keyboard to the bar, not to the pane.) While the pane does not have the keyboard, a line above the controls says so, and the controls are plain buttons to click. `Esc` returns the keyboard to the prompt and leaves the pane open.
+The keys work while the pane has the keyboard. `/ctx` gives it the keyboard; after a click on the bar, click the pane's text or run `/ctx`. A click on a row or a control of the pane presses it, but leaves the keyboard where it was. (`ctrl+x` then `tab` moves the keyboard to the bar, not to the pane.) While the pane does not have the keyboard, a line above the controls says so, and the controls are plain buttons to click. `Esc` returns the keyboard to the prompt and leaves the pane open.
 
 Each level shows every key it uses, always in the same order. A key that does not apply at the moment, such as `n` on the last page or `c` for an item without a file, is drawn fainter and does nothing. `b` on the segments does nothing too. A key that does not apply keeps the keyboard in the pane. A letter that is not in the line goes to the prompt.
 

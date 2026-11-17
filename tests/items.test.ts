@@ -9,6 +9,7 @@ import {
   injectionTitle,
   listOf,
   promptTitle,
+  promptTitles,
   skillTitle,
   sortItems,
   taskTitle,
@@ -190,7 +191,9 @@ describe('conversation items', () => {
 
   test('a local command: the typed line is a prompt, the caveat and output are notifications', () => {
     const commands = { ...DATA, messages: LOCAL_COMMAND as unknown as MessageLike[] }
-    expect(titles('prompts', commands)).toEqual(['/compact', '/context', '/review src'])
+    // One message is one prompt, named by each part the person sent; the text
+    // a prompt command expands to (/review) is not typed, and is left out.
+    expect(titles('prompts', commands)).toEqual(['/compact · Read the notes.', '/context · ! ls', '/review src'])
     expect(titles('injections', commands)).toEqual([
       'Local command caveat',
       'Output: Compacted',
@@ -199,7 +202,7 @@ describe('conversation items', () => {
     ])
     // The untagged report opens as its own item, not inside the prompt.
     const { items } = buildItems('prompts', commands)
-    const context = items.find(item => item.title === '/context')!
+    const context = items.find(item => item.title === '/context · ! ls')!
     expect(context.loaded?.()).not.toContain('Context Usage')
     const report = buildItems('injections', commands).items.find(item => item.title === 'Output of /context')!
     expect(report.loaded?.()).toBe(CONTEXT_REPORT)
@@ -231,6 +234,16 @@ describe('titles', () => {
       'Task b2 failed',
     )
     expect(skillTitle('Base directory for this skill: /opt/skills/review/\n\nBody')).toBe('review')
+  })
+
+  test('a prompt typed after /clear is named beside the command, not hidden behind it', () => {
+    const clear = '<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>'
+    expect(promptTitles([clear, 'Answer with the single word ok.'])).toBe('/clear · Answer with the single word ok.')
+    expect(promptTitles([clear])).toBe('/clear')
+    expect(promptTitles(['', 'Read the notes.'])).toBe('Read the notes.')
+    // The block after a prompt command's line is its expansion; the one after that is typed.
+    const review = '<command-message>review is running…</command-message>\n<command-name>/review</command-name>\n<command-args>src</command-args>'
+    expect(promptTitles([review, 'Review the files in src.', 'And the tests.'])).toBe('/review src · And the tests.')
   })
 
   test('a call is described by its path, its command or its pattern', () => {

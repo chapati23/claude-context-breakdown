@@ -10,7 +10,7 @@ import type {
 } from '../types'
 import { apportion, baselineOf, isMemoryUnattributed, memorySegment } from './categories'
 import type { CategoryLike, MemoryFileLike } from './categories'
-import { blockChars, isCommandOutput, sortMessage } from './classify'
+import { blockChars, isCommandOutput, localCommandOf, sortMessage } from './classify'
 import type { BlockLike, MessageLike, SplitId } from './classify'
 import { baselineKeys, listingBodies, newestEntry } from './listing'
 import type { ListingKind } from './listing'
@@ -397,6 +397,29 @@ export function promptTitle(text: string): string {
   return firstWords(text)
 }
 
+/**
+ * The title of one prompt: the words of each block the person sent, in order.
+ * Claude Code can put a command's line and the next typed prompt in one
+ * message (seen live after /clear), so the first block alone would hide the
+ * prompt. The block after a prompt command's line is what the command
+ * expands to, not typed words: it is left out.
+ */
+export function promptTitles(texts: readonly string[]): string {
+  const parts: string[] = []
+  let isExpansion = false
+  for (const text of texts) {
+    if (text.trim() === '') {
+      continue
+    }
+    if (!isExpansion) {
+      parts.push(promptTitle(text))
+    }
+    isExpansion = text.includes('<command-name>') && localCommandOf(text) === null
+  }
+
+  return firstWords(parts.join(' · '))
+}
+
 /** Claude's message: its first words, or its tool call; the call as detail beside words. */
 function claudeTitle(blocks: readonly BlockLike[]): { title: string; detail: string } {
   const words = blocks.map(textOf).find(text => text.trim() !== '')
@@ -586,7 +609,7 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
         {
           ...textItem,
           id: `p:${hashText(`${texts.join('\n')}|${kinds.join(',')}`)}`,
-          title: first === undefined ? kindTitle : promptTitle(first),
+          title: first === undefined ? kindTitle : promptTitles(texts),
           detail: first !== undefined && kinds.length > 0 ? `+${kinds.length} ${kinds.length === 1 ? kinds[0] : 'attachments'}` : '',
           markup: 'prose',
           loaded:

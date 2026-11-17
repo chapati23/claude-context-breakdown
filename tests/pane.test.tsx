@@ -570,7 +570,8 @@ test('a row’s length bar reads the same when the focus ring or the pointer inv
   }
 
   // Level 1: the largest row fills the bar; a small one is an eighth block
-  // (which cannot stay the same) and uncoloured padding.
+  // (drawn the other way round under the ring or the pointer; see the next
+  // test) and uncoloured padding.
   check(await runs('row-tool-results'), DARK.segments['tool-results'], / ████████████ /)
   const memory = await runs('row-auto-memory')
   check(memory, DARK.segments['auto-memory'], / ▏ +976/)
@@ -583,6 +584,96 @@ test('a row’s length bar reads the same when the focus ring or the pointer inv
   check(await runs('item-r:real11'), DARK.segments['tool-results'], / ▎ +600/)
   await ui.press({ key: 'back' })
   await ui.unmount()
+})
+
+test('the row under the ring is one highlight: its figures at full strength, its part-filled cell the other way round', async ($, on) => {
+  await realWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  const textOf = (x: unknown): string =>
+    typeof x === 'string' ? x : isFound(x) ? (x.children ?? []).map(textOf).join('') : ''
+  // The kit gives a part's hover overrides beside its props.
+  type Part = { text: string; props: Record<string, unknown>; hover: Record<string, unknown> | undefined }
+  const partsOf = (found: { children?: readonly unknown[] } | undefined): Part[] =>
+    (found?.children ?? [])
+      .filter(isFound)
+      .map(part => ({ text: textOf(part), props: part.props, hover: (part as { hover?: Record<string, unknown> }).hover }))
+  const runs = async (key: string) => partsOf(await ui.find({ key }))
+  const color = DARK.segments['auto-memory']
+  // The last part: a pane without the keyboard draws a dim "N: " mark first.
+  const figures = (parts: Part[]) => parts[parts.length - 1]!
+  const partCell = (parts: Part[]) => parts.find(part => part.text === '▏')!
+  const ring = (element: string) =>
+    $.ui.focus({ component: 'Pane', requestId: 'context-breakdown', plugin: 'context-breakdown', element, origin: { kind: 'person' } })
+
+  // At rest: dim figures and the glyph in the segment's colour. The hover
+  // group of the row's own key gives both the lit style under the pointer.
+  let memory = await runs('row-auto-memory')
+  expect(figures(memory).props.dimColor).toBe(true)
+  expect(figures(memory).hover).toEqual({ scope: 'row-auto-memory', dimColor: false })
+  expect(partCell(memory).props.color).toBe(color)
+  expect(partCell(memory).hover).toEqual({ scope: 'row-auto-memory', color: 'text', backgroundColor: color })
+  expect(partCell(memory).props.backgroundColor).toBeUndefined()
+  // The Button heats the group: without that, no part would follow the pointer.
+  const walk = (node: unknown): unknown[] => (isFound(node) ? [node, ...(node.children ?? []).flatMap(walk)] : [])
+  const button = walk(await ui.drawn()).find(node => isFound(node) && node.props.key === 'row-auto-memory')
+  expect((button as { hover?: unknown } | undefined)?.hover).toEqual({ scope: 'row-auto-memory' })
+  // Before any focus event the ring is where the tree asks for it: the first row.
+  expect(figures(await runs('row-system')).props.dimColor).toBe(false)
+
+  // The person moves the ring: that row is lit, the first row is at rest again.
+  await ring('row-auto-memory')
+  memory = await runs('row-auto-memory')
+  expect(figures(memory).props.dimColor).toBe(false)
+  // Inverted by the engine, the segment's colour fills the glyph and the highlight the rest.
+  expect(partCell(memory).props.backgroundColor).toBe(color)
+  expect(partCell(memory).props.color).toBeUndefined()
+  expect(figures(await runs('row-system')).props.dimColor).toBe(true)
+  // The row that asks for the ring is still the first one: a new tree starts there.
+  expect((await ui.findAll({ type: 'Button' })).filter(row => row.props.autoFocus === true).map(row => row.key)).toEqual(['row-system'])
+
+  // The ring on a control: no row is lit. Another mod's element says nothing about our pane.
+  await ring('list-down')
+  expect(figures(await runs('row-auto-memory')).props.dimColor).toBe(true)
+  expect(figures(await runs('row-system')).props.dimColor).toBe(true)
+  await ring('row-system')
+  await $.ui.focus({ component: 'Pane', requestId: 'some-pane', plugin: 'other-mod', element: 'row-auto-memory', origin: { kind: 'person' } })
+  expect(figures(await runs('row-system')).props.dimColor).toBe(false)
+  // The ring on the pane's close mark, a stop of the engine's with no element: no row is lit.
+  await $.ui.focus({ component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'person' } })
+  expect(figures(await runs('row-system')).props.dimColor).toBe(true)
+  await ring('row-system')
+
+  // Level 2: a new tree lights the row that asks for the ring, and its dim path with it.
+  await ui.press({ key: 'row-tool-results' })
+  const first = await runs('item-r:real0')
+  expect(first.every(part => part.props.dimColor !== true)).toBe(true)
+  const last = await runs('item-r:real11')
+  expect(figures(last).props.dimColor).toBe(true)
+  expect(last.filter(part => part.props.dimColor === true).every(part => part.hover?.dimColor === false)).toBe(true)
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+
+  // A pane without the keyboard shows no ring: the row the ring was noted on,
+  // and the row that would ask for it, are at rest.
+  await ring('row-auto-memory')
+  const idle = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 88 } })
+  const idleRuns = async (key: string) => partsOf(await idle.find({ key }))
+  expect(figures(await idleRuns('row-system')).props.dimColor).toBe(true)
+  const idleMemory = await idleRuns('row-auto-memory')
+  expect(figures(idleMemory).props.dimColor).toBe(true)
+  expect(partCell(idleMemory).props.color).toBe(color)
+  expect(partCell(idleMemory).props.backgroundColor).toBeUndefined()
+  await idle.unmount()
+
+  // A desktop draws its own button and swaps nothing: the lit row's figures
+  // are at full strength, but its part-filled cell stays as at rest.
+  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  const desktopMemory = partsOf(await desktop.find({ key: 'row-auto-memory' }))
+  expect(figures(desktopMemory).props.dimColor).toBe(false)
+  expect(partCell(desktopMemory).props.color).toBe(color)
+  expect(partCell(desktopMemory).props.backgroundColor).toBeUndefined()
+  expect(partCell(desktopMemory).hover).toBeUndefined()
+  await desktop.unmount()
 })
 
 test('level 2 at 24 columns: no swatch on the rows, and the facts line fits', async ($, on) => {

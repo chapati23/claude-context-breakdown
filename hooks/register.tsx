@@ -66,6 +66,12 @@ const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, n
 const focusAtom = atom({ plugin: 'context-breakdown', key: 'focus' } as const, null, {
   shape: 'focus-2',
 })
+/** The key noted while the pane's ring is on no element of ours: no row is lit. */
+const OFF_ROWS = ''
+// The key of the pane's element under the focus ring (see `ring` in types).
+const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, null, {
+  shape: 'ring-1',
+})
 
 /**
  * This load of the code. State outlives a reload; a focus written by an
@@ -138,6 +144,7 @@ export const register: Register = on => {
     mayHoldFocus = false
     chipHold.stop()
     void quietly(update($, focusAtom, () => null))
+    void quietly(update($, ringAtom, () => null))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
     void quietly(
@@ -188,6 +195,10 @@ export const register: Register = on => {
       }
     }
     keepsPlace = !hasWord && isOpen
+    if (!keepsPlace) {
+      // Another tree: the ring that was noted names an element of the old one.
+      await quietly(update($, ringAtom, () => null))
+    }
     if (segment !== null) {
       await quietly(openSegment(nav, segment))
     } else if (hasWord) {
@@ -445,6 +456,14 @@ export const register: Register = on => {
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
     const result = await next(e)
+    // Our pane's ring moved: onto `element`, whose row is drawn in one
+    // highlight, or onto one of the engine's stops (the close mark), which
+    // has no element. That is noted as no row, or the row the ring left
+    // would stay drawn as if it held it.
+    if (result.deny === undefined && e.requestId === PANE_ID) {
+      const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
+      await quietly(update($, ringAtom, () => key))
+    }
     if (mayHoldFocus) {
       mayHoldFocus = false
       chipHold.stop()
@@ -654,6 +673,7 @@ export const register: Register = on => {
             }
             await dropChip()
             keepsPlace = false
+            await quietly(update($, ringAtom, () => null))
             if (part.members.length === 1) {
               await openSegment(nav, part.id as ContextBreakdownSegmentId)
             } else {
@@ -681,6 +701,7 @@ export const register: Register = on => {
     }
     shownOffset = e.props.scroll?.offset ?? 0
     const view = await read($, viewAtom)
+    const ringNow = await read($, ringAtom)
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
       messages: () => $.session.messages({ as: 'api' }),
@@ -699,6 +720,8 @@ export const register: Register = on => {
       quietly(
         (async () => {
           keepsPlace = false
+          // The new tree's ring is where `ringKey` puts it until an event says otherwise.
+          await quietly(update($, ringAtom, () => null))
           await work()
           await quietly($.ui.scroll(TOP_SCROLL))
           const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
@@ -761,6 +784,6 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace)
+    }, palette, e.props.isFocused === true, e.surface, keepsPlace, ringNow)
   })
 }

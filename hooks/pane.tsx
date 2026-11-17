@@ -66,6 +66,29 @@ type Rows = {
   palette: Palette
   /** The key of the element that takes the focus ring (`ringKey`). */
   ring: string | null
+  /** The key of the element that holds the ring now, or null: its row is drawn `lit`. */
+  lit: string | null
+  /**
+   * Whether the surface inverts a Button under the ring or the pointer. The
+   * terminal does; a desktop draws its own button, so a cell drawn the other
+   * way round for the swap would stay that way there.
+   */
+  swaps: boolean
+}
+
+/**
+ * How a row Button's parts are drawn. The engine draws a Button under the
+ * focus ring or the pointer inverted: each cell's colour and background
+ * swapped. A part with a colour of its own (dim figures, a part-filled bar
+ * cell) then breaks the row's highlight into patches. So the row under the
+ * ring (`lit`: `ui.focus` events say where the ring is) draws those parts in the text's own colour,
+ * and the others take the same style while the pointer is on the row (the
+ * hover group `scope`, which the Button heats): one highlight, bar intact.
+ */
+type RowLook = { lit: boolean; scope: string }
+
+function lookOf(rows: Rows, key: string): RowLook {
+  return { lit: rows.lit === key, scope: key }
 }
 
 // Every part of a table row is a Text drawn `mono`: the columns line up only
@@ -85,7 +108,7 @@ function gap(rows: Rows, cells: number) {
  * dim, as a hotkey that does not work yet, and gets no `hotkey`. A row with
  * no mark is indented by as much, so the rows line up.
  */
-function markOf(rows: Rows, index: number): { hotkey?: string; mark: RenderElement | string } {
+function markOf(rows: Rows, index: number, look?: RowLook): { hotkey?: string; mark: RenderElement | string } {
   if (rows.table.mark === 0) {
     return { mark: '' }
   }
@@ -100,7 +123,7 @@ function markOf(rows: Rows, index: number): { hotkey?: string; mark: RenderEleme
 
   return {
     mark: (
-      <Text mono dimColor>
+      <Text mono dimColor {...(look === undefined ? {} : { hover: { scope: look.scope, dimColor: false } })}>
         {`${digit}: `}
       </Text>
     ),
@@ -113,30 +136,49 @@ function markOf(rows: Rows, index: number): { hotkey?: string; mark: RenderEleme
  * A row Button under the focus ring or the pointer is drawn inverted, each
  * cell's colour and background swapped. Whole blocks on their own colour
  * read the same either way, and the padding has no colour, so inverted it
- * takes the row's highlight, not the segment's colour. The one eighth block
- * cannot be stable: inverted it shows the rest of its cell instead.
+ * takes the row's highlight, not the segment's colour. A part-filled cell
+ * and the texture are not stable: inverted, they would show the rest of
+ * their cells in the segment's colour. With a `look`, they are drawn the
+ * other way round under the ring or the pointer (the segment's colour as
+ * background, the text's colour in front), so the swap puts them right.
  */
-function barPart(rows: Rows, color: string, bar: LengthBarParts) {
+function barPart(rows: Rows, color: string, bar: LengthBarParts, look?: RowLook) {
   const { Text } = rows.el
   if (rows.table.bar === 0) {
     return ''
   }
   const runs: (RenderElement | string)[] = [gap(rows, 1)]
+  // A cell that is not all one colour: the glyph in the segment's colour at
+  // rest; swapped under the ring; swapped by the hover group under the pointer.
+  const mixed = (text: string) =>
+    look?.lit === true && rows.swaps ? (
+      <Text mono backgroundColor={color}>
+        {text}
+      </Text>
+    ) : (
+      <Text
+        mono
+        color={color}
+        {...(look === undefined || !rows.swaps ? {} : { hover: { scope: look.scope, color: 'text', backgroundColor: color } })}
+      >
+        {text}
+      </Text>
+    )
   if (bar.full !== '') {
-    // The texture keeps the background showing through it.
-    const back = bar.full.startsWith(FILLED) ? { backgroundColor: color } : {}
+    // Whole blocks take their colour as background too. The texture keeps
+    // the background showing through it.
     runs.push(
-      <Text mono color={color} {...back}>
-        {bar.full}
-      </Text>,
+      bar.full.startsWith(FILLED) ? (
+        <Text mono color={color} backgroundColor={color}>
+          {bar.full}
+        </Text>
+      ) : (
+        mixed(bar.full)
+      ),
     )
   }
   if (bar.rest !== '') {
-    runs.push(
-      <Text mono color={color}>
-        {bar.rest}
-      </Text>,
-    )
+    runs.push(mixed(bar.rest))
   }
   if (bar.pad !== '') {
     runs.push(<Text mono>{bar.pad}</Text>)
@@ -165,12 +207,17 @@ function leadPart(rows: Rows, color: string, glyph = SWATCH) {
   ]
 }
 
-/** A row's figures, dim. */
-function figuresPart(rows: Rows, tokens: number, of: number | null) {
+/** A row's figures: dim at rest, at full strength under the ring or the pointer (`look`). */
+function figuresPart(rows: Rows, tokens: number, of: number | null, look?: RowLook) {
   const { Text } = rows.el
 
   return (
-    <Text mono tabular dimColor>
+    <Text
+      mono
+      tabular
+      dimColor={look?.lit !== true}
+      {...(look === undefined ? {} : { hover: { scope: look.scope, dimColor: false } })}
+    >
       {figuresText(rows.table, tokens, of)}
     </Text>
   )
@@ -243,18 +290,21 @@ function groupRows(
     .map((segment, index) => {
       const def = segmentDef(segment.id)
       const color = colorOf(rows.palette, def.id)
-      const { hotkey, mark } = markOf(rows, first + index)
+      const key = `row-${segment.id}`
+      const look = lookOf(rows, key)
+      const { hotkey, mark } = markOf(rows, first + index, look)
       const name = nameText(table, def.label, def.short)
       const isLargest = stats.largest?.id === segment.id
       const bar = lengthBarParts(segment.tokens, stats.largest?.tokens ?? 0, table.bar, segment.id)
 
       return (
         <Button
-          key={`row-${segment.id}`}
+          key={key}
           label={def.label}
           plain
+          hover={{ scope: key }}
           {...(hotkey === undefined ? {} : { hotkey })}
-          {...(rows.ring === `row-${segment.id}` ? { autoFocus: true as const } : {})}
+          {...(rows.ring === key ? { autoFocus: true as const } : {})}
           onPress={() => void actions.openSegment(segment.id)}
         >
           {mark}
@@ -266,8 +316,8 @@ function groupRows(
           ) : (
             <Text mono>{name}</Text>
           )}
-          {barPart(rows, color, bar)}
-          {figuresPart(rows, segment.tokens, stats.used)}
+          {barPart(rows, color, bar, look)}
+          {figuresPart(rows, segment.tokens, stats.used, look)}
         </Button>
       )
     })
@@ -291,6 +341,8 @@ function segmentsBody(
   actions: PaneActions,
   palette: Palette,
   ring: string | null,
+  lit: string | null,
+  swaps: boolean,
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
@@ -308,7 +360,7 @@ function segmentsBody(
     ...deferred.map(category => withoutDeferred(category.name)),
   ]
   const table = tableLayout(columns, Math.max(...names.map(cellWidth)))
-  const rows: Rows = { el, table, isFocused, palette, ring }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
   const used = usedTokens(snapshot)
   const stats = { used, largest: largestOf(shown) }
   const mark = snapshot.isEstimate ? '~' : ''
@@ -413,6 +465,8 @@ function listBody(
   actions: PaneActions,
   palette: Palette,
   ring: string | null,
+  lit: string | null,
+  swaps: boolean,
 ) {
   const { Box, Button, Text } = el
   const def = segmentDef(list.segment)
@@ -422,7 +476,7 @@ function listBody(
   const widest = Math.max(1, ...list.rows.map(row => cellWidth(row.detail === '' ? row.title : `${row.title}  ${row.detail}`)))
   // No swatch: every row has the segment's colour, which the breadcrumb shows once.
   const table = tableLayout(columns, widest, false)
-  const rows: Rows = { el, table, isFocused, palette, ring }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
@@ -447,16 +501,23 @@ function listBody(
       <Box flexDirection="column" marginTop={1}>
         {list.rows.map(row => {
           const index = row.isOpenable ? openable++ : null
-          const { hotkey, mark } = index === null ? { mark: gap(rows, table.mark) } : markOf(rows, index)
+          const key = `item-${row.id}`
+          // A row that does not open is no Button: nothing inverts it.
+          const look = index === null ? undefined : lookOf(rows, key)
+          const { hotkey, mark } = index === null ? { mark: gap(rows, table.mark) } : markOf(rows, index, look)
           const names = itemNames(table, row.title, row.detail, row.pathIn)
           const inner = [
             mark,
             <Text mono>{names.title}</Text>,
-            <Text mono dimColor>
+            <Text
+              mono
+              dimColor={look?.lit !== true}
+              {...(look === undefined ? {} : { hover: { scope: look.scope, dimColor: false } })}
+            >
               {names.detail}
             </Text>,
-            barPart(rows, color, lengthBarParts(row.tokens, largest, table.bar)),
-            figuresPart(rows, row.tokens, total),
+            barPart(rows, color, lengthBarParts(row.tokens, largest, table.bar), look),
+            figuresPart(rows, row.tokens, total, look),
           ]
           if (index === null) {
             return <Text mono>{inner}</Text>
@@ -464,11 +525,12 @@ function listBody(
 
           return (
             <Button
-              key={`item-${row.id}`}
+              key={key}
               label={row.title}
               plain
+              hover={{ scope: key }}
               {...(hotkey === undefined ? {} : { hotkey })}
-              {...(ring === `item-${row.id}` ? { autoFocus: true as const } : {})}
+              {...(ring === key ? { autoFocus: true as const } : {})}
               onPress={() => void actions.openItem(row.id)}
             >
               {inner}
@@ -745,6 +807,7 @@ function keysLine(
  * get it. `keepsPlace`: `/ctx` only gave an open pane the keyboard, so no
  * element asks for the ring here. The engine still gives the pane a ring
  * and brings it into view; the `/ctx` hook then puts the window back.
+ * `ringNow`: the key of the element the last focus event gave the ring.
  */
 export function paneTree(
   el: Ui,
@@ -756,9 +819,14 @@ export function paneTree(
   isFocused: boolean,
   surface: RenderSurface,
   keepsPlace = false,
+  ringNow: string | null = null,
 ): RenderElement {
   const { Box, Text } = el
   const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused)
+  // Where the ring is: the last focus event's element, or, before the first
+  // one for this tree, the element that asks for the ring. A pane without
+  // the keyboard shows no ring.
+  const lit = isFocused ? (ringNow ?? ring) : null
   if (view.level === 3) {
     const keys = keysLine(el, view, false, columns, isFocused, surface, actions, ring)
 
@@ -767,12 +835,12 @@ export function paneTree(
   let body: RenderElement
   let hasRows = false
   if (view.level === 2) {
-    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring)
+    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
     hasRows = view.list.rows.some(row => row.isOpenable)
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring)
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
     hasRows = true
     if (view.note !== undefined) {
       body = (

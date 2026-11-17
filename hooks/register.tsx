@@ -66,6 +66,10 @@ const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, n
 const focusAtom = atom({ plugin: 'context-breakdown', key: 'focus' } as const, null, {
   shape: 'focus-2',
 })
+// The pane's element under the focus ring (`ContextBreakdownRing`).
+const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, null, {
+  shape: 'ring-1',
+})
 
 /**
  * This load of the code. State outlives a reload; a focus written by an
@@ -138,6 +142,7 @@ export const register: Register = on => {
     mayHoldFocus = false
     chipHold.stop()
     void quietly(update($, focusAtom, () => null))
+    void quietly(update($, ringAtom, () => null))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
     void quietly(
@@ -188,6 +193,10 @@ export const register: Register = on => {
       }
     }
     keepsPlace = !hasWord && isOpen
+    if (!keepsPlace) {
+      // Another tree: the ring that was noted names an element of the old one.
+      await quietly(update($, ringAtom, () => null))
+    }
     if (segment !== null) {
       await quietly(openSegment(nav, segment))
     } else if (hasWord) {
@@ -445,6 +454,13 @@ export const register: Register = on => {
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
     const result = await next(e)
+    // Our pane's ring moved onto `element`: its row is drawn in one highlight.
+    const element = e.plugin === PLUGIN ? e.element : undefined
+    if (result.deny === undefined && element !== undefined) {
+      await quietly(
+        update($, ringAtom, value => (value?.load === LOAD && value.key === element ? value : { key: element, load: LOAD })),
+      )
+    }
     if (mayHoldFocus) {
       mayHoldFocus = false
       chipHold.stop()
@@ -654,6 +670,7 @@ export const register: Register = on => {
             }
             await dropChip()
             keepsPlace = false
+            await quietly(update($, ringAtom, () => null))
             if (part.members.length === 1) {
               await openSegment(nav, part.id as ContextBreakdownSegmentId)
             } else {
@@ -681,6 +698,8 @@ export const register: Register = on => {
     }
     shownOffset = e.props.scroll?.offset ?? 0
     const view = await read($, viewAtom)
+    const noted = await read($, ringAtom)
+    const ringNow = noted !== null && noted.load === LOAD ? noted.key : null
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
       messages: () => $.session.messages({ as: 'api' }),
@@ -699,6 +718,8 @@ export const register: Register = on => {
       quietly(
         (async () => {
           keepsPlace = false
+          // The new tree's ring is where `ringKey` puts it until an event says otherwise.
+          await quietly(update($, ringAtom, () => null))
           await work()
           await quietly($.ui.scroll(TOP_SCROLL))
           const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
@@ -761,6 +782,6 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace)
+    }, palette, e.props.isFocused === true, e.surface, keepsPlace, ringNow)
   })
 }

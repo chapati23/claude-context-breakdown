@@ -207,6 +207,16 @@ export type ContextBreakdownFocus = {
   hold: number
 }
 
+/**
+ * The element of the pane that holds its focus ring, as the last `ui.focus`
+ * event named it, so the pane can draw the row under the ring in one
+ * highlight. `load` as in ContextBreakdownFocus.
+ */
+export type ContextBreakdownRing = {
+  key: string
+  load: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'context-breakdown': {
@@ -215,6 +225,7 @@ declare module 'claude-code' {
       /** The Claude Code theme's name (the `/config` row `theme`), or null before it is read. */
       theme: Shaped<string | null>
       focus: Shaped<ContextBreakdownFocus | null>
+      ring: Shaped<ContextBreakdownRing | null>
     }
   }
 }

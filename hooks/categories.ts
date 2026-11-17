@@ -5,8 +5,10 @@ import type {
   ContextBreakdownBaselineId,
   ContextBreakdownDeferred,
   ContextBreakdownSegment,
+  ContextBreakdownServer,
 } from '../types'
 import { BASELINE_IDS } from './segments'
+import { plainName } from './text'
 
 /** The fields of one breakdown category this mod reads. */
 export type CategoryLike = {
@@ -22,9 +24,19 @@ export type MemoryFileLike = {
   tokens: number
 }
 
+/** The fields of one MCP tool this mod reads. */
+export type McpToolLike = {
+  serverName: string
+  tokens: number
+  isLoaded: boolean
+}
+
 export type BreakdownLike = {
   categories: readonly CategoryLike[]
   memoryFiles?: readonly MemoryFileLike[] | null
+  mcpTools?: readonly McpToolLike[] | null
+  /** Custom agents: their entries in the agent-types reminder are baseline. */
+  agents?: readonly { agentType: string }[] | null
 }
 
 export type CategorySplit = {
@@ -133,6 +145,29 @@ function splitMemory(
   ids.forEach((id, index) => out.set(id, parts[index] ?? 0))
 
   return out
+}
+
+/**
+ * The MCP servers with tools that are not loaded: per server the number of
+ * such tools and their tokens, largest first (then most tools, then by
+ * name). A loaded tool is in the window and counts under MCP tools instead.
+ */
+export function notLoadedServers(tools: readonly McpToolLike[] | null | undefined): ContextBreakdownServer[] {
+  const byServer = new Map<string, ContextBreakdownServer>()
+  for (const tool of tools ?? []) {
+    if (tool.isLoaded) {
+      continue
+    }
+    const name = plainName(String(tool.serverName ?? ''))
+    const server = byServer.get(name) ?? { name, tools: 0, tokens: 0 }
+    server.tools += 1
+    server.tokens += tokensOf(tool.tokens)
+    byServer.set(name, server)
+  }
+
+  return [...byServer.values()].sort(
+    (a, b) => b.tokens - a.tokens || b.tools - a.tools || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+  )
 }
 
 /**

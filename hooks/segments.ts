@@ -1,4 +1,5 @@
-// The segments of the bar: their order, names, groups and fixed colours.
+// The segments of the bar: their order, names and groups. Their colours are
+// in palette.ts, one set per kind of theme.
 
 import type {
   ContextBreakdownBaselineId,
@@ -14,35 +15,27 @@ export type SegmentDef = {
   /** A shorter name for a narrow pane; the full label still names the control. */
   short: string
   group: SegmentGroup
-  color: string
 }
 
-// Colours stay fixed so people learn them. Baseline segments are cool hues
-// (blue, teal, violet, green), conversation segments warm ones (orange, red,
-// pink, gold, brown, olive), so the two groups read apart at a glance. Each
-// has at least 3:1 contrast against white and against #1e1e1e, so a block
-// stays visible on a light and on a dark terminal. Segments that can become
-// neighbours (merges remove the ones between) differ by a CIEDE2000 distance
-// of at least 10; tool results and Claude output, often side by side, by 40.
 export const BASELINE: readonly SegmentDef[] = [
-  { id: 'system', label: 'System prompt and built-in tools', short: 'System', group: 'baseline', color: '#4A72C9' },
-  { id: 'mcp', label: 'MCP tools and instructions', short: 'MCP', group: 'baseline', color: '#1F9C91' },
-  { id: 'global-instructions', label: 'Global instructions', short: 'Global', group: 'baseline', color: '#7D5BC6' },
-  { id: 'project-instructions', label: 'Project instructions', short: 'Project', group: 'baseline', color: '#2F95C8' },
-  { id: 'auto-memory', label: 'Auto-memory', short: 'Auto-memory', group: 'baseline', color: '#C05BE0' },
-  { id: 'skills-agents', label: 'Skills list and custom agents', short: 'Skills/agents', group: 'baseline', color: '#3BA57A' },
-  { id: 'other', label: 'Other', short: 'Other', group: 'baseline', color: '#7F8C99' },
+  { id: 'system', label: 'System prompt and built-in tools', short: 'System', group: 'baseline' },
+  { id: 'mcp', label: 'MCP tools and instructions', short: 'MCP', group: 'baseline' },
+  { id: 'global-instructions', label: 'Global instructions', short: 'Global', group: 'baseline' },
+  { id: 'project-instructions', label: 'Project instructions', short: 'Project', group: 'baseline' },
+  { id: 'auto-memory', label: 'Auto-memory', short: 'Auto-memory', group: 'baseline' },
+  { id: 'skills-agents', label: 'Skills list and custom agents', short: 'Skills/agents', group: 'baseline' },
+  { id: 'other', label: 'Other', short: 'Other', group: 'baseline' },
 ]
 
 export const CONVERSATION: readonly SegmentDef[] = [
-  { id: 'compaction-summary', label: 'Compaction summary', short: 'Summary', group: 'conversation', color: '#A8783C' },
-  { id: 'tool-results', label: 'Tool results', short: 'Tool results', group: 'conversation', color: '#D9661A' },
-  { id: 'skill-bodies', label: 'Skill bodies', short: 'Skill bodies', group: 'conversation', color: '#D2508F' },
-  { id: 'task-reports', label: 'Task reports', short: 'Tasks', group: 'conversation', color: '#8C7A1E' },
-  { id: 'injections', label: 'System injections', short: 'Injections', group: 'conversation', color: '#8F6A5E' },
-  { id: 'prompts', label: 'Your prompts', short: 'Prompts', group: 'conversation', color: '#E0523F' },
-  { id: 'claude-output', label: 'Claude output', short: 'Claude', group: 'conversation', color: '#7F9C0D' },
-  { id: 'conversation', label: 'Conversation', short: 'Conversation', group: 'conversation', color: '#D9661A' },
+  { id: 'compaction-summary', label: 'Compaction summary', short: 'Summary', group: 'conversation' },
+  { id: 'tool-results', label: 'Tool results', short: 'Tool results', group: 'conversation' },
+  { id: 'skill-bodies', label: 'Skill bodies', short: 'Skill bodies', group: 'conversation' },
+  { id: 'task-reports', label: 'Task reports', short: 'Tasks', group: 'conversation' },
+  { id: 'injections', label: 'System notifications', short: 'Notifications', group: 'conversation' },
+  { id: 'prompts', label: 'Your prompts', short: 'Prompts', group: 'conversation' },
+  { id: 'claude-output', label: 'Claude output', short: 'Claude', group: 'conversation' },
+  { id: 'conversation', label: 'Conversation', short: 'Conversation', group: 'conversation' },
 ]
 
 export const BASELINE_IDS = BASELINE.map(def => def.id) as readonly ContextBreakdownBaselineId[]
@@ -57,7 +50,7 @@ const BY_ID = new Map<string, SegmentDef>(
 )
 
 export function segmentDef(id: ContextBreakdownSegmentId): SegmentDef {
-  return BY_ID.get(id) ?? { id, label: id, short: id, group: 'baseline', color: '#7F8C99' }
+  return BY_ID.get(id) ?? { id, label: id, short: id, group: 'baseline' }
 }
 
 /**

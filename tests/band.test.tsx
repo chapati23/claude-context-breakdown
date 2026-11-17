@@ -1,8 +1,47 @@
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
-import { BAND, SUMMARY, SURFACES, TRANSCRIPT, usage, world } from './fixtures'
+import { CHIP_GAP } from '../hooks/bar'
+import { inkOn } from '../hooks/color'
+import { CHIP_HOLD_MS } from '../hooks/focus'
+import { DARK, LIGHT, edgeColor } from '../hooks/palette'
+import { BAND, PANE, SUMMARY, SURFACES, TRANSCRIPT, usage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
+
+/** A band wide enough that the legend leaves the bar the cells it had before it. */
+const WIDE = { ...BAND, props: { ...BAND.props, bodyColumns: 100 } } as const
+
+type Node = { type: string; props?: Record<string, unknown>; hover?: Record<string, unknown>; children?: unknown[] }
+
+const isNode = (x: unknown): x is Node => typeof x === 'object' && x !== null && 'type' in x
+const textOf = (x: unknown): string =>
+  typeof x === 'string' ? x : isNode(x) ? (x.children ?? []).map(textOf).join('') : ''
+const isPlaced = (node: Node) => node.type === 'Box' && node.props?.position === 'absolute'
+
+/**
+ * The band's row as drawn: what stands in the flow, each with the column it
+ * starts at, and the chips laid over it.
+ */
+async function rowOf(ui: { drawn: () => Promise<unknown> }) {
+  const tree = (await ui.drawn()) as Node
+  const children = (tree.children ?? []).filter(isNode)
+  const flow: { node: Node; start: number; text: string }[] = []
+  let column = 0
+  for (const node of children.filter(child => !isPlaced(child))) {
+    const text = textOf(node)
+    flow.push({ node, start: column, text })
+    column += text.length
+  }
+  const chips = children.filter(isPlaced).map(box => ({ box, text: textOf(box), label: (box.children ?? []).filter(isNode)[0]! }))
+
+  return { flow, width: column, chips }
+}
+
+/** The chip that names a segment, by its hover group or, when shown, by its place. */
+function chipOf(row: Awaited<ReturnType<typeof rowOf>>, id: string) {
+  return row.chips.find(chip => chip.box.hover?.scope === `seg-${id}`)
+}
 
 test('the band draws nothing before the first measurement', async ($, on) => {
   world(on)
@@ -21,7 +60,7 @@ test('the band draws the segments and the total after session.start', async ($, 
   await w.clock.advance(0)
 
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...BAND, surface })
+    const ui = await $.ui.mount({ ...WIDE, surface })
     const buttons = await ui.findAll({ type: 'Button' })
 
     expect(buttons.map(button => button.key)).toEqual([
@@ -45,21 +84,423 @@ test('the band draws the segments and the total after session.start', async ($, 
   }
 })
 
-test('the row fits its width', async ($, on) => {
+test('the row fits its width, and no chip makes it longer', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
 
   for (const surface of SURFACES) {
-    for (const bodyColumns of [8, 10, 12, 16, 20, 24, 40, 80, 160]) {
+    for (const bodyColumns of [8, 10, 12, 16, 20, 24, 30, 40, 50, 60, 80, 100, 160]) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
-      const texts = await ui.findAll({ type: 'Text' })
-      const width = texts.reduce((sum, text) => sum + text.text.length, 0)
+      const row = await rowOf(ui)
 
-      expect(width).toBeLessThan(bodyColumns)
+      // Only what is drawn in the flow takes room; chips lie over it.
+      expect(row.width).toBeLessThan(bodyColumns)
+      for (const chip of row.chips) {
+        const left = chip.box.props?.left as number
+        expect(left).toBeGreaterThanOrEqual(0)
+        expect(left + chip.text.length).toBeLessThanOrEqual(row.width)
+        // Neither its segment nor the cell on either side of it: there the
+        // pointer leaves the segment for its neighbour, not for the chip.
+        const seg = row.flow.find(item => item.node.props?.key === chip.box.hover?.scope)!
+        const end = seg.start + seg.text.length
+        expect(left + chip.text.length <= seg.start - CHIP_GAP || left >= end + CHIP_GAP).toBe(true)
+        // Inside the bar, or over the whole total and legend to the row's
+        // end: never a piece of a figure left beside it ("39k 1M 10%").
+        const bar = row.flow.filter(item => item.node.type === 'Button' || /^[·▒]+$/.test(item.text))
+        const barEnd = Math.max(...bar.map(item => item.start + item.text.length))
+        expect(left + chip.text.length <= barEnd || left + chip.text.length === row.width).toBe(true)
+      }
       await ui.unmount()
     }
   }
+})
+
+test('each segment ends in a seven-eighths edge; free space and reserve are quieter glyphs', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...WIDE, surface })
+    const row = await rowOf(ui)
+    const segments = row.flow.filter(item => item.node.type === 'Button')
+
+    expect(segments.length).toBe(6)
+    for (const { text } of segments) {
+      expect(text).toMatch(/^█*▉$/)
+    }
+    // The one-cell segments are the edge alone.
+    expect(segments.find(item => item.node.props?.key === 'seg-prompts')?.text).toBe('▉')
+    expect((await ui.find({ key: 'seg-tool-results' }))?.text).toBe('█████████▉')
+    // The full blocks on their own colour, so the engine's inversion of a
+    // focused or hovered Button leaves them as they are; the edge on a shade
+    // of it, so its last eighth still reads as a gap.
+    const tools = (await ui.find({ key: 'seg-tool-results' }))?.children as Node[]
+    const color = DARK.segments['tool-results']
+    expect(tools.map(run => [textOf(run), run.props])).toEqual([
+      ['█████████', { color, backgroundColor: color }],
+      ['▉', { color, backgroundColor: edgeColor(DARK, 'tool-results') }],
+    ])
+    // A one-cell segment is its edge alone: inverted, the shade fills most of
+    // the cell, so it does not vanish.
+    const prompts = (await ui.find({ key: 'seg-prompts' }))?.children as Node[]
+    expect(prompts.map(run => run.props)).toEqual([
+      { color: DARK.segments.prompts, backgroundColor: edgeColor(DARK, 'prompts') },
+    ])
+    expect(await ui.find({ type: 'Text', text: /^·+$/ })).toMatchObject({ props: { color: DARK.free } })
+    expect(await ui.find({ type: 'Text', text: /^▒+$/ })).toMatchObject({ props: { color: DARK.reserve } })
+    await ui.unmount()
+  }
+})
+
+test('hovering a segment reveals a chip beside it in its colour', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+    const row = await rowOf(ui)
+    const claude = row.flow.find(item => item.node.props?.key === 'seg-claude-output')!
+    const chip = chipOf(row, 'claude-output')!
+    const color = DARK.segments['claude-output']
+
+    expect(chip.text).toBe(' Claude output 8k ')
+    // Hidden at rest, shown by the segment's hover group.
+    expect(chip.box.props).toMatchObject({ position: 'absolute', top: 0, display: 'none' })
+    expect(chip.box.hover).toEqual({ scope: 'seg-claude-output', display: 'flex' })
+    expect(claude.node.hover).toEqual({ scope: 'seg-claude-output' })
+    // Right of the segment, over the free dots, after one uncovered cell:
+    // there the pointer reaches the next part before it reaches the chip.
+    expect(chip.box.props?.left).toBe(claude.start + claude.text.length + CHIP_GAP)
+    expect(chip.label.props).toEqual({ color: inkOn(color), backgroundColor: color })
+    // Gold takes black ink.
+    expect(chip.label.props?.color).toBe('#000000')
+    await ui.unmount()
+  }
+
+  // The desktop draws each segment as a native button, so a chip counted in
+  // text cells could land on its own segment: none is drawn there.
+  const desktop = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const row = await rowOf(desktop)
+  expect(row.chips).toEqual([])
+  expect(row.flow.filter(item => item.node.type === 'Button').length).toBe(6)
+  await desktop.unmount()
+})
+
+test('a merged cell’s chip lists its members', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  // The task report (100 tokens) is merged into the tool results.
+  expect(chipOf(await rowOf(ui), 'tool-results')?.text).toBe(' Tool results 30k + Task reports 100 ')
+  await ui.unmount()
+})
+
+test('a chip with no room on the right flips to the left of its segment', async ($, on) => {
+  const w = world(on)
+  // Almost full, and Claude output last after a long run of tool results:
+  // it ends where the reserve and the total begin.
+  w.usage = usage(180_000, 154_000)
+  w.messages = [
+    { role: 'user', content: [{ type: 'text', text: 'p'.repeat(4000) }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'c'.repeat(30_000) }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'r'.repeat(120_000) }] },
+  ]
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  {
+    // Too narrow for the legend: only the total is right of the bar.
+    const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: 45 } })
+    const row = await rowOf(ui)
+    const claude = row.flow.find(item => item.node.props?.key === 'seg-claude-output')!
+    const chip = chipOf(row, 'claude-output')!
+    const left = chip.box.props?.left as number
+
+    expect(await ui.find({ type: 'Text', text: /%$/ })).toMatchObject({ text: ' 180k/200k 90%' })
+    // It ends one cell before the segment starts, over the cells before it.
+    expect(left + chip.text.length).toBe(claude.start - CHIP_GAP)
+    expect(chip.text).toBe(' Claude output 30k ')
+    // The tool results' chip, with room on the right, goes right: over
+    // Claude output's cells and beyond, never over its own or the first
+    // cell after it, so the pointer can walk on to Claude output.
+    const tools = row.flow.find(item => item.node.props?.key === 'seg-tool-results')!
+    expect(chipOf(row, 'tool-results')?.box.props?.left).toBe(tools.start + tools.text.length + CHIP_GAP)
+    await ui.unmount()
+  }
+})
+
+test('keyboard focus on a segment shows its chip; focus leaving hides it', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const focus = (element?: string) =>
+    $.ui.focus({
+      component: 'AbovePrompt',
+      requestId: 'context-breakdown',
+      ...(element === undefined ? {} : { plugin: 'context-breakdown', element }),
+      origin: { kind: 'person' },
+    })
+
+  {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+
+    await focus('seg-claude-output')
+    let row = await rowOf(ui)
+    // Shown from state: no hover needed, no display none.
+    const shown = row.chips.filter(chip => chip.box.hover === undefined)
+    expect(shown.map(chip => chip.text)).toEqual([' Claude output 8k '])
+    expect(shown[0]?.box.props?.display).toBeUndefined()
+    expect(chipOf(row, 'claude-output')).toBeUndefined()
+    // No hover chip beside it: the pointer on another segment cannot show a
+    // second chip while this one is up.
+    expect(row.chips).toHaveLength(1)
+
+    // An engine stop (a pane's close mark): no element of ours.
+    await focus()
+    row = await rowOf(ui)
+    expect(row.chips.every(chip => chip.box.props?.display === 'none')).toBe(true)
+    expect(chipOf(row, 'claude-output')?.text).toBe(' Claude output 8k ')
+    await ui.unmount()
+  }
+
+  // The desktop gets no chips, focused or not.
+  const desktop = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  await focus('seg-claude-output')
+  expect((await rowOf(desktop)).chips).toEqual([])
+  await desktop.unmount()
+})
+
+test('the focus chip clears when the ring moves to another mod’s element or into a pane', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const focusTools = () =>
+    $.ui.focus({
+      component: 'AbovePrompt',
+      requestId: 'context-breakdown',
+      plugin: 'context-breakdown',
+      element: 'seg-tool-results',
+      origin: { kind: 'person' },
+    })
+  const shownChips = async () => {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+    const shown = (await rowOf(ui)).chips.filter(chip => chip.box.props?.display !== 'none').length
+    await ui.unmount()
+
+    return shown
+  }
+
+  await focusTools()
+  expect(await shownChips()).toBe(1)
+  // Another mod's row in the band takes the ring.
+  await $.ui.focus({
+    component: 'AbovePrompt',
+    requestId: 'context-breakdown',
+    plugin: 'other-mod',
+    element: 'other-button',
+    origin: { kind: 'person' },
+  })
+  expect(await shownChips()).toBe(0)
+
+  await focusTools()
+  expect(await shownChips()).toBe(1)
+  // The ring moves in a pane: the band no longer holds the keyboard.
+  await $.ui.focus({
+    component: 'Pane',
+    requestId: 'some-pane',
+    plugin: 'other-mod',
+    element: 'row-1',
+    origin: { kind: 'person' },
+  })
+  expect(await shownChips()).toBe(0)
+
+  // Another mod's key that happens to start with "seg-" is not ours.
+  await $.ui.focus({
+    component: 'AbovePrompt',
+    requestId: 'context-breakdown',
+    plugin: 'other-mod',
+    element: 'seg-tool-results',
+    origin: { kind: 'person' },
+  })
+  expect(await shownChips()).toBe(0)
+})
+
+test('a submitted prompt or a /clear drops a focus chip that was left behind', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const focusTools = () =>
+    $.ui.focus({
+      component: 'AbovePrompt',
+      requestId: 'context-breakdown',
+      plugin: 'context-breakdown',
+      element: 'seg-tool-results',
+      origin: { kind: 'person' },
+    })
+  const shownChips = async () => {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+    const shown = (await rowOf(ui)).chips.filter(chip => chip.box.props?.display !== 'none').length
+    await ui.unmount()
+
+    return shown
+  }
+
+  await focusTools()
+  expect(await shownChips()).toBe(1)
+  // Esc gave the keyboard back to the prompt; the person sends a prompt.
+  await $.prompt.submit({ text: 'hello', wait: false, origin: { kind: 'composer' } })
+  await w.clock.settle()
+  expect(await shownChips()).toBe(0)
+
+  await focusTools()
+  expect(await shownChips()).toBe(1)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await w.clock.advance(0)
+  expect(await shownChips()).toBe(0)
+})
+
+/** A band mount's chips: how many are drawn, and how many show without a hover. */
+async function chipCounts($: Engine) {
+  const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  const { chips } = await rowOf(ui)
+  await ui.unmount()
+
+  return { drawn: chips.length, shown: chips.filter(chip => chip.box.props?.display !== 'none').length }
+}
+
+test('the keyboard chip ends a few seconds after the last focus move, and a new move restarts the wait', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const focus = (element: string) =>
+    $.ui.focus({
+      component: 'AbovePrompt',
+      requestId: 'context-breakdown',
+      plugin: 'context-breakdown',
+      element,
+      origin: { kind: 'person' },
+    })
+
+  await focus('seg-tool-results')
+  expect((await chipCounts($)).shown).toBe(1)
+  // Esc, typing or a click elsewhere raise no event: the chip waits out its time.
+  await w.clock.advance(CHIP_HOLD_MS - 1000)
+  expect((await chipCounts($)).shown).toBe(1)
+  // Tab to the next segment: its chip, and the wait starts again.
+  await focus('seg-prompts')
+  await w.clock.advance(CHIP_HOLD_MS - 1000)
+  // The first move's timer was stopped; it does not end the second's chip.
+  expect((await chipCounts($)).shown).toBe(1)
+  await w.clock.advance(1000)
+  const after = await chipCounts($)
+  expect(after.shown).toBe(0)
+  // The hover chips are back.
+  expect(after.drawn).toBeGreaterThan(1)
+})
+
+test('a press on a segment opens the pane and leaves no chip behind', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  // A click moves the ring onto the segment, then presses it.
+  await $.ui.focus({
+    component: 'AbovePrompt',
+    requestId: 'context-breakdown',
+    plugin: 'context-breakdown',
+    element: 'seg-tool-results',
+    origin: { kind: 'person' },
+  })
+  expect((await chipCounts($)).shown).toBe(1)
+  const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  await ui.press({ key: 'seg-tool-results' })
+  await w.clock.settle()
+  await ui.unmount()
+
+  expect(w.opened).toEqual(['context-breakdown'])
+  expect((await chipCounts($)).shown).toBe(0)
+})
+
+test('the legend names the largest conversation segment after a swatch of its colour, and goes first when narrow', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of SURFACES) {
+    for (const bodyColumns of [60, 80, 100]) {
+      const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
+      const row = await rowOf(ui)
+      const at = row.flow.findIndex(item => item.text === ' Tool results 45%')
+      // 30k of 66k used. The words are dim text, as the total: a segment
+      // colour holds only 3:1, too little for text.
+      expect(row.flow[at]?.node.props).toEqual({ dimColor: true })
+      // The swatch before them carries the colour.
+      expect(row.flow[at - 1]?.text).toBe('▉')
+      expect(row.flow[at - 1]?.node.props).toEqual({ color: DARK.segments['tool-results'] })
+      expect(row.flow[at - 2]?.text).toBe(' · ')
+      await ui.unmount()
+    }
+    // 12 + 3 + 2 + 16 + 2 + 20 = 55 columns hold the legend; 54 do not.
+    for (const [bodyColumns, hasLegend] of [[55, true], [54, false], [24, false]] as const) {
+      const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
+      expect((await ui.find({ type: 'Text', text: ' Tool results 45%' })) !== undefined).toBe(hasLegend)
+      expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text).toBe(' 66k/200k 33%')
+      expect((await ui.findAll({ type: 'Button' })).length).toBeGreaterThan(0)
+      await ui.unmount()
+    }
+  }
+})
+
+test('a light theme draws the light palette, and a theme change follows', async ($, on) => {
+  const w = world(on)
+  w.theme = 'light-daltonized'
+  await $.session.start(START)
+  await w.clock.advance(0)
+  expect(w.configLists).toBe(1)
+
+  const colors = async () => {
+    const band = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+    const pane = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const out = {
+      bar: ((await band.find({ key: 'seg-system' }))?.children[0] as Node).props?.color,
+      reserve: (await band.find({ type: 'Text', text: /^▒+$/ }))?.props.color,
+      // The row's length bar carries the segment's colour.
+      swatch: ((await pane.find({ key: 'row-system' }))?.children.find(
+        child => isNode(child) && child.props?.color !== undefined,
+      ) as Node).props?.color,
+    }
+    await band.unmount()
+    await pane.unmount()
+
+    return out
+  }
+
+  expect(await colors()).toEqual({ bar: LIGHT.segments.system, reserve: LIGHT.reserve, swatch: LIGHT.segments.system })
+
+  await $.config.set({
+    key: 'theme',
+    value: 'dark',
+    previous: 'light-daltonized',
+    provider: { plugin: 'engine', tier: 'core' },
+    origin: { kind: 'composer' },
+  })
+  expect(await colors()).toEqual({ bar: DARK.segments.system, reserve: DARK.reserve, swatch: DARK.segments.system })
+})
+
+test('an unreadable theme leaves the dark palette', async ($, on) => {
+  const w = world(on)
+  w.theme = null
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  expect(((await ui.find({ key: 'seg-system' }))?.children[0] as Node).props?.color).toBe(DARK.segments.system)
+  await ui.unmount()
 })
 
 test('a band too narrow for any total draws nothing of ours', async ($, on) => {
@@ -210,7 +651,9 @@ test('after a compaction the band estimates and marks the total with ~', async (
 
     // 26k baseline plus 2,000 characters at one character a token.
     expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' ~28k/200k 14%')
-    expect(await ui.find({ key: 'seg-compaction-summary' })).toBeDefined()
+    // The texture keeps no background: the terminal's shows through it.
+    const summary = (await ui.find({ key: 'seg-compaction-summary' }))?.children as Node[]
+    expect(summary.map(run => run.props)).toEqual([{ color: DARK.segments['compaction-summary'] }])
     await ui.unmount()
   }
 

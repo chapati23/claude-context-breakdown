@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { apportion, splitCategories } from '../hooks/categories'
+import { apportion, notLoadedServers, splitCategories } from '../hooks/categories'
 import type { BreakdownLike } from '../hooks/categories'
 
 const used = (name: string, tokens: number) => ({ name, tokens, kind: 'used' })
@@ -117,6 +117,45 @@ describe('splitCategories', () => {
 
     expect(byId(split)['project-instructions']).toBe(50)
     expect(byId(split).other).toBe(50)
+  })
+})
+
+describe('notLoadedServers', () => {
+  const tool = (serverName: string, tokens: number, isLoaded = false) => ({ serverName, tokens, isLoaded })
+
+  test('counts the tools that are not loaded per server, largest first', () => {
+    expect(
+      notLoadedServers([
+        tool('notes', 400),
+        tool('notes', 600),
+        tool('notes', 5000, true),
+        tool('tickets', 3000),
+        tool('maps', 1000),
+        tool('atlas', 1000),
+        tool('calendar', 500),
+        tool('calendar', 500),
+      ]),
+    ).toEqual([
+      { name: 'tickets', tools: 1, tokens: 3000 },
+      // A tie in tokens: more tools first, then by name.
+      { name: 'calendar', tools: 2, tokens: 1000 },
+      { name: 'notes', tools: 2, tokens: 1000 },
+      { name: 'atlas', tools: 1, tokens: 1000 },
+      { name: 'maps', tools: 1, tokens: 1000 },
+    ])
+  })
+
+  test('leaves out loaded tools, and servers whose tools are all loaded', () => {
+    expect(notLoadedServers([tool('notes', 600, true)])).toEqual([])
+    expect(notLoadedServers(null)).toEqual([])
+    expect(notLoadedServers(undefined)).toEqual([])
+  })
+
+  test('keeps the tools of a server with no token figure, and strips control characters from names', () => {
+    expect(notLoadedServers([tool('\x1b[31mred\x1b[0m\tteam', 0), tool('red team', Number.NaN), tool('notes', -5)])).toEqual([
+      { name: 'red team', tools: 2, tokens: 0 },
+      { name: 'notes', tools: 1, tokens: 0 },
+    ])
   })
 })
 

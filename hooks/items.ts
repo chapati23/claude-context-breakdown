@@ -10,8 +10,12 @@ import type {
 } from '../types'
 import { apportion, baselineOf, isMemoryUnattributed, memorySegment } from './categories'
 import type { CategoryLike, MemoryFileLike } from './categories'
-import { blockChars, classifyBlock } from './classify'
+import { blockChars, isCommandOutput, sortMessage } from './classify'
 import type { BlockLike, MessageLike, SplitId } from './classify'
+import { baselineKeys, listingBodies, newestEntry } from './listing'
+import type { ListingKind } from './listing'
+import { fenced } from './markdown'
+import type { Markup } from './markdown'
 import { loadedFileText } from './reminder'
 import { segmentDef } from './segments'
 import { DEFAULT_CHARS_PER_TOKEN, MAX_API_MESSAGES } from './snapshot'
@@ -46,6 +50,9 @@ export function isCutList(messages: readonly MessageLike[]): boolean {
   return messages.length >= MAX_API_MESSAGES
 }
 
+/** The note of a segment that holds nothing now; a list that loses its last item says more. */
+export const NO_ITEMS = 'No items.'
+
 const CUT_NOTE = `Only the newest ${MAX_API_MESSAGES.toLocaleString('en-US')} messages can be read: older items are not listed.`
 
 /** Which file comparison applies to an item at level 3. */
@@ -63,6 +70,10 @@ export type Item = {
   disk: DiskKind | null
   /** The as-loaded text carries its own line numbers (a Read result). */
   isNumbered: boolean
+  /** What the text is, for level 3's formatted view and the view it opens in. */
+  markup: Markup
+  /** The formatted view's text as loaded, where it is not the raw text (Claude's reply). */
+  formatted?: () => string
   /** The as-loaded text, or null when it is not found; absent: no level 3. */
   loaded: (() => string | null) | null
   /** Why the as-loaded text may be missing, when the usual reason is wrong. */
@@ -136,6 +147,7 @@ function categoryItem(category: CategoryLike, order: number): Item {
     path: null,
     disk: null,
     isNumbered: false,
+    markup: 'text',
     loaded: null,
   }
 }
@@ -168,6 +180,7 @@ function memoryItems(
       path: file.path,
       disk: 'memory' as const,
       isNumbered: false,
+      markup: 'file' as const,
       loaded: () => (messages === null ? null : loadedFileText(messages, file.path)),
       ...(missing === undefined ? {} : { missing }),
     }))
@@ -185,6 +198,16 @@ function skillSource(source: string): string {
   return words[source] ?? source
 }
 
+/** A row's as-loaded text, or no level 3 when there is none. */
+function asLoaded(text: string | null): (() => string) | null {
+  return text === null || text === '' ? null : () => text
+}
+
+/** Several listings of one kind, oldest first, as one text; null with none. */
+function joined(bodies: readonly string[]): string | null {
+  return bodies.length === 0 ? null : bodies.join('\n\n')
+}
+
 function baselineItems(segment: ContextBreakdownSegmentId, data: ItemData): ItemSet {
   const { breakdown } = data
   if (breakdown === null) {
@@ -192,40 +215,60 @@ function baselineItems(segment: ContextBreakdownSegmentId, data: ItemData): Item
   }
   const items: Item[] = []
   const push = (item: Omit<Item, 'order'>) => items.push({ ...item, order: items.length })
-  const plain = { path: null, disk: null, isNumbered: false, loaded: null }
+  const plain = { path: null, disk: null, isNumbered: false, markup: 'text' as const, loaded: null }
   const categories = usedCategories(breakdown, segment)
+  // The listings arrive as reminders, so their as-loaded text is in the
+  // conversation; a row opens only where its text was found.
+  const listings = (kind: ListingKind) => (data.messages === null ? [] : listingBodies(data.messages, kind))
 
   if (segment === 'mcp') {
     const tools = (breakdown.mcpTools ?? []).filter(tool => tool.isLoaded)
     for (const tool of tools) {
       push({ id: `m:${hashText(tool.name)}`, title: tool.name, detail: tool.serverName, tokens: tokensOf(tool.tokens), ...plain })
     }
+    const instructions = joined(listings('mcp'))
     for (const category of categories) {
       if (tools.length === 0 || !category.name.startsWith('MCP tools')) {
-        push(categoryItem(category, 0))
+        const isInstructions = /instructions/i.test(category.name)
+        push({ ...categoryItem(category, 0), loaded: isInstructions ? asLoaded(instructions) : null })
       }
     }
   } else if (segment === 'skills-agents') {
     const skills = breakdown.skills?.skillFrontmatter ?? []
     const agents = breakdown.agents ?? []
+    const skillListings = listings('skills')
+    const agentListings = listings('agents')
     for (const skill of skills) {
+      // The listing names a plugin's skill "plugin:name". Only that name is
+      // tried: the bare name may be another skill's entry.
+      const names =
+        skill.pluginName === undefined || skill.name.includes(':') ? [skill.name] : [`${skill.pluginName}:${skill.name}`]
       push({
         id: `s:${hashText(`${skill.source}:${skill.name}`)}`,
         title: skill.name,
         detail: skill.pluginName ?? skillSource(skill.source),
         tokens: tokensOf(skill.tokens),
         ...plain,
+        loaded: asLoaded(newestEntry(skillListings, names)),
       })
     }
     for (const agent of agents) {
-      push({ id: `g:${hashText(agent.agentType)}`, title: agent.agentType, detail: 'agent', tokens: tokensOf(agent.tokens), ...plain })
+      push({
+        id: `g:${hashText(agent.agentType)}`,
+        title: agent.agentType,
+        detail: 'agent',
+        tokens: tokensOf(agent.tokens),
+        ...plain,
+        loaded: asLoaded(newestEntry(agentListings, [agent.agentType])),
+      })
     }
     for (const category of categories) {
       const isListed =
         (category.name === 'Skills' && skills.length > 0) ||
         (category.name === 'Custom agents' && agents.length > 0)
       if (!isListed) {
-        push(categoryItem(category, 0))
+        const whole = category.name === 'Skills' ? joined(skillListings) : null
+        push({ ...categoryItem(category, 0), loaded: asLoaded(whole) })
       }
     }
   } else {
@@ -246,7 +289,7 @@ function baselineItems(segment: ContextBreakdownSegmentId, data: ItemData): Item
     }
   }
 
-  return { items, note: items.length === 0 ? 'No items.' : null }
+  return { items, note: items.length === 0 ? NO_ITEMS : null }
 }
 
 // Conversation segments: blocks of the messages, sized by characters.
@@ -291,11 +334,20 @@ function resultText(block: BlockLike): string | null {
   return content.some(part => asRecord(part).type === 'text') ? parts.join('\n') : null
 }
 
-/** "Prompt hook: …", or the first line of a reminder, tags left out. */
+/** The row detail of an injection whose block is partly counted in the baseline. */
+export const PART_IN_BASELINE = 'custom agents in Baseline'
+
+/** "Prompt hook: …", "Output: …", or the first line of a reminder, tags left out. */
 export function injectionTitle(text: string): string {
   const hook = /<user-prompt-submit-hook>([\s\S]*?)(?:<\/user-prompt-submit-hook>|$)/.exec(text)
   if (hook !== null) {
     return `Prompt hook: ${firstWords(hook[1]!, 48)}`
+  }
+  if (text.trimStart().startsWith('<local-command-caveat>')) {
+    return 'Local command caveat'
+  }
+  if (isCommandOutput(text)) {
+    return firstWords(`Output: ${text}`)
   }
   const body = text.replace(/<\/?system-reminder>/g, '\n')
   const line = body.split('\n').find(one => one.trim() !== '') ?? ''
@@ -340,9 +392,6 @@ export function promptTitle(text: string): string {
   if (shell !== undefined) {
     return firstWords(`! ${shell}`)
   }
-  if (text.includes('<local-command-stdout>') || text.includes('<bash-stdout>')) {
-    return firstWords(`Output: ${text}`)
-  }
 
   return firstWords(text)
 }
@@ -365,6 +414,24 @@ function claudeTitle(blocks: readonly BlockLike[]): { title: string; detail: str
   return { title: blocks.some(block => block.type === 'thinking') ? 'Thinking' : 'Reply', detail: '' }
 }
 
+/** Claude's message as Markdown: its text as written, each tool input fenced as JSON. */
+function claudeMarkdown(blocks: readonly BlockLike[]): string {
+  return blocks
+    .map(block => {
+      switch (block.type) {
+        case 'text':
+          return textOf(block)
+        case 'thinking':
+          return `**Thinking**\n\n${typeof block.thinking === 'string' ? block.thinking : ''}`
+        case 'tool_use':
+          return `**${String(block.name ?? 'tool')}**\n\n${fenced(JSON.stringify(block.input ?? {}, null, 2), 'json')}`
+        default:
+          return `[${block.type}]`
+      }
+    })
+    .join('\n\n')
+}
+
 function claudeText(blocks: readonly BlockLike[]): string {
   return blocks
     .map(block => {
@@ -381,6 +448,9 @@ function claudeText(blocks: readonly BlockLike[]): string {
     })
     .join('\n\n')
 }
+
+/** Tools whose result is terminal output: the formatted view fences it, so a "#" line stays a line. */
+const OUTPUT_TOOLS: ReadonlySet<string> = new Set(['Bash', 'BashOutput', 'PowerShell', 'Grep', 'Glob', 'LS'])
 
 type ToolUse = { name: string; input: unknown }
 
@@ -406,7 +476,7 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
     return { items: [], note: 'The messages could not be read.' }
   }
   const ratio = data.charsPerToken !== null && data.charsPerToken > 0 ? data.charsPerToken : DEFAULT_CHARS_PER_TOKEN
-  const memoryPaths = (data.breakdown?.memoryFiles ?? []).map(file => file.path)
+  const keys = baselineKeys(data.breakdown)
   const uses = segment === 'tool-results' ? toolUses(messages) : new Map<string, ToolUse>()
   const items: Item[] = []
   const sizes: number[] = []
@@ -439,7 +509,9 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
             id: `a:${firstCall === undefined ? hashText(blocks.map(textOf).join('\n')) : String(firstCall.id)}`,
             title,
             detail,
+            markup: 'prose',
             loaded: () => claudeText(blocks),
+            formatted: () => claudeMarkdown(blocks),
           },
           blocks.reduce((sum, block) => sum + blockChars(block), 0),
         )
@@ -447,14 +519,18 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
       continue
     }
     const prompt: BlockLike[] = []
-    for (const block of blocks) {
+    let promptChars = 0
+    const sortedBlocks = sortMessage(message.role, blocks, keys)
+    for (const [index, block] of blocks.entries()) {
       order += 1
-      const id = classifyBlock(message.role, block, memoryPaths)
-      if (id !== segment) {
+      const sorted = sortedBlocks[index] ?? null
+      const id = sorted?.id ?? null
+      if (sorted === null || id !== segment) {
         continue
       }
       if (id === 'prompts') {
         prompt.push(block)
+        promptChars += sorted.chars
         continue
       }
       if (id === 'tool-results') {
@@ -473,6 +549,7 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
             path,
             disk: isTextRead && path !== null ? 'read' : null,
             isNumbered: isTextRead,
+            markup: isTextRead ? 'file' : OUTPUT_TOOLS.has(name) ? 'output' : 'text',
             loaded: text === null ? null : () => text,
           },
           blockChars(block),
@@ -487,8 +564,16 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
             ? skillTitle(text)
             : id === 'task-reports'
               ? taskTitle(text)
-              : injectionTitle(text)
-      push({ ...textItem, id: `${ID_PREFIX[id]}:${hashText(text)}`, title, loaded: () => text }, blockChars(block))
+              : sorted.outputOf !== undefined
+                ? `Output of ${firstWords(sorted.outputOf, 40)}`
+                : injectionTitle(text)
+      // A summary and a skill body are written as Markdown; a report or an
+      // injection is mostly tags around it.
+      const markup: Markup = id === 'compaction-summary' || id === 'skill-bodies' ? 'prose' : 'text'
+      // Part of the block is counted in the baseline (custom agents' entries):
+      // the text shows whole, the size is the rest, and the row says so.
+      const detail = sorted.chars < blockChars(block) ? PART_IN_BASELINE : ''
+      push({ ...textItem, id: `${ID_PREFIX[id]}:${hashText(text)}`, title, detail, markup, loaded: () => text }, sorted.chars)
     }
     // The blocks a person sent in one message are one prompt.
     if (prompt.length > 0) {
@@ -502,12 +587,13 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
           id: `p:${hashText(`${texts.join('\n')}|${kinds.join(',')}`)}`,
           title: first === undefined ? kindTitle : promptTitle(first),
           detail: first !== undefined && kinds.length > 0 ? `+${kinds.length} ${kinds.length === 1 ? kinds[0] : 'attachments'}` : '',
+          markup: 'prose',
           loaded:
             texts.length === 0
               ? null
               : () => prompt.map(block => (block.type === 'text' ? textOf(block) : `[${block.type}]`)).join('\n\n'),
         },
-        prompt.reduce((sum, block) => sum + blockChars(block), 0),
+        promptChars,
       )
     }
   }
@@ -524,7 +610,7 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
     item.tokens = parts[index] ?? 0
   })
 
-  return { items, note: isCut ? CUT_NOTE : items.length === 0 ? 'No items.' : null }
+  return { items, note: isCut ? CUT_NOTE : items.length === 0 ? NO_ITEMS : null }
 }
 
 /** The items of one segment. */

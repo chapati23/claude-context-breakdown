@@ -35,12 +35,24 @@ describe('formatTokens', () => {
 })
 
 describe('formatPercent', () => {
-  test('rounds down, and marks a small share', () => {
-    expect(formatPercent(95_000, 1_000_000)).toBe('9%')
+  test('rounds to the nearest, as the status line does, and marks a small share', () => {
+    // 109k and 116k of 1M: the status line reads 11% and 12%.
+    expect(formatPercent(109_000, 1_000_000)).toBe('11%')
+    expect(formatPercent(116_000, 1_000_000)).toBe('12%')
+    expect(formatPercent(114_000, 1_000_000)).toBe('11%')
+    expect(formatPercent(95_000, 1_000_000)).toBe('10%')
+    expect(formatPercent(5000, 1_000_000)).toBe('1%')
     expect(formatPercent(2000, 1_000_000)).toBe('<1%')
+    expect(formatPercent(1, 1_000_000)).toBe('<1%')
     expect(formatPercent(0, 1_000_000)).toBe('0%')
     expect(formatPercent(10, 0)).toBe('0%')
     expect(formatPercent(1_200_000, 1_000_000)).toBe('120%')
+  })
+
+  test('never reads 100% before the window is full', () => {
+    expect(formatPercent(996_000, 1_000_000)).toBe('99%')
+    expect(formatPercent(999_999, 1_000_000)).toBe('99%')
+    expect(formatPercent(1_000_000, 1_000_000)).toBe('100%')
   })
 })
 
@@ -49,10 +61,25 @@ describe('formatShare', () => {
     // 46k and 44k of 1M are 4.6% and 4.4%: together the 9% of 90k.
     expect(formatShare(46_000, 1_000_000)).toBe('4.6%')
     expect(formatShare(44_000, 1_000_000)).toBe('4.4%')
-    expect(formatShare(20_000, 1_000_000)).toBe('2%')
-    expect(formatShare(500, 1_000_000)).toBe('<0.1%')
-    expect(formatShare(877_000, 1_000_000)).toBe('87%')
+    // A whole number keeps its decimal, so the share column lines up.
+    expect(formatShare(20_000, 1_000_000)).toBe('2.0%')
+    expect(formatShare(10_400, 1_000_000)).toBe('1.0%')
+    expect(formatShare(400, 1_000_000)).toBe('<0.1%')
+    expect(formatShare(500, 1_000_000)).toBe('0.1%')
     expect(formatShare(0, 1_000_000)).toBe('0%')
     expect(formatShare(10, 0)).toBe('0%')
+  })
+
+  test('rounds to the nearest, so rows add up to their group within rounding', () => {
+    expect(formatShare(877_000, 1_000_000)).toBe('88%')
+    expect(formatShare(312_000, 1_000_000)).toBe('31%')
+    expect(formatShare(18_000, 1_000_000)).toBe('1.8%')
+    expect(formatShare(18_460, 1_000_000)).toBe('1.8%')
+    expect(formatShare(18_460 + 90, 1_000_000)).toBe('1.9%')
+    // 9.96% rounds to 10.0 tenths: shown as a whole percent, not "10.0%".
+    expect(formatShare(99_600, 1_000_000)).toBe('10%')
+    // A row that is almost all of its group is not shown as all of it.
+    expect(formatShare(996_000, 1_000_000)).toBe('99%')
+    expect(formatShare(1_000_000, 1_000_000)).toBe('100%')
   })
 })

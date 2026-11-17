@@ -121,7 +121,26 @@ export const PANE = {
   },
 } as const
 
+/** The pane while it holds the keyboard: hotkeys work and the key line shows them. */
+export const FOCUSED_PANE = { ...PANE, props: { ...PANE.props, isFocused: true } } as const
+
 export const SURFACES = ['terminal', 'desktop'] as const
+
+type Drawn = { props: Record<string, unknown>; children: readonly unknown[] }
+
+/**
+ * Whether a control of the key line is drawn as not applying now: no dim
+ * label of its own, but a child Text in the theme's faint colour.
+ */
+export function isOff(button: Drawn | undefined): boolean {
+  if (button === undefined || button.props.dimColor === true) {
+    return false
+  }
+
+  return button.children.some(
+    child => typeof child === 'object' && child !== null && (child as Drawn).props?.color === 'subtle',
+  )
+}
 
 export const PROJECT_MD = '/home/user/project/CLAUDE.md'
 export const NOTES = '/home/user/project/notes.txt'
@@ -219,6 +238,158 @@ export const CHAT = [
   { role: 'assistant', content: [{ type: 'text', text: 'The folder holds one data file.' }] },
 ] as const
 
+/** The skills listing as a reminder: richBreakdown's two skills, one under its plugin's name. */
+export const SKILLS_REMINDER =
+  '<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- demo-skill: Runs the demo steps.\nTRIGGER when the user asks for a demo.\n- tools:helper: Helps with the tools.\n</system-reminder>'
+
+/** The MCP server instructions as a reminder. */
+export const MCP_REMINDER =
+  '<system-reminder>\n# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n## notes\nSearch the notes before you write one.\n</system-reminder>'
+
+/** The custom agent's entry in the agent-types listing, as AGENTS_REMINDER holds it. */
+export const REVIEWER_ENTRY = '- reviewer: Reviews a diff before it ships. (Tools: Read, Grep)'
+
+/** The agent types as a reminder: one built-in type and richBreakdown's custom agent. */
+export const AGENTS_REMINDER = `<system-reminder>\nAvailable agent types for the Agent tool:\n- general: Handles any task. (Tools: *)\n${REVIEWER_ENTRY}\n\nLaunch agents together when their work is independent.\n</system-reminder>`
+
+/** Engine reminders that no baseline category counts. */
+export const ENVIRONMENT_REMINDER =
+  '<system-reminder>\n# Environment\nYou have been invoked in the following environment:\n - Platform: test\n</system-reminder>'
+
+/**
+ * A first message as Claude Code sends it after a start or a compaction:
+ * the baseline listings and other reminders, then the prompt.
+ */
+export const OPENING = [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: SKILLS_REMINDER },
+      { type: 'text', text: MCP_REMINDER },
+      { type: 'text', text: AGENTS_REMINDER },
+      { type: 'text', text: ENVIRONMENT_REMINDER },
+      { type: 'text', text: 'List the notes.' },
+    ],
+  },
+  { role: 'assistant', content: [{ type: 'text', text: 'There are two notes.' }] },
+] as const
+
+/** The caveat Claude Code puts before a local command. */
+export const CAVEAT =
+  '<local-command-caveat>The command below was run directly by the user, not sent to you. Do not answer it.</local-command-caveat>'
+
+/** `/context`'s report as the API form gives it: plain Markdown, no tag. */
+export const CONTEXT_REPORT =
+  '## Context Usage\n\n**Tokens:** 12k / 200k (6%)\n\n| Category | Tokens |\n|----------|--------|\n| Messages | 3k |\n\n'
+
+/**
+ * Local commands as the API form holds them; one user message gathers what
+ * was run between two prompts. A tagged output, then a typed prompt; an
+ * untagged report right after its command's line; a shell line and its
+ * output; a prompt command, whose line opens with `<command-message>` and
+ * whose next block is the prompt it expands to.
+ */
+export const LOCAL_COMMAND = [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: CAVEAT },
+      { type: 'text', text: '<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>' },
+      { type: 'text', text: '<local-command-stdout>Compacted</local-command-stdout>' },
+      { type: 'text', text: 'Read the notes.' },
+    ],
+  },
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: '<command-name>/context</command-name>\n            <command-message>context</command-message>\n            <command-args></command-args>\n' },
+      { type: 'text', text: CONTEXT_REPORT },
+      { type: 'text', text: '<bash-input>ls</bash-input>\n' },
+      { type: 'text', text: '<bash-stdout>a.txt\nb.txt</bash-stdout><bash-stderr></bash-stderr>' },
+    ],
+  },
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: '<command-message>review is running…</command-message>\n<command-name>/review</command-name>\n<command-args>src</command-args>' },
+      { type: 'text', text: 'Review the files in src.' },
+    ],
+  },
+] as const
+
+/**
+ * The tool results of the session the design critique looked at: twelve
+ * results, 114.4k characters in all, largest first. Rows 10 to 12 have no
+ * hotkey.
+ */
+const REAL_RESULTS = [31_000, 22_000, 14_500, 11_200, 9400, 7300, 6100, 4800, 3600, 2700, 1200, 600]
+
+/**
+ * The session the design critique looked at, in invented content of the
+ * same sizes: 283k of a 1M window used. Baseline 48k (System 24k, MCP 5.5k,
+ * Global instructions 7.9k, Auto-memory 976, Skills 9.1k); conversation 235k
+ * (Compaction summary 7.8k, Tool results 114k, System notifications 65k, Your
+ * prompts 2.9k, Claude output 45k); reserve 33k, so 684k free. One character
+ * is one token, so the split by characters gives these sizes exactly.
+ */
+export function realSession(): { usage: SessionUsage; messages: unknown[] } {
+  const messagesTokens = 235_100
+  const used = 47_776 + messagesTokens
+  const uses = REAL_RESULTS.map((_, k) =>
+    k % 3 === 2
+      ? { type: 'tool_use', id: `real${k}`, name: 'Bash', input: { command: `npm run step-${k + 1}` } }
+      : { type: 'tool_use', id: `real${k}`, name: 'Read', input: { file_path: `/home/user/project/src/module-${k + 1}.ts` } },
+  )
+  // Tool calls are Claude's output: its text gets what they leave of 45k.
+  const callChars = uses.reduce((sum, use) => sum + use.name.length + JSON.stringify(use.input).length, 0)
+  const summary = 'This session is being continued from a previous conversation. '
+  const messages: unknown[] = [
+    { role: 'user', content: [{ type: 'text', text: summary.padEnd(7800, 's') }] },
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>'.padEnd(65_000, 'i') }] },
+    { role: 'user', content: [{ type: 'text', text: 'p'.repeat(2900) }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'c'.repeat(45_000 - callChars) }] },
+  ]
+  REAL_RESULTS.forEach((chars, k) => {
+    messages.push({ role: 'assistant', content: [uses[k]] })
+    messages.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: `real${k}`, content: 'r'.repeat(chars) }] })
+  })
+  const base = breakdown()
+
+  return {
+    messages,
+    usage: {
+      startedAt: 0,
+      context: {
+        tokens: used,
+        percent: Math.floor((used / 1_000_000) * 100),
+        window: 1_000_000,
+        breakdown: {
+          ...base,
+          categories: [
+            category('System prompt', 4300, 'used'),
+            category('System tools', 20_000, 'used'),
+            category('MCP tools', 5500, 'used'),
+            category('Memory files', 8876, 'used'),
+            category('Skills', 9100, 'used'),
+            category('Messages', messagesTokens, 'used'),
+            category('Autocompact buffer', 33_000, 'buffer'),
+            category('Free space', 1_000_000 - used - 33_000, 'free'),
+          ],
+          totalTokens: used,
+          maxTokens: 1_000_000,
+          rawMaxTokens: 1_000_000,
+          percentage: Math.floor((used / 1_000_000) * 100),
+          memoryFiles: [
+            { path: '/home/user/.claude/CLAUDE.md', type: 'User', tokens: 7900 },
+            { path: '/home/user/.claude/memory/MEMORY.md', type: 'AutoMem', tokens: 976 },
+          ],
+        },
+      },
+      rateLimits: [],
+    },
+  }
+}
+
 /** A conversation of `n` Bash results, the k-th `(n + 1 - k) * 100` characters long. */
 export function manyResults(n: number): unknown[] {
   const out: unknown[] = [{ role: 'user', content: [{ type: 'text', text: 'Run them all.' }] }]
@@ -239,6 +410,8 @@ export type World = {
   /** How many of the next usage calls with a breakdown fail. */
   usageFailures: number
   opened: string[]
+  /** The panes open now, as `$.ui.panes()` lists them. */
+  open: Set<string>
   /** The `focus` of each open, in order. */
   focused: boolean[]
   closed: string[]
@@ -247,6 +420,9 @@ export type World = {
   reads: string[]
   copied: string[]
   filled: string[]
+  /** The Claude Code theme `$.config.list` reports; null for no theme row. */
+  theme: string | null
+  configLists: number
   clock: ReturnType<typeof mock.clock>
 }
 
@@ -261,14 +437,39 @@ export function world(on: On): World {
     usageCalls: 0,
     usageFailures: 0,
     opened: [],
+    open: new Set(),
     focused: [],
     closed: [],
     files: {},
     reads: [],
     copied: [],
     filled: [],
+    theme: 'dark',
+    configLists: 0,
     clock: mock.clock(on, { now: 1000 }),
   }
+  on('config.list', () => {
+    state.configLists += 1
+    const rows =
+      state.theme === null
+        ? []
+        : [
+            {
+              key: 'theme',
+              label: 'Theme',
+              kind: 'choice' as const,
+              value: state.theme,
+              provider: { plugin: 'engine', tier: 'core' as const },
+              isLocked: false,
+            },
+          ]
+
+    return { value: rows }
+  })
+  on('config.set', (_, e) => ({ value: e.value }))
+  // Every plugin's elements: a hook naming none hears only its own.
+  on('ui.focus', { plugin: '*' }, () => ({}))
+  on('prompt.submit', (_, e) => ({ text: e.text }))
   on('session.usage', (_, e) => {
     state.usageCalls += 1
     if (e?.breakdown !== undefined && state.usageFailures > 0) {
@@ -288,15 +489,20 @@ export function world(on: On): World {
   on('command.register', () => ({ value: { command: 'ctx' } }))
   on('ui.open', (_, e) => {
     state.opened.push(e.id)
+    state.open.add(e.id)
     state.focused.push(e.focus === true)
 
     return { value: { isPlaced: true } }
   })
   on('ui.close', (_, e) => {
     state.closed.push(e.id)
+    state.open.delete(e.id)
 
     return { value: undefined }
   })
+  on('ui.panes', () => ({
+    value: [...state.open].map(id => ({ id, title: 'Context', isShown: true, isFocused: false, isPlaced: true })),
+  }))
   on('fs.read', (_, e) => {
     state.reads.push(e.path)
     const text = state.files[e.path]

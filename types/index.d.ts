@@ -207,16 +207,6 @@ export type ContextBreakdownFocus = {
   hold: number
 }
 
-/**
- * The element of the pane that holds its focus ring, as the last `ui.focus`
- * event named it, so the pane can draw the row under the ring in one
- * highlight. `load` as in ContextBreakdownFocus.
- */
-export type ContextBreakdownRing = {
-  key: string
-  load: string
-}
-
 declare module 'claude-code' {
   interface PluginState {
     'context-breakdown': {
@@ -225,7 +215,15 @@ declare module 'claude-code' {
       /** The Claude Code theme's name (the `/config` row `theme`), or null before it is read. */
       theme: Shaped<string | null>
       focus: Shaped<ContextBreakdownFocus | null>
-      ring: Shaped<ContextBreakdownRing | null>
+      /**
+       * The key of the pane's element that holds its focus ring, as the last
+       * `ui.focus` event named it, so the pane can draw the row under the ring
+       * in one highlight. Empty: the ring is on one of the engine's own stops.
+       * Null: no event yet for the tree that is drawn. Not tied to one load of
+       * the code: the engine keeps the ring through a reload, and the keys
+       * stay the same.
+       */
+      ring: Shaped<string | null>
     }
   }
 }

@@ -599,7 +599,8 @@ test('the row under the ring is one highlight: its figures at full strength, its
       .map(part => ({ text: textOf(part), props: part.props, hover: (part as { hover?: Record<string, unknown> }).hover }))
   const runs = async (key: string) => partsOf(await ui.find({ key }))
   const color = DARK.segments['auto-memory']
-  const figures = (parts: Part[]) => parts.find(part => /\d/.test(part.text))!
+  // The last part: a pane without the keyboard draws a dim "N: " mark first.
+  const figures = (parts: Part[]) => parts[parts.length - 1]!
   const partCell = (parts: Part[]) => parts.find(part => part.text === '▏')!
   const ring = (element: string) =>
     $.ui.focus({ component: 'Pane', requestId: 'context-breakdown', plugin: 'context-breakdown', element, origin: { kind: 'person' } })
@@ -637,6 +638,10 @@ test('the row under the ring is one highlight: its figures at full strength, its
   await ring('row-system')
   await $.ui.focus({ component: 'Pane', requestId: 'some-pane', plugin: 'other-mod', element: 'row-auto-memory', origin: { kind: 'person' } })
   expect(figures(await runs('row-system')).props.dimColor).toBe(false)
+  // The ring on the pane's close mark, a stop of the engine's with no element: no row is lit.
+  await $.ui.focus({ component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'person' } })
+  expect(figures(await runs('row-system')).props.dimColor).toBe(true)
+  await ring('row-system')
 
   // Level 2: a new tree lights the row that asks for the ring, and its dim path with it.
   await ui.press({ key: 'row-tool-results' })
@@ -648,12 +653,27 @@ test('the row under the ring is one highlight: its figures at full strength, its
   await ui.press({ key: 'back' })
   await ui.unmount()
 
-  // A pane without the keyboard shows no ring: every row is at rest.
+  // A pane without the keyboard shows no ring: the row the ring was noted on,
+  // and the row that would ask for it, are at rest.
+  await ring('row-auto-memory')
   const idle = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 88 } })
   const idleRuns = async (key: string) => partsOf(await idle.find({ key }))
-  expect(figures(await idleRuns('row-tool-results')).props.dimColor).toBe(true)
-  expect(partCell(await idleRuns('row-auto-memory')).props.color).toBe(color)
+  expect(figures(await idleRuns('row-system')).props.dimColor).toBe(true)
+  const idleMemory = await idleRuns('row-auto-memory')
+  expect(figures(idleMemory).props.dimColor).toBe(true)
+  expect(partCell(idleMemory).props.color).toBe(color)
+  expect(partCell(idleMemory).props.backgroundColor).toBeUndefined()
   await idle.unmount()
+
+  // A desktop draws its own button and swaps nothing: the lit row's figures
+  // are at full strength, but its part-filled cell stays as at rest.
+  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  const desktopMemory = partsOf(await desktop.find({ key: 'row-auto-memory' }))
+  expect(figures(desktopMemory).props.dimColor).toBe(false)
+  expect(partCell(desktopMemory).props.color).toBe(color)
+  expect(partCell(desktopMemory).props.backgroundColor).toBeUndefined()
+  expect(partCell(desktopMemory).hover).toBeUndefined()
+  await desktop.unmount()
 })
 
 test('level 2 at 24 columns: no swatch on the rows, and the facts line fits', async ($, on) => {

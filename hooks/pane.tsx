@@ -68,6 +68,12 @@ type Rows = {
   ring: string | null
   /** The key of the element that holds the ring now, or null: its row is drawn `lit`. */
   lit: string | null
+  /**
+   * Whether the surface inverts a Button under the ring or the pointer. The
+   * terminal does; a desktop draws its own button, so a cell drawn the other
+   * way round for the swap would stay that way there.
+   */
+  swaps: boolean
 }
 
 /**
@@ -145,7 +151,7 @@ function barPart(rows: Rows, color: string, bar: LengthBarParts, look?: RowLook)
   // A cell that is not all one colour: the glyph in the segment's colour at
   // rest; swapped under the ring; swapped by the hover group under the pointer.
   const mixed = (text: string) =>
-    look?.lit === true ? (
+    look?.lit === true && rows.swaps ? (
       <Text mono backgroundColor={color}>
         {text}
       </Text>
@@ -153,7 +159,7 @@ function barPart(rows: Rows, color: string, bar: LengthBarParts, look?: RowLook)
       <Text
         mono
         color={color}
-        {...(look === undefined ? {} : { hover: { scope: look.scope, color: 'text', backgroundColor: color } })}
+        {...(look === undefined || !rows.swaps ? {} : { hover: { scope: look.scope, color: 'text', backgroundColor: color } })}
       >
         {text}
       </Text>
@@ -336,6 +342,7 @@ function segmentsBody(
   palette: Palette,
   ring: string | null,
   lit: string | null,
+  swaps: boolean,
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
@@ -353,7 +360,7 @@ function segmentsBody(
     ...deferred.map(category => withoutDeferred(category.name)),
   ]
   const table = tableLayout(columns, Math.max(...names.map(cellWidth)))
-  const rows: Rows = { el, table, isFocused, palette, ring, lit }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
   const used = usedTokens(snapshot)
   const stats = { used, largest: largestOf(shown) }
   const mark = snapshot.isEstimate ? '~' : ''
@@ -459,6 +466,7 @@ function listBody(
   palette: Palette,
   ring: string | null,
   lit: string | null,
+  swaps: boolean,
 ) {
   const { Box, Button, Text } = el
   const def = segmentDef(list.segment)
@@ -468,7 +476,7 @@ function listBody(
   const widest = Math.max(1, ...list.rows.map(row => cellWidth(row.detail === '' ? row.title : `${row.title}  ${row.detail}`)))
   // No swatch: every row has the segment's colour, which the breadcrumb shows once.
   const table = tableLayout(columns, widest, false)
-  const rows: Rows = { el, table, isFocused, palette, ring, lit }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
@@ -827,12 +835,12 @@ export function paneTree(
   let body: RenderElement
   let hasRows = false
   if (view.level === 2) {
-    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit)
+    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
     hasRows = view.list.rows.some(row => row.isOpenable)
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit)
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
     hasRows = true
     if (view.note !== undefined) {
       body = (

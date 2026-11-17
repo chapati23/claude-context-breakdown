@@ -66,7 +66,9 @@ const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, n
 const focusAtom = atom({ plugin: 'context-breakdown', key: 'focus' } as const, null, {
   shape: 'focus-2',
 })
-// The pane's element under the focus ring (`ContextBreakdownRing`).
+/** The key noted while the pane's ring is on no element of ours: no row is lit. */
+const OFF_ROWS = ''
+// The key of the pane's element under the focus ring (see `ring` in types).
 const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, null, {
   shape: 'ring-1',
 })
@@ -454,12 +456,13 @@ export const register: Register = on => {
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
     const result = await next(e)
-    // Our pane's ring moved onto `element`: its row is drawn in one highlight.
-    const element = e.plugin === PLUGIN ? e.element : undefined
-    if (result.deny === undefined && element !== undefined) {
-      await quietly(
-        update($, ringAtom, value => (value?.load === LOAD && value.key === element ? value : { key: element, load: LOAD })),
-      )
+    // Our pane's ring moved: onto `element`, whose row is drawn in one
+    // highlight, or onto one of the engine's stops (the close mark), which
+    // has no element. That is noted as no row, or the row the ring left
+    // would stay drawn as if it held it.
+    if (result.deny === undefined && e.requestId === PANE_ID) {
+      const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
+      await quietly(update($, ringAtom, () => key))
     }
     if (mayHoldFocus) {
       mayHoldFocus = false
@@ -698,8 +701,7 @@ export const register: Register = on => {
     }
     shownOffset = e.props.scroll?.offset ?? 0
     const view = await read($, viewAtom)
-    const noted = await read($, ringAtom)
-    const ringNow = noted !== null && noted.load === LOAD ? noted.key : null
+    const ringNow = await read($, ringAtom)
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
       messages: () => $.session.messages({ as: 'api' }),

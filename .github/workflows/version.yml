@@ -1,0 +1,49 @@
+name: version
+
+# Enforces the release rule in AGENTS.md: a change to a shipped file must come
+# with a higher version in .claude-plugin/plugin.json. Without it, an installed
+# copy of the mod does not update.
+on:
+  pull_request:
+    # "edited" covers a pull request whose base branch changes.
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+# Every job states its own permissions, so a job added later starts with none.
+permissions: {}
+
+concurrency:
+  group: version-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: version rises with shipped changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The check compares two commits, so it needs the history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A pull request is checked as GitHub's test merge into its base, so the
+      # comparison is with the base as it is now. This catches two pull
+      # requests that picked the same number, once the second one runs again.
+      - name: Check a pull request against its base branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/check-version.sh "origin/$BASE_REF"
+
+      # After a merge, the same check runs on main against the commit that
+      # main had before. It reports a release that slipped through.
+      - name: Check a push to main against the commit before it
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: scripts/check-version.sh "$BEFORE"

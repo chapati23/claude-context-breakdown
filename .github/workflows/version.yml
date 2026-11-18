@@ -5,7 +5,7 @@ name: version
 # copy of the mod does not update.
 on:
   pull_request:
-    # "edited" covers a pull request whose base branch changes.
+    # "edited" covers a pull request that moves to another base branch.
     types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
@@ -41,9 +41,15 @@ jobs:
         run: scripts/check-version.sh "origin/$BASE_REF"
 
       # After a merge, the same check runs on main against the commit that
-      # main had before. It reports a release that slipped through.
+      # main had before. It reports a release that slipped through. After a
+      # force push, that commit is not in the clone: compare with the parent.
       - name: Check a push to main against the commit before it
         if: github.event_name == 'push'
         env:
           BEFORE: ${{ github.event.before }}
-        run: scripts/check-version.sh "$BEFORE"
+        run: |
+          if ! git cat-file -e "$BEFORE^{commit}" 2> /dev/null; then
+            echo "::warning::The commit before this push is not available (a force push or a new branch). Comparing with the parent commit."
+            BEFORE=HEAD^
+          fi
+          scripts/check-version.sh "$BEFORE"

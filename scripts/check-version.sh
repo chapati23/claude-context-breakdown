@@ -23,16 +23,19 @@ fail() {
 base=$1
 
 command -v jq > /dev/null || fail "jq is not installed"
-cd "$(git rev-parse --show-toplevel)" || fail "not in a git repository"
+top=$(git rev-parse --show-toplevel 2> /dev/null) || fail "not in a git repository"
+cd "$top"
 git rev-parse --verify --quiet "$base^{commit}" > /dev/null || fail "the base '$base' is not a commit; fetch it first"
 
 # The version that a commit states, as three numbers. Fails if the manifest is
-# missing, has no version, or has one that is not major.minor.patch.
+# missing, has no version, or has one that is not major.minor.patch. Each
+# number has at most nine digits, so the comparison below cannot overflow.
+NUMBER='(0|[1-9][0-9]{0,8})'
 version_at() {
   local commit=$1 version
   version=$(git show "$commit:$MANIFEST" 2> /dev/null | jq -er '.version' 2> /dev/null) ||
     fail "cannot read a version from $MANIFEST at $commit"
-  [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+  [[ $version =~ ^$NUMBER\.$NUMBER\.$NUMBER$ ]] ||
     fail "the version '$version' at $commit is not major.minor.patch" 1
   echo "$version"
 }

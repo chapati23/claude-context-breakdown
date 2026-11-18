@@ -645,6 +645,38 @@ test('an arrow at the first or the last row scrolls the window: the ring cannot 
   await ui.unmount()
 })
 
+test('after a reload the ring state still names a row: an arrow steps from that row, not from the first', async ($, on) => {
+  // A reload empties the mod's record of the ring, and the state keeps the
+  // row. Here the second session start's write of no ring lands as that row,
+  // before the mod has moved the ring at all.
+  let kept: string | null = null
+  on('state.set', async (_, e, next) => {
+    const change = e as unknown as { key?: string; value?: { value?: unknown } }
+    if (kept !== null && change.key === 'ring' && change.value?.value === null) {
+      return next({ ...e, value: { ...change.value, value: kept } } as typeof e)
+    }
+
+    return next(e)
+  })
+  const { seen } = await scrollWorld($, on)
+  let ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  const rows = await rowsOf(ui)
+  await ui.unmount()
+  kept = rows[4]!
+  await $.session.start(START)
+  ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  kept = null
+  expect(await litRow(ui)).toBe(rows[4])
+
+  // Up: the mod answers the scroll, so the window stays, and the ring goes to row 4.
+  seen.length = 0
+  await personScroll($, -1)
+  await settle()
+  expect(seen).toEqual([])
+  expect(await litRow(ui)).toBe(rows[3])
+  await ui.unmount()
+})
+
 test('after a click on Down or Up, j and k step on from the row the ring was on', async ($, on) => {
   await scrollWorld($, on)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })

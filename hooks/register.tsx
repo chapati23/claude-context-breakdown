@@ -36,18 +36,14 @@ import { paletteFor } from './palette'
 import { createRefresher } from './refresh'
 import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from './ring'
 import {
-  END_SCROLL,
   STEP_SCROLL,
   TOP_SCROLL,
-  atNewTop,
   createLane,
-  createPaneScroll,
   createSteps,
   crossDelta,
   crossScroll,
   heldOffset,
   learnLink,
-  needsRetry,
   shareAcross,
   stepAnswer,
   stepOf,
@@ -56,6 +52,7 @@ import { matchSegment } from './segments'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
 import { bandModelFor } from './view'
 import type { LayoutPart, SegmentPart } from './layout'
+import type { Link } from './scroll'
 
 // The engine reads which state a hook touches from this file, so the atoms
 // are written here. A tag declines a value an earlier version stored (it
@@ -100,12 +97,15 @@ const steps = createSteps()
 /** j and k presses, one at a time: one running, one waiting. */
 const lane = createLane(2)
 /**
- * Whether the `ui.scroll` hook sees our own scrolls, and the window's offset
- * the render hook last read (scroll.ts, `PaneScroll`). Hints for this load
- * only: a reload resets them. A new level or item keeps the link, so a link
- * proven to work stays proven.
+ * Whether the `ui.scroll` hook sees our own scrolls (scroll.ts). A hint for
+ * this load only: a reload that resets it asks again.
  */
-const win = createPaneScroll()
+let link: Link = 'unknown'
+/**
+ * The pane's window offset the render hook last read: whether a scroll of
+ * ours had to move the window, for `learnLink`. A hint only, never drawn from.
+ */
+let shownOffset = 0
 /**
  * `/ctx` only gave an open pane the keyboard: its trees take no ring until
  * the next move, so the window stays where the person left it (`paneTree`).
@@ -126,7 +126,17 @@ const ring = createRingMoves()
 let paneFocused = false
 let shownView: ContextBreakdownView = LEVEL_1
 let shownSnapshot: ContextBreakdownSnapshot | null = null
-/** The surface the pane was last drawn on. */
+/**
+ * The ring key as the render hook last read it on the terminal, and as each
+ * write of it set it since. A reload empties the mod's record of the ring,
+ * but the state keeps the key: an arrow steps from this. A hint only.
+ */
+let shownNoted: string | null = null
+/**
+ * The surface the pane was last drawn on, for the hooks whose event names no
+ * surface (`ui.focus`, `ui.scroll`, `command.run`). A hook whose event names
+ * one reads it from the event.
+ */
 let shownSurface: RenderSurface = 'terminal'
 
 /**
@@ -143,9 +153,14 @@ function writeView($: Engine, change: (view: ContextBreakdownView) => ContextBre
   })
 }
 
-/** Writes the ring key. */
+/** Writes the ring key, and notes it for the arrow's `ui.scroll` hook. */
 function writeRing($: Engine, change: (key: string | null) => string | null): Promise<string | null> {
-  return update($, ringAtom, change)
+  return update($, ringAtom, key => {
+    const next = change(key)
+    shownNoted = next
+
+    return next
+  })
 }
 
 /**
@@ -256,7 +271,6 @@ async function moveRing($: Engine, step: number): Promise<void> {
       key = move.page > 0 ? keys[0] : keys[keys.length - 1]
       if (move.page > 0) {
         // The engine keeps the window across a new tree: the next page from its top.
-        atNewTop(win)
         await quietly($.ui.scroll(TOP_SCROLL))
       }
     } else {
@@ -289,20 +303,25 @@ async function moveRing($: Engine, step: number): Promise<void> {
 
 /**
  * A new page, level or item from `work`, at its top: the ring where the new
- * tree puts it, and the window at the top.
+ * tree puts it, and the window at the top. `surface` is where the pressed
+ * tree was drawn. Off the terminal the ring moves only to a new level: on the
+ * same level it stays on the control the person pressed (Next page, say).
  */
-function thenTopOf($: Engine, work: () => Promise<unknown>): Promise<unknown> {
+function thenTopOf($: Engine, surface: RenderSurface, work: () => Promise<unknown>): Promise<unknown> {
   return quietly(
     (async () => {
       keepsPlace = false
       // The new tree's ring is where `ringKey` puts it until an event says otherwise.
       ring.forget()
       await quietly(writeRing($, () => null))
+      const before = (await read($, viewAtom)).level
       await work()
-      // The link stays as it is: a step at the top of the new tree proves nothing.
-      atNewTop(win)
       await quietly($.ui.scroll(TOP_SCROLL))
-      const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true, shownSurface)
+      const view = await read($, viewAtom)
+      if (surface !== 'terminal' && view.level === before) {
+        return
+      }
+      const key = ringKey(view, await read($, snapshotAtom), true, surface)
       if (key !== null) {
         await $.ui.focus({ requestId: PANE_ID, key })
       }
@@ -326,11 +345,10 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
   const step = stepOf(e.element)
   const ran = await lane.run(async () => {
     const token = steps.push(step)
-    let retry: typeof token | null = null
     try {
       const result = await next(e)
       // Without the hook a step to `start` would jump to the top: no scroll.
-      if (win.link === 'absent') {
+      if (link === 'absent') {
         return result
       }
       let answer: { deny?: string } | null = null
@@ -339,21 +357,9 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
       } catch {
         // No pane to scroll, or no surface: the press does nothing.
       }
-      win.link = learnLink(win.link, token, answer, win.shown)
-      // The engine believed the window already stood at `start` and raised
-      // no event: ask once more, for `end`, which it must move to.
-      if (needsRetry(token, answer, win.link)) {
-        retry = steps.push(step)
-        let again: { deny?: string } | null = null
-        try {
-          again = await $.ui.scroll(END_SCROLL)
-        } catch {
-          again = null
-        }
-        win.link = learnLink(win.link, retry, again, win.shown)
-      }
+      link = learnLink(link, token, answer, shownOffset)
       // Only the hook sets `cross`, from the window's own numbers.
-      const cross = retry?.seen === true ? retry.cross : token.cross
+      const { cross } = token
       if (cross !== null) {
         await quietly(
           (async () => {
@@ -371,9 +377,6 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
               readFile: path => $.fs.read(path),
             }
             await contentPage(nav, delta, delta < 0)
-            if (delta > 0) {
-              atNewTop(win)
-            }
             // The next page from its top; the previous one from its bottom,
             // so k keeps going up line by line. The ring goes where the
             // window goes (the first control, or the one under the text),
@@ -390,9 +393,6 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
       return result
     } finally {
       steps.drop(token)
-      if (retry !== null) {
-        steps.drop(retry)
-      }
     }
   })
 
@@ -427,7 +427,7 @@ async function formatPress($: Engine, e: UiPressArgument, next: PressNext): Prom
     readFile: path => $.fs.read(path),
   }
   const ran = await lane.run(async () => {
-    const measure = win.link === 'absent' ? null : steps.push(0, 'measure')
+    const measure = link === 'absent' ? null : steps.push(0, 'measure')
     try {
       const result = await next(e)
       await quietly(
@@ -440,7 +440,7 @@ async function formatPress($: Engine, e: UiPressArgument, next: PressNext): Prom
             } catch {
               answer = null
             }
-            win.link = learnLink(win.link, measure, answer, win.shown)
+            link = learnLink(link, measure, answer, shownOffset)
             share = measure.seen ? measure.share : null
             steps.drop(measure)
           }
@@ -500,6 +500,7 @@ export const register: Register = on => {
     mayHoldFocus = false
     chipHold.stop()
     void quietly(update($, focusAtom, () => null))
+    ring.forget()
     void quietly(writeRing($, () => null))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
@@ -529,8 +530,8 @@ export const register: Register = on => {
   // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items.
   // `/ctx` alone on an open pane only gives it the keyboard: it is the one
   // key path to a pane that lost it (ctrl+x tab reaches the bar only). Its
-  // trees then name no ring of their own (`keepsPlace`), and the hook puts
-  // the window back where it stood (below).
+  // trees then name no ring of their own (`keepsPlace`), and on the terminal
+  // the hook puts the window back where it stood (below).
   on('command.run', { command: 'ctx' }, async ($, e) => {
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
@@ -566,9 +567,12 @@ export const register: Register = on => {
     // A pane that takes the keyboard gets its ring back on a control, and the
     // engine brings that control into view (seen live: the window jumped to
     // the controls above the text). So read where the window stands first
-    // (`measure`), and put it back after the open (`place`), as f does.
+    // (`measure`), and put it back after the open (`place`), as f does. Only
+    // on the terminal: elsewhere the engine clamps this mod's own offsets to
+    // a stale height, so `/ctx` there only gives the pane the keyboard. The
+    // command names no surface: the pane's last drawing says which.
     const held: { share: number | null } = { share: null }
-    if (keepsPlace && win.link !== 'absent') {
+    if (keepsPlace && shownSurface === 'terminal' && link !== 'absent') {
       await lane.run(async () => {
         const measure = steps.push(0, 'measure')
         try {
@@ -578,7 +582,7 @@ export const register: Register = on => {
           } catch {
             answer = null
           }
-          win.link = learnLink(win.link, measure, answer, win.shown)
+          link = learnLink(link, measure, answer, shownOffset)
           held.share = measure.seen ? measure.share : null
         } finally {
           steps.drop(measure)
@@ -592,7 +596,7 @@ export const register: Register = on => {
       if (share !== null) {
         // The ring first, and wait for it: a window put back before the
         // engine has brought the ring into view is moved again.
-        const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true, shownSurface)
+        const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
         if (key !== null) {
           await quietly($.ui.focus({ requestId: PANE_ID, key }))
         }
@@ -619,7 +623,7 @@ export const register: Register = on => {
             } catch {
               answer = null
             }
-            win.link = learnLink(win.link, token, answer, win.shown)
+            link = learnLink(link, token, answer, shownOffset)
           } finally {
             steps.drop(token)
           }
@@ -898,7 +902,7 @@ export const register: Register = on => {
     const step = shownSurface === 'terminal' ? arrowStep(e, { isFocused: paneFocused, level: shownView.level }) : null
     const moves =
       step !== null &&
-      ringTarget(rowKeys(shownView, shownSnapshot), stepStart(shownView, shownSnapshot, null), step, pagesOf(shownView)) !== null
+      ringTarget(rowKeys(shownView, shownSnapshot), stepStart(shownView, shownSnapshot, shownNoted), step, pagesOf(shownView)) !== null
     if (step === null || !moves) {
       return next(e)
     }
@@ -907,8 +911,9 @@ export const register: Register = on => {
     return {}
   }).catch(($, e, next) => next(e))
 
-  // The parts the band drew last, for a click the desktop's bar posts.
-  let bandParts: readonly LayoutPart[] = []
+  // The parts the band drew last on each surface, for a click the desktop's
+  // bar posts: a terminal of the same session draws other parts.
+  const bandParts = new Map<RenderSurface, readonly LayoutPart[]>()
   // Set when the desktop's bar Client fails: the band draws the picture row
   // from then on, until the hooks module loads again.
   let barClientFailed = false
@@ -948,7 +953,7 @@ export const register: Register = on => {
 
   // A click on the desktop's bar (barclient.tsx): the segment it names, or the total.
   on('ui.message', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const part = e.element === BAR_CLIENT ? partOfPost(bandParts, e.data) : undefined
+    const part = e.element === BAR_CLIENT ? partOfPost(bandParts.get(e.surface) ?? [], e.data) : undefined
     if (part === undefined) {
       return next(e)
     }
@@ -994,7 +999,7 @@ export const register: Register = on => {
     const acts = bandActs($)
     const openPane: OpenPane = part => openFromBand(nav, acts, part)
     // The desktop's bar posts which part a click landed on.
-    bandParts = model.parts
+    bandParts.set(e.surface, model.parts)
 
     return bandTree($.ui.resolve(e), model, palette, openPane, focused, pictureFigures(snapshot), e.surface, barClientFailed)
   })
@@ -1006,7 +1011,7 @@ export const register: Register = on => {
     if (e.props.placement === 'widget') {
       return glanceTree($.ui.resolve(e), snapshot, e.props.bodyColumns, palette, e.surface)
     }
-    win.shown = e.props.scroll?.offset ?? 0
+    shownOffset = e.props.scroll?.offset ?? 0
     shownSurface = e.surface
     const view = await read($, viewAtom)
     paneFocused = e.props.isFocused === true
@@ -1016,6 +1021,9 @@ export const register: Register = on => {
     // the terminal draws a lit row; elsewhere the key is not read, so its
     // writes draw nothing.
     const ringNow = e.surface === 'terminal' ? await read($, ringAtom) : null
+    if (e.surface === 'terminal') {
+      shownNoted = ringNow
+    }
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
       messages: () => $.session.messages({ as: 'api' }),
@@ -1028,9 +1036,10 @@ export const register: Register = on => {
     // level change starts at the top. A refresh keeps the place; f is the
     // `ui.press` hook's. Then the ring goes onto the element the new tree
     // focuses (the row b came back to, the first row, the first control):
-    // `autoFocus` alone left some trees with no ring, after Enter. The call
-    // is refused while the pane does not hold the keys; that is fine.
-    const thenTop = (work: () => Promise<unknown>) => thenTopOf($, work)
+    // `autoFocus` alone left some trees with no ring, after Enter. Off the
+    // terminal only a new level moves the ring (`thenTopOf`). The call is
+    // refused while the pane does not hold the keys; that is fine.
+    const thenTop = (work: () => Promise<unknown>) => thenTopOf($, e.surface, work)
 
     const tree = paneTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, {
       close: () =>

@@ -231,6 +231,25 @@ test('a click posted from the band opens the pane; the total opens level 1', asy
   await band.unmount()
 })
 
+test('a desktop click opens what the desktop bar drew, after the terminal drew its own bar', async ($, on) => {
+  const w = await measured($, on)
+  const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const props = (await clientOf(band)).props
+  const prompts = targetOfColor(props.runs, DARK.segments.prompts)
+  // A terminal of the same session draws its bar narrower, after the
+  // desktop: there the prompts have no part of their own.
+  const terminal = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: 50 } })
+  expect(await terminal.find({ key: 'seg-prompts' })).toBeUndefined()
+
+  await band.post(postOf(props, prompts), { in: CLIENT })
+  expect(w.opened).toEqual(['context-breakdown'])
+  const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
+  expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('Your prompts')
+  await pane.unmount()
+  await terminal.unmount()
+  await band.unmount()
+})
+
 test('a click on a merged cell opens level 1, not one member’s items', async ($, on) => {
   const w = await measured($, on)
   const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
@@ -329,11 +348,10 @@ test('a click posted before a relayout opens the segment it was on, never the pa
   expect(after.parts[String(claude)]?.id).not.toBe('claude-output')
 
   await band.post(old, { in: CLIENT })
-  if (w.opened.length > 0) {
-    const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
-    expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('Claude output')
-    await pane.unmount()
-  }
+  expect(w.opened).toEqual(['context-breakdown'])
+  const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
+  expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('Claude output')
+  await pane.unmount()
   await band.unmount()
 })
 
@@ -851,4 +869,103 @@ test('a desktop control that does not apply is drawn dimmer than a live one, wit
   expect(off?.props.dimColor).toBeUndefined()
   expect((off?.children ?? []).filter(isNode).map(child => child.props?.color)).toEqual(['subtle'])
   await terminal.unmount()
+})
+
+/** Waits `ms` on the host's clock (the types of this mod declare no timers). */
+function wait(ms: number): Promise<void> {
+  const host = globalThis as unknown as { setTimeout: (fn: () => void, ms: number) => unknown }
+
+  return new Promise(resolve => void host.setTimeout(resolve, ms))
+}
+
+// The kit refuses the mod's own `$.ui.scroll`, so no measure is ever seen and
+// no place follows. A measure waits in the lane of the j and k presses,
+// though: a j press held open beneath the mod keeps it from running, and the
+// open waits behind it. Off the terminal `/ctx` asks for no measure, so the
+// open comes at once.
+test('/ctx on an open level-3 pane off the terminal pushes no measure or place token and writes no ring key', async ($, on) => {
+  const ring: unknown[] = []
+  on('state.set', async (_, e, next) => {
+    const change = e as unknown as { key?: string; value?: { value?: unknown } }
+    if (change.key === 'ring') {
+      ring.push(change.value?.value)
+    }
+
+    return next(e)
+  })
+  let letGo = () => {}
+  const held = new Promise<void>(resolve => {
+    letGo = resolve
+  })
+  on('ui.press', { plugin: '*' }, async (_, e, next) => {
+    if (e.element === 'scroll-down') {
+      await held
+    }
+
+    return next(e)
+  })
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  w.files = { [NOTES]: 'alpha\nbeta\n', [PROJECT_MD]: `${PROJECT_TEXT}\n` }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const run = (args: string) =>
+    $.command.run({ command: 'ctx', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await run('tool')
+  // The terminal draws j at level 3; the desktop draws the pane last.
+  const terminal = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  await terminal.press({ key: 'item-r:tu1' })
+  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
+  expect(await desktop.find({ type: 'Code' })).toBeDefined()
+  ring.length = 0
+
+  const press = terminal.press({ key: 'scroll-down' })
+  const ctx = run('')
+  await wait(20)
+  // The pane got the keyboard at once: no measure waited in the lane.
+  expect(w.focused).toEqual([true, true])
+  letGo()
+  await press
+  await ctx
+  expect(w.focused).toEqual([true, true])
+  expect(ring).toEqual([])
+  expect(await desktop.find({ type: 'Code' })).toBeDefined()
+  await desktop.unmount()
+  await terminal.unmount()
+})
+
+// The mobile app has no keyboard: like the terminal, it offers keys only
+// while the pane holds them. The desktop and VS Code draw a hotkey as a key
+// cap and keep the caps and the key words in both states.
+test('the mobile app draws key words and key caps only while the pane holds the keys; VS Code keeps them', async ($, on) => {
+  await measured($, on)
+  for (const surface of ['mobile', 'vscode'] as const) {
+    for (const isFocused of [false, true]) {
+      const state = `${surface}, ${isFocused ? 'with' : 'without'} the keys`
+      const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, isFocused } })
+      const caps = async () =>
+        (await ui.findAll({ type: 'Button' })).map(button => button.props.hotkey).filter(key => typeof key === 'string')
+      const words = async () => (await ui.findAll({ type: 'Text', text: /: (Move|Open)$/ })).map(text => text.text)
+      const offers = isFocused || surface === 'vscode'
+      for (const level of [1, 2, 3]) {
+        if (level === 2) {
+          await ui.press({ key: 'row-tool-results' })
+        }
+        if (level === 3) {
+          await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.startsWith('item-'))!.key! })
+        }
+        const want = level === 3 ? ['x', 'n'] : ['1', 'x']
+        if (offers) {
+          expect(await caps(), `${state}, level ${level}`).toEqual(expect.arrayContaining(want))
+        } else {
+          expect(await caps(), `${state}, level ${level}`).toEqual([])
+        }
+        expect((await words()).length, `${state}, level ${level}`).toBe(offers && level !== 3 ? 2 : 0)
+      }
+      await ui.press({ key: 'back' })
+      await ui.press({ key: 'back' })
+      await ui.unmount()
+    }
+  }
 })

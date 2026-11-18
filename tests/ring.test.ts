@@ -118,7 +118,7 @@ test('five quick steps land on the fifth row and a step back on the fourth; the 
     })
   const step = (n: number) =>
     moves.serial(async () => {
-      const move = ringTarget(keys, moves.local() ?? null, n)
+      const move = ringTarget(keys, moves.from() ?? null, n)
       if (move !== null && 'key' in move) {
         moves.set(move.key)
         void moves.focus(move.key, apply)
@@ -127,9 +127,9 @@ test('five quick steps land on the fifth row and a step back on the fourth; the 
 
   // The ring on no row: the first j goes to the first row.
   await Promise.all([step(1), step(1), step(1), step(1), step(1)])
-  expect(moves.local()).toBe('row-5')
+  expect(moves.from()).toBe('row-5')
   await step(-1)
-  expect(moves.local()).toBe('row-4')
+  expect(moves.from()).toBe('row-4')
   // One call at a time: the first target is under way, the others wait, and
   // only the newest of them is asked for next.
   expect(asked).toEqual(['row-1'])
@@ -143,7 +143,7 @@ test('five quick steps land on the fifth row and a step back on the fourth; the 
   expect(moves.busy()).toBe(false)
   // A new tree: the record is not known until the next event or move.
   moves.forget()
-  expect(moves.local()).toBeUndefined()
+  expect(moves.from()).toBeUndefined()
 })
 
 test('a refused focus call does not stop the next one', async () => {
@@ -163,7 +163,6 @@ test('on the Down or Up control a step starts from the last row; on any other co
   moves.set('row-b')
   // A click on Down or Up puts the ring on the control: the row stays the start.
   moves.set('list-down')
-  expect(moves.local()).toBe('list-down')
   expect(moves.from()).toBe('row-b')
   moves.set('list-up')
   expect(moves.from()).toBe('row-b')
@@ -193,7 +192,7 @@ test('a focus call the engine refuses puts the record back, unless a later move 
     },
   )
   expect(undone).toBe(1)
-  expect(moves.local()).toBe('row-a')
+  expect(moves.from()).toBe('row-a')
   // Accepted: nothing is put back.
   moves.set('row-b')
   await moves.focus('row-b', async () => ({}), () => void (undone += 1))
@@ -205,7 +204,7 @@ test('a focus call the engine refuses puts the record back, unless a later move 
   refuse({ deny: 'another move came first' })
   await late
   expect(undone).toBe(1)
-  expect(moves.local()).toBe('row-a')
+  expect(moves.from()).toBe('row-a')
 })
 
 test('a target that replaced a waiting one goes back to before both when it is refused', async () => {

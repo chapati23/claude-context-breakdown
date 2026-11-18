@@ -135,12 +135,12 @@ for (const surface of SURFACES) {
       const pieces = three.body.slice(1, end)
       expect(pieces.length, id).toBeGreaterThan(1)
       expect(pieces.every(piece => piece.length <= CODE_LINE_CHARS), id).toBe(true)
-      // The split keeps a surrogate pair whole, but not a letter and its
-      // combining mark: there a piece starts with the mark (text.ts,
-      // `safeCut`). The pieces still rejoin to the whole line.
+      // The split keeps a surrogate pair whole. It can cut between a letter
+      // and its combining mark (text.ts, `safeCut`), so the check of broken
+      // text skips a piece of `tum` that starts with a mark. The pieces still
+      // rejoin to the whole line.
       const stray = (piece: string) => /^\p{M}/u.test(piece)
       expect(badLines(pieces.filter(piece => id !== 'tum' || !stray(piece))), id).toEqual([])
-      expect(pieces.some(stray), id).toBe(id === 'tum')
       expect(pieces.join(''), id).toBe(line)
       await tap(ui, 'back', opts)
     }

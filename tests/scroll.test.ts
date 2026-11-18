@@ -6,16 +6,13 @@ import {
   SCROLL_UP,
   STEP_SCROLL,
   TOP_SCROLL,
-  atNewTop,
   createLane,
-  createPaneScroll,
   createSteps,
   crossDelta,
   crossScroll,
   crossingOf,
   heldOffset,
   learnLink,
-  needsRetry,
   shareAcross,
   shareOf,
   stepAnswer,
@@ -179,10 +176,6 @@ test('the link is proven by a seen token, disproven by an unseen scroll that had
   // A refused or failed call says nothing.
   expect(learnLink('unknown', unseen, { deny: 'no-surface' }, 7)).toBe('unknown')
   expect(learnLink('works', unseen, null, 7)).toBe('works')
-  // A proven link stays: on the desktop a quick press can find the engine's
-  // window behind, and `start` then moves nothing.
-  expect(learnLink('works', unseen, {}, 7)).toBe('works')
-  expect(learnLink('works', createSteps().push(0, 'measure'), {}, 7)).toBe('works')
   // The bottom of the pane, for k into the previous page.
   expect(END_SCROLL).toEqual({ in: 'context-breakdown', to: 'end' })
 })
@@ -256,70 +249,4 @@ test('a step starts where the event says the window stands, also after the windo
   expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
   expect(last.cross).toBeNull()
   expect(next.cross).toBeNull()
-})
-
-test('an unseen step the engine answered {} asks once more, unless the link is absent', () => {
-  const unseen = createSteps().push(1)
-  const seen = { ...createSteps().push(1), seen: true }
-  expect(needsRetry(unseen, {}, 'works')).toBe(true)
-  expect(needsRetry(createSteps().push(-1), {}, 'works')).toBe(true)
-  // A link not known yet: at row 0 a step cannot prove it, so the retry does.
-  expect(needsRetry(unseen, {}, 'unknown')).toBe(true)
-  // The hook saw it: it moved.
-  expect(needsRetry(seen, {}, 'works')).toBe(false)
-  expect(needsRetry(seen, {}, 'unknown')).toBe(false)
-  // Refused or failed: nothing to retry.
-  expect(needsRetry(unseen, { deny: 'the window moved meanwhile' }, 'works')).toBe(false)
-  expect(needsRetry(unseen, null, 'unknown')).toBe(false)
-  // Without the hook, `end` would jump to the bottom.
-  expect(needsRetry(unseen, {}, 'absent')).toBe(false)
-  // Only a j or k step.
-  expect(needsRetry(createSteps().push(0, 'measure'), {}, 'works')).toBe(false)
-  expect(needsRetry(createSteps().push(0, 'probe'), {}, 'unknown')).toBe(false)
-})
-
-test('the retry at the top of a new tree settles a link not known yet', () => {
-  const steps = createSteps()
-  const pane = createPaneScroll()
-  // j at row 0: the engine stands at `start`, answers {} and raises nothing.
-  const token = steps.push(1)
-  pane.link = learnLink(pane.link, token, {}, pane.shown)
-  expect(pane.link).toBe('unknown')
-  expect(needsRetry(token, {}, pane.link)).toBe(true)
-  // The retry to `end` reaches the hook: the link works, and the step moves one row.
-  const retry = steps.push(1)
-  steps.drop(token)
-  const toEnd = { offset: 30, by: 30, bodyRows: 10, contentRows: 40, origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
-  expect(stepAnswer(toEnd, 'context-breakdown', steps)).toBe(1)
-  expect(learnLink(pane.link, retry, {}, pane.shown)).toBe('works')
-  // Unseen and answered {} from the top: a tree that fits has its end there, so nothing is known.
-  expect(learnLink('unknown', createSteps().push(1), {}, 0)).toBe('unknown')
-  // Without the hook the retry jumped the window to the end: the next step,
-  // unseen and answered {} from there, finds the link absent.
-  expect(learnLink('unknown', createSteps().push(1), {}, 40)).toBe('absent')
-})
-
-test('a new tree from its top keeps a proven link, so j at its top still asks again for the end', () => {
-  const steps = createSteps()
-  const pane = createPaneScroll()
-  pane.link = 'works'
-  pane.shown = 8
-  atNewTop(pane)
-  expect(pane).toEqual({ link: 'works', shown: 0 })
-  // j at the top: the engine already stands at `start`, answers {} and raises nothing.
-  const token = steps.push(1)
-  pane.link = learnLink(pane.link, token, {}, pane.shown)
-  expect(pane.link).toBe('works')
-  expect(needsRetry(token, {}, pane.link)).toBe(true)
-})
-
-test('a quick press on a new tree before its drawing does not read the old offset and find the link absent', () => {
-  const steps = createSteps()
-  const pane = createPaneScroll()
-  // The old tree's window stood at 8; the link is not known yet.
-  pane.shown = 8
-  atNewTop(pane)
-  // j at once: the engine stands at the new top, answers {} and raises nothing.
-  pane.link = learnLink(pane.link, steps.push(1), {}, pane.shown)
-  expect(pane.link).toBe('unknown')
 })

@@ -290,10 +290,11 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
     ['person', -1],
     ['person', 1],
   ])
-  // A focus move the desktop reports (a click on a row) writes no ring key either.
+  // A focus move the desktop reports (a click on a row) writes no ring key
+  // either: the mod moved nothing.
   await ringOn($, rows[3]!)
   expect(keysWritten()).toEqual([])
-  // The tree still asks for the ring on the first row: nothing moved it.
+  // The tree still asks for the ring on the first row, its autoFocus key.
   expect(await ringOf(ui)).toBe(rows[0])
 
   // The digit of Tool results opens its items.

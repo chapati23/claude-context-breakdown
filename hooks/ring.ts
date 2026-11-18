@@ -6,7 +6,7 @@
 //
 // The ring moves through `$.ui.focus`. A held key can press faster than the
 // engine answers and raises `ui.focus`, so the mod keeps its own record of
-// the row the ring is on (`RingMoves.local`) and steps from that. The presses
+// the row the ring is on and steps from that (`RingMoves.from`). The presses
 // run one after the other and none is dropped; the focus calls run one at a
 // time, and a target asked for while one is under way replaces any that
 // waits, so the ring always ends on the last target.
@@ -115,8 +115,6 @@ export function notesRing(origin: RingOrigin, plugin: string, busy: boolean): bo
 export type RingMark = { local: string | null | undefined; row: string | null | undefined }
 
 export type RingMoves = {
-  /** The key the mod last put the ring on or saw it on; undefined when not known. */
-  local: () => string | null | undefined
   /**
    * The key a step starts from: the ring's key, or, while the ring is on the
    * Down or Up control, the last key it held before (a row, or none).
@@ -175,7 +173,6 @@ export function createRingMoves(): RingMoves {
   }
 
   return {
-    local: () => local,
     from: () => (local === LIST_DOWN || local === LIST_UP ? row : local),
     set: key => {
       local = key

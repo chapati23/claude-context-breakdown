@@ -74,6 +74,8 @@ type Rows = {
    * way round for the swap would stay that way there.
    */
   swaps: boolean
+  /** Whether a desktop row draws its hotkey as a key cap now (`showsKeys`). */
+  caps: boolean
 }
 
 /**
@@ -98,9 +100,10 @@ function lookOf(rows: Rows, key: string): RowLook {
 /**
  * The hotkey of a desktop row: its digit, "1" to "9", for the row at `index`
  * among the rows that open (null for a row that does not open). None in a
- * narrow pane (`cells` 0) or for the tenth row and later. The row gets it in
- * both focus states: the desktop draws the hotkey as a key cap inside the
- * native button, and a hotkey presses only while the pane holds the keys.
+ * narrow pane (`cells` 0) or for the tenth row and later. The desktop and VS
+ * Code give the row its hotkey in both focus states (`showsKeys`): they draw
+ * it as a key cap inside the native button, and a hotkey presses only while
+ * the pane holds the keys.
  */
 export function desktopHotkeyOf(cells: number, index: number | null): string | undefined {
   return cells > 0 && index !== null && index < 9 ? String(index + 1) : undefined
@@ -115,7 +118,7 @@ export function desktopHotkeyOf(cells: number, index: number | null): string | u
  * The Button's text is the name. The native button draws the row's hotkey
  * as a key cap before the label, in the mark's cells; a row without a
  * hotkey has blank cells there, so every name starts in the same column.
- * The row is the same with and without the keys.
+ * The row keeps its place with and without the keys.
  */
 function desktopRow(
   rows: Rows,
@@ -125,7 +128,7 @@ function desktopRow(
   const { Box, Button, Text } = rows.el
   const label = parts.name.trimEnd()
   const cells = rows.table.mark
-  const digit = desktopHotkeyOf(cells, parts.index)
+  const digit = rows.caps ? desktopHotkeyOf(cells, parts.index) : undefined
 
   return (
     <Box flexDirection="row">
@@ -414,6 +417,7 @@ function segmentsBody(
   ring: string | null,
   lit: string | null,
   swaps: boolean,
+  caps: boolean,
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
@@ -431,7 +435,7 @@ function segmentsBody(
     ...deferred.map(category => withoutDeferred(category.name)),
   ]
   const table = tableLayout(columns, Math.max(...names.map(cellWidth)))
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   const used = usedTokens(snapshot)
   const stats = { used, largest: largestOf(shown) }
   const mark = snapshot.isEstimate ? '~' : ''
@@ -538,6 +542,7 @@ function listBody(
   ring: string | null,
   lit: string | null,
   swaps: boolean,
+  caps: boolean,
 ) {
   const { Box, Button, Text } = el
   const def = segmentDef(list.segment)
@@ -547,7 +552,7 @@ function listBody(
   const widest = Math.max(1, ...list.rows.map(row => cellWidth(row.detail === '' ? row.title : `${row.title}  ${row.detail}`)))
   // No swatch: every row has the segment's colour, which the breadcrumb shows once.
   const table = tableLayout(columns, widest, false)
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
@@ -763,6 +768,16 @@ function hasSteps(isFocused: boolean, surface: RenderSurface): boolean {
   return surface === 'terminal' && isFocused
 }
 
+/**
+ * Whether the pane offers its keys now: the key words and the hotkeys. The
+ * desktop and VS Code draw a hotkey as a key cap and keep the keys in both
+ * states. The terminal, and the mobile app, which has no keyboard, offer them
+ * only while the pane holds the keys.
+ */
+function showsKeys(isFocused: boolean, surface: RenderSurface): boolean {
+  return isFocused || surface === 'desktop' || surface === 'vscode'
+}
+
 function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean, surface: RenderSurface): Control[] {
   const out: Control[] = []
   const add = (key: string, label: string, hotkey: string, isOn: boolean, onPress: Control['onPress']) =>
@@ -876,10 +891,10 @@ function keysLine(
   const { Box, Button, Text } = el
 
   // The hint gets a row of its own: beside the label-only controls it would
-  // read as one phrase ("click the pane  Close"). A desktop keeps the key
-  // words and the controls' hotkeys (drawn as key caps) in both states, so
-  // Esc changes its line by the hint's row only. A hotkey presses only while
-  // the pane holds the keys.
+  // read as one phrase ("click the pane  Close"). The desktop and VS Code
+  // keep the key words and the controls' hotkeys (drawn as key caps) in both
+  // states, so Esc changes their line by the hint's row only (`showsKeys`).
+  // A hotkey presses only while the pane holds the keys.
   return (
     <Box flexDirection="column" marginTop={1}>
       {!isFocused && (
@@ -888,7 +903,7 @@ function keysLine(
         </Text>
       )}
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {keyWords(hasRows, columns, isFocused || surface !== 'terminal', surface).map(words => (
+        {keyWords(hasRows, columns, showsKeys(isFocused, surface), surface).map(words => (
           <Text dimColor>{words}</Text>
         ))}
         {controls(view, actions, isFocused, surface).map(control => {
@@ -896,7 +911,7 @@ function keysLine(
             key: control.key,
             label: control.label,
             plain: true as const,
-            ...(isFocused || surface !== 'terminal' ? { hotkey: control.hotkey } : {}),
+            ...(showsKeys(isFocused, surface) ? { hotkey: control.hotkey } : {}),
             ...(control.key === 'close' ? { role: 'dismiss' as const } : {}),
             ...(ring === control.key ? { autoFocus: true as const } : {}),
             onPress: (press: { surface: RenderSurface }) => void control.onPress(press.surface),
@@ -959,12 +974,12 @@ export function paneTree(
   let body: RenderElement
   let hasRows = false
   if (view.level === 2) {
-    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
+    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
     hasRows = view.list.rows.some(row => row.isOpenable)
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
     hasRows = true
     if (view.note !== undefined) {
       body = (

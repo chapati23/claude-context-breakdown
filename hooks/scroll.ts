@@ -231,60 +231,14 @@ export type Link = 'unknown' | 'works' | 'absent'
  * render hook last read. A probe, a window at the top, or a refused or failed
  * call (`answer` null) says nothing: the engine may answer `{}` without
  * raising the event when the window is already where it asked.
- *
- * The same holds for the retry to `end` (`needsRetry`): seen, it proves the
- * link; unseen and answered `{}` from below the top, it disproves it. From
- * the top it says nothing, as a tree that fits the window has its end there.
  */
 export function learnLink(link: Link, token: StepToken, answer: { deny?: string } | null, standing: number): Link {
-  // Once proven, an unseen scroll does not undo it: a quick press can find
-  // the engine's window behind, and `start` then moves nothing.
-  if (token.seen || link === 'works') {
+  if (token.seen) {
     return 'works'
   }
   const hadToMove = (token.kind === 'step' || token.kind === 'measure') && standing > 0
 
   return hadToMove && answer !== null && answer.deny === undefined ? 'absent' : link
-}
-
-/**
- * What the press hooks know of the pane's window between drawings: whether
- * the hook sees our scrolls (`link`), and the window's offset as the render
- * hook last read it (`shown`), for `learnLink`. Hints only, never drawn from.
- */
-export type PaneScroll = { link: Link; shown: number }
-
-export function createPaneScroll(): PaneScroll {
-  return { link: 'unknown', shown: 0 }
-}
-
-/**
- * A new tree asks for its top. The offset is the top's from now on: a quick
- * press before the next drawing must not read the old tree's offset and
- * conclude the link is absent. The link stays as it is: a step at the top of
- * the new tree proves nothing, and a proven link must still ask again for
- * `end` (`needsRetry`).
- */
-export function atNewTop(pane: PaneScroll): void {
-  pane.shown = 0
-}
-
-/**
- * Whether a settled step should ask again, once, for the pane's `end`. The
- * hook did not see it, yet the engine answered `{}`: the engine believed the
- * window already stood at `start`, so it raised no event. `end` resolves to
- * another row, so the engine raises the event and the hook moves it one row.
- *
- * Also while the link is not known yet: at row 0 of a new tree a step to
- * `start` cannot prove it, so without this j would do nothing there until
- * the wheel moves the window. The retry settles it: seen, the link works.
- * The one cost: if the hook link is truly absent, that single retry jumps
- * the window to the end once before the link is known to be absent (the
- * next step finds the window off the top and `learnLink` concludes it).
- * Never once it is absent: `end` would jump to the bottom each time.
- */
-export function needsRetry(token: StepToken, answer: { deny?: string } | null, link: Link): boolean {
-  return token.kind === 'step' && token.step !== 0 && !token.seen && link !== 'absent' && answer !== null && answer.deny === undefined
 }
 
 /** The fields of a `ui.scroll` event that say who moves the window. */

@@ -1,17 +1,22 @@
 // The band above the prompt: one row, the bar, its total and the legend.
 
-import type { EngineInterface, RenderElement } from 'claude-code'
+import type { Elements, EngineInterface, RenderElement } from 'claude-code'
 
 import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot } from '../types'
-import { FILLED, FREE, RESERVE, chipsToDraw, segmentCells, segmentKey, segmentRuns } from './bar'
+import { FILLED, FREE, MIN_CHIP_CELLS, RESERVE, chipForms, chipsToDraw, segmentCells, segmentKey, segmentRuns } from './bar'
 import type { Chip } from './bar'
 import { inkOn } from './color'
 import type { SegmentPart } from './layout'
 import { colorOf, edgeColor } from './palette'
 import type { Palette } from './palette'
 import { segmentDef } from './segments'
+import { SVG_BAR_HEIGHT, SVG_SWATCH_PX, barSvg, svgBarWidth, swatchSvg } from './svgbar'
+import type { TokensOf } from './svgbar'
+import type { BarClientProps, BarRun } from './barclient'
+import { usedTokens } from './snapshot'
 import type { BandModel } from './view'
-import { LEGEND_JOIN, bandModel } from './view'
+import { LEGEND_JOIN, bandModel, fit, legendCells } from './view'
+import { cellWidth } from './text'
 
 /** The element table of the surface being drawn. */
 export type Ui = ReturnType<EngineInterface['ui']['resolve']>
@@ -24,8 +29,11 @@ export function partLabel(part: SegmentPart): string {
   return more > 0 ? `${label} and ${more} more` : label
 }
 
-/** What a press on a bar cell runs: it is told which cell. */
-export type OpenPane = (part: SegmentPart) => unknown
+/** The key of the desktop band's surface module instance. */
+export const BAR_CLIENT = 'context-bar'
+
+/** What a press on a bar cell runs: it is told which cell, or null for the total (level 1). */
+export type OpenPane = (part: SegmentPart | null) => unknown
 
 /**
  * A segment's cells. The engine draws a Button under the focus ring or the
@@ -151,10 +159,128 @@ function row(
 }
 
 /**
+ * The row on a surface that draws a picture (the desktop app, the editor, the
+ * mobile app): the bar as one SVG, then the total and the legend in the code
+ * font. Those surfaces draw a Button as a native button showing only its
+ * label, so the bar cannot be a row of segment Buttons there. The total is
+ * the one Button, with no label so its own text shows; `openPane` null
+ * opens the segments.
+ */
+function pictureRow(
+  ui: PictureUi,
+  model: BandModel,
+  tokensOf: TokensOf,
+  used: number,
+  openPane: OpenPane | null,
+): RenderElement {
+  const { Box, Text, Button, Svg } = ui
+  const { legend } = model
+  const hasBar = model.parts.length > 0
+  const total = <Text mono dimColor>{model.label}</Text>
+
+  return (
+    <Box flexDirection="row" alignItems="center" columnGap={1}>
+      {hasBar && (
+        <Svg
+          source={barSvg(model.parts, tokensOf, used)}
+          alt={`Context window: ${model.label}`}
+          width={svgBarWidth(model.parts)}
+          height={SVG_BAR_HEIGHT}
+          isInteractive
+        />
+      )}
+      {openPane === null ? (
+        total
+      ) : (
+        <Button key="context-total" plain onPress={() => void openPane(null)}>
+          {total}
+        </Button>
+      )}
+      {legend !== null && <Text mono dimColor>·</Text>}
+      {legend !== null && (
+        <Svg source={swatchSvg(legend.cell)} alt={segmentDef(legend.id).label} width={SVG_SWATCH_PX} height={SVG_SWATCH_PX} />
+      )}
+      {legend !== null && <Text mono dimColor>{legend.text}</Text>}
+    </Box>
+  )
+}
+
+/**
+ * The desktop band's row as data for the surface module `barclient.tsx`:
+ * the terminal's cells and colours, each run marked with the part a click
+ * on it opens, and per segment the text that shows while the pointer is on
+ * it.
+ */
+export function barClientProps(model: BandModel, palette: Palette, tokensOf: TokensOf): BarClientProps {
+  const runs: BarRun[] = []
+  const hovers: Record<string, string> = {}
+  const hoverParts: { index: number; forms: string[] }[] = []
+  model.parts.forEach((part, index) => {
+    if (part.kind === 'free') {
+      runs.push({ text: FREE.repeat(part.cells), color: palette.free, target: null })
+
+      return
+    }
+    if (part.kind === 'reserve') {
+      runs.push({ text: RESERVE.repeat(part.cells), color: palette.reserve, target: null })
+
+      return
+    }
+    const color = colorOf(palette, part.id)
+    const { fill, edge } = segmentRuns(part.id, part.cells)
+    // No background: the terminal's is there for its inverted highlight, and
+    // on a desktop it would stay bright while the rest dims under a hover,
+    // and stand taller than the glyphs.
+    if (fill !== '') {
+      runs.push({ text: fill, color, target: index })
+    }
+    if (edge !== '') {
+      runs.push({ text: edge, color, target: index })
+    }
+    hoverParts.push({ index, forms: chipForms(part, tokensOf).map(form => form.trim()) })
+  })
+  const { legend } = model
+  // The name shows in the legend's place, so it gets the legend's cells:
+  // the longest form that fits, else the shortest cut to fit. With no legend
+  // there is no room, and no name shows.
+  const room = legend === null ? 0 : legendCells(legend) - LEGEND_JOIN.length
+  for (const { index, forms } of hoverParts) {
+    const fits = forms.find(form => cellWidth(form) <= room)
+    const text = fits ?? (room >= MIN_CHIP_CELLS ? fit(forms[forms.length - 1] ?? '', room).trimEnd() : '')
+    if (text !== '') {
+      hovers[String(index)] = text
+    }
+  }
+  runs.push({ text: `${model.parts.length > 0 ? ' ' : ''}${model.label}`, dimColor: true, target: 'total' })
+  if (legend !== null) {
+    runs.push({ text: LEGEND_JOIN, dimColor: true, target: null })
+    runs.push({ text: segmentCells(legend.cell, 1), color: colorOf(palette, legend.cell), target: null, isLegend: true })
+    runs.push({ text: ` ${legend.text}`, dimColor: true, target: null, isLegend: true })
+  }
+
+  return { runs, hovers }
+}
+
+/** The element table of a surface that has `Svg`. */
+type PictureUi = Elements['desktop'] | Elements['mobile'] | Elements['vscode']
+
+/**
+ * Whether a surface draws the picture row: every surface but the terminal
+ * (the only one without `Svg`). Asked of the surface's name: a table may
+ * carry more elements than its surface draws.
+ */
+export function drawsPicture(surface: string): boolean {
+  return surface !== 'terminal'
+}
+
+/** What the picture's tooltips read: each segment's tokens, and what is used. */
+export type PictureFigures = { tokensOf: TokensOf; used: number }
+
+/**
  * The band's row for one model (see `bandModel`). `focused` is the key of
  * the bar Button that holds the keyboard focus, if any: its chip alone shows.
  * The chips are placed in text cells, so only the terminal gets them (see
- * `bandModelFor`).
+ * `bandModelFor`). A surface with `Svg` gets the picture row.
  */
 export function bandTree(
   ui: Ui,
@@ -162,7 +288,15 @@ export function bandTree(
   palette: Palette,
   openPane: OpenPane,
   focused: string | null,
+  figures: PictureFigures,
+  surface: string,
 ): RenderElement {
+  if (drawsPicture(surface)) {
+    const { Client } = ui as Elements['desktop']
+
+    return <Client key={BAR_CLIENT} module="./barclient.tsx" props={barClientProps(model, palette, figures.tokensOf)} />
+  }
+
   return row(ui, model, palette, openPane, focused)
 }
 
@@ -175,11 +309,31 @@ export function glanceTree(
   snapshot: ContextBreakdownSnapshot | null,
   columns: number,
   palette: Palette,
+  surface: string,
 ): RenderElement {
   const { Text } = ui
   if (snapshot === null) {
     return <Text dimColor>Measuring…</Text>
   }
+  const model = bandModel(snapshot, columns)
+  if (drawsPicture(surface)) {
+    return pictureRow(ui as PictureUi, model, ...pictureArgs(snapshot), null)
+  }
 
-  return row(ui, bandModel(snapshot, columns), palette, null, null)
+  return row(ui, model, palette, null, null)
+}
+
+/** The tooltips' figures for a snapshot. */
+export function pictureFigures(snapshot: ContextBreakdownSnapshot): PictureFigures {
+  const tokens = new Map<string, number>(
+    [...snapshot.baseline, ...snapshot.conversation].map(segment => [segment.id, segment.tokens]),
+  )
+
+  return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot) }
+}
+
+function pictureArgs(snapshot: ContextBreakdownSnapshot): [TokensOf, number] {
+  const { tokensOf, used } = pictureFigures(snapshot)
+
+  return [tokensOf, used]
 }

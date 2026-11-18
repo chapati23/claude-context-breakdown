@@ -6,16 +6,21 @@ import {
   SCROLL_UP,
   STEP_SCROLL,
   TOP_SCROLL,
+  atNewTop,
   createLane,
+  createPaneScroll,
   createSteps,
   crossDelta,
   crossScroll,
   crossingOf,
   heldOffset,
   learnLink,
+  needsRetry,
+  nextStep,
   shareAcross,
   shareOf,
   stepAnswer,
+  stepBase,
   stepOf,
   stepOffset,
 } from '../hooks/scroll'
@@ -176,6 +181,10 @@ test('the link is proven by a seen token, disproven by an unseen scroll that had
   // A refused or failed call says nothing.
   expect(learnLink('unknown', unseen, { deny: 'no-surface' }, 7)).toBe('unknown')
   expect(learnLink('works', unseen, null, 7)).toBe('works')
+  // A proven link stays: on the desktop a quick press can find the engine's
+  // window behind, and `start` then moves nothing.
+  expect(learnLink('works', unseen, {}, 7)).toBe('works')
+  expect(learnLink('works', createSteps().push(0, 'measure'), {}, 7)).toBe('works')
   // The bottom of the pane, for k into the previous page.
   expect(END_SCROLL).toEqual({ in: 'context-breakdown', to: 'end' })
 })
@@ -232,4 +241,190 @@ test('a crossing opens the next page at its top and the previous page at its bot
   expect(crossDelta(null, 1, 3)).toBe(0)
   expect(crossScroll(1)).toBe(TOP_SCROLL)
   expect(crossScroll(-1)).toBe(END_SCROLL)
+})
+
+test('a step continues from the last target while the engine still reports the row it left', () => {
+  const steps = createSteps()
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  // The engine still stands at 5: the next step goes on from 6, not again to 6.
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(7)
+  // The engine reports 7: it has caught up, and the next step starts there.
+  steps.push(1)
+  expect(stepAnswer(oursAt(7), 'context-breakdown', steps)).toBe(8)
+  // The wheel moved the window to 12: that row wins.
+  steps.push(1)
+  expect(stepAnswer(oursAt(12), 'context-breakdown', steps)).toBe(13)
+})
+
+test('an engine that has caught up only part of the way still lags: the step goes on from the last target', () => {
+  const steps = createSteps()
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(7)
+  // The engine reports 6, between 5 and 7: the window is at 7, so on to 8.
+  steps.push(1)
+  expect(stepAnswer(oursAt(6), 'context-breakdown', steps)).toBe(8)
+  // j then k with the engine still at 5: k goes back to 5, then on to 4.
+  const back = createSteps()
+  back.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', back)).toBe(6)
+  back.push(-1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', back)).toBe(5)
+  back.push(-1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', back)).toBe(4)
+})
+
+test('a scroll of ours with no step, or a new tree, each end the lag', () => {
+  const steps = createSteps()
+  steps.push(1)
+  stepAnswer(oursAt(5), 'context-breakdown', steps)
+  expect(steps.last()).toEqual({ lo: 5, hi: 6, to: 6 })
+  // Our own top after a page change: the next step starts where it went.
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBeNull()
+  expect(steps.last()).toBeNull()
+  steps.push(1)
+  stepAnswer(oursAt(5), 'context-breakdown', steps)
+  steps.forget()
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  // A measure (f) also ends it.
+  steps.push(0, 'measure')
+  stepAnswer(oursAt(5), 'context-breakdown', steps)
+  expect(steps.last()).toBeNull()
+})
+
+test('the base of a step: the row the engine reports, or the last target while the engine lags', () => {
+  expect(stepBase(5, null)).toBe(5)
+  expect(stepBase(5, { lo: 5, hi: 6, to: 6 })).toBe(6)
+  // Any row inside the range of the steps under lag: their last target.
+  expect(stepBase(6, { lo: 5, hi: 8, to: 8 })).toBe(8)
+  expect(stepBase(8, { lo: 5, hi: 8, to: 8 })).toBe(8)
+  expect(stepBase(7, { lo: 6, hi: 9, to: 6 })).toBe(6)
+  expect(stepBase(6, { lo: 5, hi: 6, to: 5 })).toBe(5)
+  // A row off the range: the engine's row.
+  expect(stepBase(12, { lo: 5, hi: 6, to: 6 })).toBe(12)
+  expect(stepBase(4, { lo: 5, hi: 8, to: 8 })).toBe(4)
+  expect(stepBase(10, { lo: 6, hi: 9, to: 6 })).toBe(10)
+  // A step that moved nothing (k at the top) leaves nothing to go on from.
+  expect(stepBase(0, { lo: 0, hi: 0, to: 0 })).toBe(0)
+})
+
+test('the range grows while the engine lags and starts again when it agrees or something else moved the window', () => {
+  expect(nextStep(5, null, 6)).toEqual({ lo: 5, hi: 6, to: 6 })
+  // Lag: the range takes in the row and the new target.
+  expect(nextStep(5, { lo: 5, hi: 6, to: 6 }, 5)).toEqual({ lo: 5, hi: 6, to: 5 })
+  expect(nextStep(6, { lo: 5, hi: 6, to: 5 }, 4)).toEqual({ lo: 4, hi: 6, to: 4 })
+  // The engine at the last target: the lag is over.
+  expect(nextStep(6, { lo: 5, hi: 7, to: 6 }, 5)).toEqual({ lo: 5, hi: 6, to: 5 })
+  // A row off the range wins.
+  expect(nextStep(12, { lo: 5, hi: 7, to: 7 }, 13)).toEqual({ lo: 12, hi: 13, to: 13 })
+})
+
+test('j, k, k under lag: the engine catching up part of the way loses no press', () => {
+  const steps = createSteps()
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  steps.push(-1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(5)
+  // The engine reports 6, the row of the first step: still lag, so on from 5 to 4.
+  steps.push(-1)
+  expect(stepAnswer(oursAt(6), 'context-breakdown', steps)).toBe(4)
+})
+
+test('j, j, k, k, k under lag ends one row above where it began', () => {
+  const steps = createSteps()
+  // The engine stays at 5 for four presses, then reports 6.
+  const answers = [5, 5, 5, 5, 6].map((standing, index) => {
+    steps.push(index < 2 ? 1 : -1)
+
+    return stepAnswer(oursAt(standing), 'context-breakdown', steps)
+  })
+  expect(answers).toEqual([6, 7, 6, 5, 4])
+})
+
+test('a crossing is read from the same base as the step', () => {
+  // The engine reports 29, but the last step went to 30, the bottom.
+  expect(crossingOf(toStart(29), 1, 30)).toBe('next')
+  expect(stepOffset(toStart(29), 1, 30)).toBe(30)
+  expect(crossingOf(toStart(1), -1, 0)).toBe('prev')
+
+  const steps = createSteps()
+  const first = steps.push(1)
+  expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
+  expect(first.cross).toBeNull()
+  const second = steps.push(1)
+  expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
+  expect(second.cross).toBe('next')
+})
+
+test('an unseen step the engine answered {} asks once more, unless the link is absent', () => {
+  const unseen = createSteps().push(1)
+  const seen = { ...createSteps().push(1), seen: true }
+  expect(needsRetry(unseen, {}, 'works')).toBe(true)
+  expect(needsRetry(createSteps().push(-1), {}, 'works')).toBe(true)
+  // A link not known yet: at row 0 a step cannot prove it, so the retry does.
+  expect(needsRetry(unseen, {}, 'unknown')).toBe(true)
+  // The hook saw it: it moved.
+  expect(needsRetry(seen, {}, 'works')).toBe(false)
+  expect(needsRetry(seen, {}, 'unknown')).toBe(false)
+  // Refused or failed: nothing to retry.
+  expect(needsRetry(unseen, { deny: 'the window moved meanwhile' }, 'works')).toBe(false)
+  expect(needsRetry(unseen, null, 'unknown')).toBe(false)
+  // Without the hook, `end` would jump to the bottom.
+  expect(needsRetry(unseen, {}, 'absent')).toBe(false)
+  // Only a j or k step.
+  expect(needsRetry(createSteps().push(0, 'measure'), {}, 'works')).toBe(false)
+  expect(needsRetry(createSteps().push(0, 'probe'), {}, 'unknown')).toBe(false)
+})
+
+test('the retry at the top of a new tree settles a link not known yet', () => {
+  const steps = createSteps()
+  const pane = createPaneScroll()
+  // j at row 0: the engine stands at `start`, answers {} and raises nothing.
+  const token = steps.push(1)
+  pane.link = learnLink(pane.link, token, {}, pane.shown)
+  expect(pane.link).toBe('unknown')
+  expect(needsRetry(token, {}, pane.link)).toBe(true)
+  // The retry to `end` reaches the hook: the link works, and the step moves one row.
+  const retry = steps.push(1)
+  steps.drop(token)
+  const toEnd = { offset: 30, by: 30, bodyRows: 10, contentRows: 40, origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
+  expect(stepAnswer(toEnd, 'context-breakdown', steps)).toBe(1)
+  expect(learnLink(pane.link, retry, {}, pane.shown)).toBe('works')
+  // Unseen and answered {} from the top: a tree that fits has its end there, so nothing is known.
+  expect(learnLink('unknown', createSteps().push(1), {}, 0)).toBe('unknown')
+  // Without the hook the retry jumped the window to the end: the next step,
+  // unseen and answered {} from there, finds the link absent.
+  expect(learnLink('unknown', createSteps().push(1), {}, 40)).toBe('absent')
+})
+
+test('a new tree from its top keeps a proven link, so j at its top still asks again for the end', () => {
+  const steps = createSteps()
+  const pane = createPaneScroll()
+  pane.link = 'works'
+  pane.shown = 8
+  steps.push(1)
+  stepAnswer(oursAt(8), 'context-breakdown', steps)
+  atNewTop(pane, steps)
+  expect(pane).toEqual({ link: 'works', shown: 0 })
+  expect(steps.last()).toBeNull()
+  // j at the top: the engine already stands at `start`, answers {} and raises nothing.
+  const token = steps.push(1)
+  pane.link = learnLink(pane.link, token, {}, pane.shown)
+  expect(pane.link).toBe('works')
+  expect(needsRetry(token, {}, pane.link)).toBe(true)
+})
+
+test('a quick press on a new tree before its drawing does not read the old offset and find the link absent', () => {
+  const steps = createSteps()
+  const pane = createPaneScroll()
+  // The old tree's window stood at 8; the link is not known yet.
+  pane.shown = 8
+  atNewTop(pane, steps)
+  // j at once: the engine stands at the new top, answers {} and raises nothing.
+  pane.link = learnLink(pane.link, steps.push(1), {}, pane.shown)
+  expect(pane.link).toBe('unknown')
 })

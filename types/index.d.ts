@@ -167,6 +167,13 @@ export type ContextBreakdownContent = {
    * opens at its end, and the ring starts on the control below the text.
    */
   atEnd: boolean
+  /**
+   * Off the terminal, what j and k skipped at the top of the page: display
+   * lines in the raw view, blocks in the formatted one (lines.ts). Absent
+   * is 0, so a value stored before this field still reads right. A new
+   * item, page, source or view starts at 0 again; the terminal never sets it.
+   */
+  top?: number
 }
 
 /**

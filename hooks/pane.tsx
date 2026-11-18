@@ -17,6 +17,7 @@ import type { Ui } from './band'
 import { FILLED, FREE, RESERVE } from './bar'
 import { baselineOf } from './categories'
 import { formatTokens } from './format'
+import { lineMove, shownFacts, shownMarkdown, shownRuns, topOf } from './lines'
 import { colorOf } from './palette'
 import type { Palette } from './palette'
 import { LIST_DOWN, LIST_UP, SCROLL_DOWN, SCROLL_UP } from './scroll'
@@ -31,7 +32,6 @@ import {
   itemNames,
   largestOf,
   lengthBarParts,
-  lineFacts,
   listFacts,
   nameText,
   notLoadedRows,
@@ -40,7 +40,7 @@ import {
   tableLayout,
 } from './table'
 import type { LengthBarParts, Table } from './table'
-import { cellWidth, codeRuns } from './text'
+import { cellWidth } from './text'
 import { paneHeading } from './view'
 
 export type PaneActions = {
@@ -94,6 +94,57 @@ function lookOf(rows: Rows, key: string): RowLook {
 // Every part of a table row is a Text drawn `mono`: the columns line up only
 // cell for cell, and a surface other than the terminal draws text in a face
 // that is not monospaced unless asked. The figures are also `tabular`.
+
+/**
+ * The hotkey of a desktop row: its digit, "1" to "9", for the row at `index`
+ * among the rows that open (null for a row that does not open). None in a
+ * narrow pane (`cells` 0) or for the tenth row and later. The row gets it in
+ * both focus states: the desktop draws the hotkey as a key cap inside the
+ * native button, and a hotkey presses only while the pane holds the keys.
+ */
+export function desktopHotkeyOf(cells: number, index: number | null): string | undefined {
+  return cells > 0 && index !== null && index < 9 ? String(index + 1) : undefined
+}
+
+/**
+ * A row on a desktop: only the name is the Button, in a Box as wide as the
+ * name's column plus the mark's cells, and the parts with a colour of their
+ * own (the swatch, the length bar, the figures) stand outside it. A desktop
+ * draws a Button's children as plain text, dropping colour and the code
+ * font, so inside it the bar would turn black and the columns would drift.
+ * The Button's text is the name. The native button draws the row's hotkey
+ * as a key cap before the label, in the mark's cells; a row without a
+ * hotkey has blank cells there, so every name starts in the same column.
+ * The row is the same with and without the keys.
+ */
+function desktopRow(
+  rows: Rows,
+  button: { key: string; autoFocus?: true; onPress: () => void },
+  parts: { index: number | null; lead: unknown; name: string; rest: unknown[] },
+) {
+  const { Box, Button, Text } = rows.el
+  const label = parts.name.trimEnd()
+  const cells = rows.table.mark
+  const digit = desktopHotkeyOf(cells, parts.index)
+
+  return (
+    <Box flexDirection="row">
+      {parts.lead as RenderElement}
+      <Box width={cells + cellWidth(parts.name)} flexShrink={0}>
+        {digit === undefined && cells > 0 ? <Text mono>{' '.repeat(cells)}</Text> : ''}
+        <Button
+          key={button.key}
+          label={label}
+          plain
+          {...(digit === undefined ? {} : { hotkey: digit })}
+          {...(button.autoFocus === undefined ? {} : { autoFocus: true as const })}
+          onPress={button.onPress}
+        />
+      </Box>
+      <Text mono>{parts.rest as RenderElement[]}</Text>
+    </Box>
+  )
+}
 
 /** Blank cells that hold a column's place. */
 function gap(rows: Rows, cells: number) {
@@ -236,13 +287,16 @@ function plainRow(
   const { table } = rows
   // Free space and Reserve show the bar's own glyph where a row's colour
   // goes: in the swatch's place, or at the start of the length bar's column.
+  // On the desktop the mark's cells follow the swatch, as in a row, where the
+  // native button draws the key cap after the swatch.
   const lead = glyph === null ? ' '.repeat(table.lead) : leadPart(rows, glyph.color, glyph.text)
   const bar = glyph === null ? null : { full: '', rest: glyph.text, pad: ' '.repeat(Math.max(0, table.bar - cellWidth(glyph.text))) }
 
   return (
     <Text mono dimColor>
-      {' '.repeat(table.mark)}
+      {rows.swaps ? ' '.repeat(table.mark) : ''}
       {lead}
+      {rows.swaps ? '' : ' '.repeat(table.mark)}
       {nameText(table, name)}
       {glyph === null || bar === null ? (table.bar > 0 ? ` ${' '.repeat(table.bar)}` : '') : barPart(rows, glyph.color, bar)}
       <Text mono tabular>
@@ -292,10 +346,27 @@ function groupRows(
       const color = colorOf(rows.palette, def.id)
       const key = `row-${segment.id}`
       const look = lookOf(rows, key)
-      const { hotkey, mark } = markOf(rows, first + index, look)
       const name = nameText(table, def.label, def.short)
       const isLargest = stats.largest?.id === segment.id
       const bar = lengthBarParts(segment.tokens, stats.largest?.tokens ?? 0, table.bar, segment.id)
+
+      if (!rows.swaps) {
+        return desktopRow(
+          rows,
+          {
+            key,
+            ...(rows.ring === key ? { autoFocus: true as const } : {}),
+            onPress: () => void actions.openSegment(segment.id),
+          },
+          {
+            index: first + index,
+            lead: leadPart(rows, color),
+            name,
+            rest: [barPart(rows, color, bar), figuresPart(rows, segment.tokens, stats.used)],
+          },
+        )
+      }
+      const { hotkey, mark } = markOf(rows, first + index, look)
 
       return (
         <Button
@@ -523,6 +594,29 @@ function listBody(
             return <Text mono>{inner}</Text>
           }
 
+          if (!rows.swaps) {
+            return desktopRow(
+              rows,
+              {
+                key,
+                ...(ring === key ? { autoFocus: true as const } : {}),
+                onPress: () => void actions.openItem(row.id),
+              },
+              {
+                index,
+                lead: '',
+                name: names.title,
+                rest: [
+                  <Text mono dimColor>
+                    {names.detail}
+                  </Text>,
+                  barPart(rows, color, lengthBarParts(row.tokens, largest, table.bar)),
+                  figuresPart(rows, row.tokens, total),
+                ],
+              },
+            )
+          }
+
           return (
             <Button
               key={key}
@@ -558,9 +652,77 @@ function listBody(
 export const NEXT_BELOW = 'next-below'
 
 /**
+ * Where level 3's text starts on `surface`: the terminal scrolls the pane's
+ * window, so its text always starts at the page's top; elsewhere j and k
+ * move the start (lines.ts).
+ */
+export function shownTop(item: ContextBreakdownContent, surface: RenderSurface): number {
+  return surface === 'terminal' ? 0 : topOf(item)
+}
+
+/** Rows a text takes in `columns`, wrapped. */
+function rowsOf(text: string, columns: number): number {
+  return Math.max(1, Math.ceil(cellWidth(text) / Math.max(1, columns)))
+}
+
+/**
+ * About how many rows of level 3 stand above its text (the title, the facts,
+ * the notes, the keys line and its margins) and below it (Next page), so a
+ * page entered from its end can show about one window of text. An estimate:
+ * the surface wraps and draws key caps its own way.
+ */
+export function contentHeadRows(
+  view: Extract<ContextBreakdownView, { level: 3 }>,
+  columns: number,
+  isFocused: boolean,
+  surface: RenderSurface,
+): number {
+  const { item } = view
+  const def = segmentDef(view.list.segment)
+  const none = () => undefined
+  const actions: PaneActions = {
+    close: none,
+    refresh: none,
+    openSegment: none,
+    openItem: none,
+    back: none,
+    toggleSort: none,
+    listPage: none,
+    contentPage: none,
+    toggleSource: none,
+    copy: none,
+    mention: none,
+  }
+  const hasCaps = isFocused || surface !== 'terminal'
+  // A control: its label, a key cap (about three cells and a space), and the gap of two.
+  const controlCells = controls(view, actions, isFocused, surface).reduce(
+    (sum, control) => sum + cellWidth(control.label) + (hasCaps ? 4 : 0) + 2,
+    0,
+  )
+  let rows = rowsOf(`██ ${def.short} › ${item.title}`, columns) + 1
+  if (item.isChanged && item.source === 'loaded') {
+    rows += rowsOf('! The file changed on disk since it was loaded.', columns)
+  }
+  if (item.note !== null) {
+    rows += rowsOf(item.note, columns)
+  }
+  if (item.notice !== null) {
+    rows += 1
+  }
+  // The keys line's margin, the hint, the controls, and the text's margin.
+  rows += 1 + (isFocused ? 0 : rowsOf(keysHint(surface), columns)) + rowsOf(' '.repeat(controlCells), columns) + 1
+  if (item.page + 1 < item.pages) {
+    rows += 2
+  }
+
+  return rows
+}
+
+/**
  * Level 3: the title, the facts line, then `keys` (the controls), then the
  * text. The controls stand above the text so that the ring, which the engine
- * brings into view on every new tree, keeps the heading in view too.
+ * brings into view on every new tree, keeps the heading in view too. `top`:
+ * the units j and k skipped at the page's top, 0 on the terminal.
  */
 function contentBody(
   el: Ui,
@@ -570,6 +732,7 @@ function contentBody(
   keys: RenderElement,
   actions: PaneActions,
   ring: string | null,
+  top = 0,
 ) {
   const { Box, Button, Code, Markdown, Text } = el
   const def = segmentDef(segment)
@@ -579,14 +742,15 @@ function contentBody(
     item.source === 'loaded' ? 'as loaded' : 'on disk',
   ]
   // Where the page lies in the whole item: a page holds hundreds of lines,
-  // so a page number alone says little.
-  const place = lineFacts(item)
+  // so a page number alone says little. Once j moved the text, from the
+  // first line shown.
+  const place = shownFacts({ ...item, top })
   if (place !== '') {
     facts.push(place)
   }
   // The raw view promises every character: a line too long for the engine's
   // Code element is split, and the facts line says so.
-  const code = item.format === 'raw' && item.text !== '' ? codeRuns(item.text, item.startLine) : null
+  const code = item.format === 'raw' && item.text !== '' ? shownRuns(item.text, item.startLine, top) : null
   if (code?.isSplit === true) {
     facts.push('long lines split')
   }
@@ -615,7 +779,7 @@ function contentBody(
           <Text dimColor>(empty)</Text>
         ) : code === null ? (
           // No onLinkPress: a link is the surface's to open, as in a reply.
-          <Markdown key="content-formatted" text={item.text} />
+          <Markdown key="content-formatted" text={shownMarkdown(item.text, top)} />
         ) : (
           code.runs.map((run, index) => (
             <Code
@@ -659,16 +823,22 @@ function downKey(view: ContextBreakdownView): string {
   return view.level === 3 ? SCROLL_DOWN : LIST_DOWN
 }
 
-function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean): Control[] {
+function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean, surface: RenderSurface): Control[] {
   const out: Control[] = []
   const add = (key: string, label: string, hotkey: string, isOn: boolean, onPress: Control['onPress']) =>
     out.push({ key, label, hotkey, isOn, onPress: isOn ? onPress : () => undefined })
-  // j and k only with the keyboard: a click moves one row, which the wheel
-  // does better. The register's `ui.press` hook does the scroll (scroll.ts
-  // says why), so the Buttons' own presses do nothing.
-  if (isFocused) {
-    add(downKey(view), 'Down', 'j', true, () => undefined)
-    add(view.level === 3 ? SCROLL_UP : LIST_UP, 'Up', 'k', true, () => undefined)
+  // j and k on the terminal only with the keyboard: a click moves one row,
+  // which the wheel does better. A desktop draws them in both states, so its
+  // line keeps one set of controls when Esc takes the keys; a click there
+  // does what the key does. The register's `ui.press` hooks do the move
+  // (ring.ts, scroll.ts, lines.ts), so the Buttons' own presses do nothing.
+  // Off the terminal, j and k at level 3 move where the text starts
+  // (lines.ts): each is off where a press would do nothing.
+  if (isFocused || surface !== 'terminal') {
+    const canDown = view.level !== 3 || surface === 'terminal' || lineMove(view.item, 1) !== null
+    const canUp = view.level !== 3 || surface === 'terminal' || lineMove(view.item, -1) !== null
+    add(downKey(view), 'Down', 'j', canDown, () => undefined)
+    add(view.level === 3 ? SCROLL_UP : LIST_UP, 'Up', 'k', canUp, () => undefined)
   }
   // b at level 1 too: a reflex press there must not leave the pane.
   add('back', 'Back', 'b', view.level !== 1, actions.back)
@@ -709,18 +879,21 @@ export function keysHint(surface: RenderSurface): string {
   return surface === 'terminal' ? KEYS_HINT : CLICK_HINT
 }
 
+/** The words that say how the ring moves along the rows: the arrows and Tab (j and k are controls of their own). */
+export const MOVE_WORDS = '↑↓ tab: Move'
+
 /**
- * The words before the controls, with the keyboard: Tab walks the rows (the
- * arrows scroll a pane) and Enter or a digit opens one. Without it, none:
- * the hint stands on its own line, and the controls keep only their labels,
- * so a click still works and no key is offered that would go to the prompt.
+ * The words before the controls, with the keyboard: the arrows and Tab walk
+ * the rows and Enter or a digit opens one. Without it, none: the hint stands
+ * on its own line, and the controls keep only their labels, so a click
+ * still works and no key is offered that would go to the prompt.
  */
 export function keyWords(hasRows: boolean, columns: number, isFocused: boolean): string[] {
   if (!isFocused || !hasRows) {
     return []
   }
 
-  return ['tab: Move', showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
+  return [MOVE_WORDS, showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
 }
 
 /**
@@ -762,7 +935,10 @@ function keysLine(
   const { Box, Button, Text } = el
 
   // The hint gets a row of its own: beside the label-only controls it would
-  // read as one phrase ("click the pane  Close").
+  // read as one phrase ("click the pane  Close"). A desktop keeps the key
+  // words and the controls' hotkeys (drawn as key caps) in both states, so
+  // Esc changes its line by the hint's row only. A hotkey presses only while
+  // the pane holds the keys.
   return (
     <Box flexDirection="column" marginTop={1}>
       {!isFocused && (
@@ -771,15 +947,15 @@ function keysLine(
         </Text>
       )}
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {keyWords(hasRows, columns, isFocused).map(words => (
+        {keyWords(hasRows, columns, isFocused || surface !== 'terminal').map(words => (
           <Text dimColor>{words}</Text>
         ))}
-        {controls(view, actions, isFocused).map(control => {
+        {controls(view, actions, isFocused, surface).map(control => {
           const props = {
             key: control.key,
             label: control.label,
             plain: true as const,
-            ...(isFocused ? { hotkey: control.hotkey } : {}),
+            ...(isFocused || surface !== 'terminal' ? { hotkey: control.hotkey } : {}),
             ...(control.key === 'close' ? { role: 'dismiss' as const } : {}),
             ...(ring === control.key ? { autoFocus: true as const } : {}),
             onPress: (press: { surface: RenderSurface }) => void control.onPress(press.surface),
@@ -830,7 +1006,7 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, false, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, view.list.segment, view.item, palette, keys, actions, ring)
+    return contentBody(el, view.list.segment, view.item, palette, keys, actions, ring, shownTop(view.item, surface))
   }
   let body: RenderElement
   let hasRows = false

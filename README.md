@@ -88,6 +88,10 @@ From a shell:
 claude plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
+In the Claude desktop app, `/plugin` does not run. Click **+** next to the prompt box, then **Plugins**, then **Add marketplace** with `chapati23/claude-context-breakdown`, then **Add plugin**.
+
+An install at the user scope from a terminal also loads in the local sessions of the desktop app. Start a new session to see the bar. The desktop app draws the bar in its code font with the same cells as the terminal. Its colours come from the Claude Code theme setting, not from the app's light or dark appearance.
+
 ## Update
 
 By default, Claude Code does not update this mod by itself. From a shell:
@@ -114,34 +118,44 @@ Open the pane:
 - `/ctx` opens the segments. When the pane is already open, `/ctx` only gives it the keyboard: it keeps the level, the item, the page and the place it shows. The focus ring is then on the first control or row, which can be above the rows in view; `tab` moves the ring and brings it into view.
 - `/ctx <segment>` opens the items of one segment. It accepts the start of the segment's name, for example `/ctx tool` or `/ctx global`. When two names start the same way, the segment that comes first in the bar wins. A word that matches no segment opens the segments with a note, for example `No segment matches "foo".` The note goes away when you open a segment.
 - In the fullscreen layout, a click on a bar segment opens the items of that segment.
+- In the desktop app, a click on a bar segment opens the items of that segment, and a click on the total opens the segments. A cell that holds several small segments opens the segments. While the pointer is on a segment, the other segments are drawn dim, and the segment's name and tokens take the place of the legend.
 
 Keys in the pane:
 
 | Key | Where | Action |
 | --- | --- | --- |
-| `tab`, then `enter` | Segments, items | Move along the rows, then open the row with the focus ring |
+| `↓`, `↑`, `tab`, `shift+tab`, then `enter` | Segments, items | Move the focus ring along the rows, then open the row with the ring |
 | `1` to `9` | Segments, items | Open that row |
-| `j`, `k` | All levels | Scroll down or up by one line. In a large item, `j` at the bottom of a page continues on the next page and `k` at the top goes back to the bottom of the previous page |
+| `j`, `k` | Segments, items | Move the focus ring to the next or the previous row. In the items, `j` on the last row of a page opens the next page with the ring on its first row, and `k` on the first row opens the previous page with the ring on its last row |
+| `j`, `k` | Content | In the terminal, scroll down or up by one line. In a large item, `j` at the bottom of a page continues on the next page and `k` at the top goes back to the bottom of the previous page. In the desktop app, start the text one line later or earlier, in the raw view and in the formatted view, under the title and the controls; see below |
 | `b` | Items, content | Go back one level |
 | `s` | Items of a conversation segment | Switch between largest first and newest first |
 | `n`, `p` | Items, content | Next page, previous page. An item has pages only when it is longer than about 500 lines or 40,000 characters. The formatted view can start a new page slightly earlier |
 | `v` | Content of an item that has a file | Switch between the text as loaded and the file on disk |
-| `f` | Content | Switch between the formatted text and the raw text |
+| `f` | Content | Switch between the formatted text and the raw text. The other view opens at the line that the pane showed first |
 | `c` | Content of an item that has a file | Copy the file's path |
 | `m` | Content of an item that has a file | Put `@path` into the prompt |
 | `r` | All levels | Measure again |
 | `x` | All levels | Close the pane |
 
-The keys work while the pane has the keyboard. `/ctx` gives it the keyboard; after a click on the bar, click the pane's text or run `/ctx`. A click on a row or a control of the pane presses it, but leaves the keyboard where it was. (`ctrl+x` then `tab` moves the keyboard to the bar, not to the pane.) While the pane does not have the keyboard, a line above the controls says so, and the controls are plain buttons to click. `Esc` returns the keyboard to the prompt and leaves the pane open.
+The keys work while the pane has the keyboard. `/ctx` gives it the keyboard; after a click on the bar, click the pane's text or run `/ctx`. A click on a row or a control of the pane presses it, but leaves the keyboard where it was. (`ctrl+x` then `tab` moves the keyboard to the bar, not to the pane.) While the pane does not have the keyboard, a line above the controls says so, and the controls are plain buttons to click. In the desktop app the keys stay drawn on the rows and controls, but they work only while the pane has the keyboard. `Esc` returns the keyboard to the prompt and leaves the pane open.
 
 Each level shows every key it uses, always in the same order. A key that does not apply at the moment, such as `n` on the last page or `c` for an item without a file, is drawn fainter and does nothing. `b` on the segments does nothing too. A key that does not apply keeps the keyboard in the pane. A letter that is not in the line goes to the prompt.
 
 After `b`, the focus ring is on the row you opened. A list that you open has the ring on its first row.
 
+In the segments and the items, `j`, `k` and the arrow keys move the ring by one row, and the row with the ring stays in view. When the ring is on no row, for example on a control, `j` and `↓` go to the first row, and `k` and `↑` to the last. After a click on `Down` or `Up`, the ring is on that control, and `j` and `k` go on from the row the ring was on before. On the first and last rows of the segments, and on the first row of the first page and the last row of the last page of the items, `j` and `k` leave the ring where it is, and the arrow keys scroll the pane, so the lines above and below the rows come into view. A held key moves the ring row by row and stops on the row of the last press. The mouse wheel and the page keys still scroll the pane.
+
+In the content of an item, the arrow keys scroll the text. In the terminal, `j` and `k` scroll it too, as before.
+
+In the desktop app, `j` and `k` in the content ask for no scroll. The app limits a mod's scroll to the height the pane had when it opened, so after a long item opened, a scroll step went back to the top. Instead, each `j` draws the text from one line later and each `k` from one line earlier. The title, the facts line and the controls stay at the top, and the text moves under them. In the raw view a step is one line; a line longer than 1,000 characters is drawn in pieces, and a step is one piece, with the line's number repeated in the gutter. In the formatted view a step is one line of the Markdown text too, also in a long paragraph, a list or a block quote. A blank line is skipped, so the text never starts with one. A code block and a table keep their frame: in a code block the code block's first line stays at the top, so the rest still draws as code; in a table the header row and the separator row stay at the top, so the rest still draws as a table. A long tool result in the formatted view is one code block, so `j` and `k` step through it line by line. `j` stops when the last line of the page is the first line shown; the next `j` opens the next page at its top. `k` at the first line opens the previous page at its end, with about one pane of text showing. The facts line gives the first line shown. `Down` and `Up` are drawn off where a press would do nothing. A new item or page starts at its top. `f` keeps the place: the other view starts at the same line, or within one line of it. `v` keeps the line too when the other text has it; otherwise the other text starts at its top. A refresh keeps the place while the text is the same. Keys pressed in quick succession apply in the order pressed. The mouse wheel and the arrow keys still scroll the pane, apart from `j` and `k`.
+
+In the desktop app, the app draws each key as a small key cap inside its button, before the label: the digits 1 to 9 on the first nine rows and the letters on the controls. The rows and the controls keep their key caps with and without the keyboard. A row without a digit, such as the tenth row, has blank space in the key cap's place, so every row keeps its name, bar and figures in the same columns. In a pane narrower than 32 columns no row has a digit. The controls line keeps the same controls in the same order, so `Esc` adds only the line that says how to get the keys. Without the keyboard, a click on `Down` or `Up` in the content does what `j` or `k` does. In the segments and the items it does nothing: Claude Code moves a pane's ring only while the pane has the keyboard. The desktop app does not tell a mod when `tab` or `shift+tab` moves the focus ring, so after a `tab`, `j` and `k` go on from the row they last moved to, not from the row `tab` went to; and the arrow keys move the ring only in a list taller than the pane (in a list that fits, the app sends a mod no event for them).
+
 Reading the pane:
 
 - The heading gives the tokens in use and the tokens that are free before a compaction: `283k used · 684k free before compaction`.
-- Each row has a length bar. In the segments level, the largest segment fills the bar column and its name is bold. In the items level, the largest item on the page fills it. The row with the focus ring, and the row under the pointer, is drawn as one highlight band: the name and the figures stand on it at full strength, and the bar keeps its colour and its length. Claude Code draws the highlight, and the hotkey digit on it, in its own colours.
+- Each row has a length bar. In the segments level, the largest segment fills the bar column and its name is bold. In the items level, the largest item on the page fills it. The row with the focus ring, and the row under the pointer, is drawn as one highlight band: the name and the figures stand on it at full strength, and the bar keeps its colour and its length. Claude Code draws the highlight, and the hotkey digit or key cap on it, in its own colours.
 - The percentage of a segment is its share of what is used, not of the window. The percentage of an item is its share of its segment. Percentages are rounded to the nearest, so the rows of a group add up to the group within rounding.
 - The segments end with the "Not loaded" block: the tool schemas that Claude Code loads on demand, such as `MCP tools` and `System tools`, with their tokens. These tokens are not part of the total.
 - Under `MCP tools`, one row per MCP server gives the number of its tools that are not loaded yet and the tokens their schemas take once loaded. The largest server comes first. The pane shows at most 8 servers, and one last row such as `3 more servers` adds up the rest. When Claude Code gives no token figure for these tools, the rows show the tool counts and leave the token column empty. A long server name is cut, so the table keeps its width. These rows are not controls and take no focus. A tool that is loaded is in the window: it is an item of MCP tools and instructions.
@@ -188,6 +202,17 @@ tsc -p .
 `tsc` needs TypeScript 5.4 or newer and the API declarations in `.claude-plugin/types/`. Claude Code writes them when it loads the folder as a mod, for example with `claude --plugin-dir .`.
 
 A pull request that changes a file under `hooks/`, `types/` or `.claude-plugin/` must raise the version in `.claude-plugin/plugin.json`. Without a new version, an installed copy does not update. The rule is in "Releases" in [AGENTS.md](AGENTS.md).
+
+The desktop app has no `--plugin-dir` flag. To load the folder in its local sessions, add two entries to the `env` block of `~/.claude/settings.json`, then start a new session:
+
+```json
+"env": {
+  "CLAUDE_CODE_PLUGIN_DIRS": "/absolute/path/to/claude-context-breakdown",
+  "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
+}
+```
+
+`CLAUDE_CODE_PLUGIN_DIR_WATCH` makes the session reload the mod when a file changes.
 
 Project terms are defined in [CONTEXT.md](CONTEXT.md). Decision records are in [docs/adr](docs/adr).
 

@@ -6,6 +6,10 @@ See what fills your Claude Code context window.
 
 Claude Code's own `/context` command shows a similar report, but only when you ask for it, and it shows the whole conversation as one number. This mod stays on screen, updates while you work, and splits the conversation into its parts.
 
+![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
+
+The pictures in this file show Claude Code 2.1.327 in Ghostty, in a session with a 200k window.
+
 > Status: early version. The mod uses Claude Code's mods API, which is early access and can change between releases.
 
 ## Segments
@@ -62,6 +66,8 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 
 ### Reading the bar
 
+![The bar with the pointer on its last segment. A chip beside the segment reads "Claude output 5.6k".](docs/img/bar.png)
+
 - A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour, and no gap after it.
 - Right of the bar is the total, then the largest conversation segment with its share of what is used: `364k/1M 36% · ▉ Tool results 40%`. The percent is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.
@@ -108,6 +114,10 @@ The bar is always visible above the prompt. The pane has three levels:
 1. **Segments.** Every segment with its tokens and its share of what is used.
 2. **Items.** The concrete things inside one segment: each instruction file, each tool result, each skill body, each prompt.
 3. **Content.** The text of one item as loaded, which is the text the model received.
+
+| Items of one segment | Content of one item |
+| --- | --- |
+| ![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](docs/img/pane-items.png) | ![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](docs/img/pane-content.png) |
 
 Open the pane:
 

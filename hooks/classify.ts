@@ -63,11 +63,24 @@ export function emptyChars(): ConversationChars {
   return out
 }
 
+/**
+ * The opening tag of a task report, alone on its line. Claude Code can put
+ * the report of a background task inside a `<system-reminder>` that says the
+ * text is not the person's input (seen in Claude Code 2.1.327). A reminder
+ * that only names the tag in a sentence is not a report.
+ */
+const TASK_REPORT_LINE = /^[ \t]*<task-notification>[ \t]*$/m
+
+/** Whether a reminder holds a task report: the tag on its own line, and a task id. */
+function isWrappedTaskReport(text: string): boolean {
+  return TASK_REPORT_LINE.test(text) && text.includes('<task-id>')
+}
+
 /** Which segment a user-role text block belongs to, by its known renderings. */
 export function classifyUserText(text: string): SplitId {
   const head = text.trimStart()
   if (head.startsWith('<system-reminder>')) {
-    return 'injections'
+    return isWrappedTaskReport(text) ? 'task-reports' : 'injections'
   }
   // Checked before the other tags, which a command's output may quote.
   if (isCommandOutput(text)) {

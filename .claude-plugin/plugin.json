@@ -1,6 +1,6 @@
 {
   "name": "context-breakdown",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shows what fills the context window: a segmented bar above the prompt and a pane that lists each item",
   "types": "./types/index.d.ts"
 }

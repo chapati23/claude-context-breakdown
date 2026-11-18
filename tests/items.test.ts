@@ -233,6 +233,12 @@ describe('titles', () => {
     expect(taskTitle('<task-notification><task-id>b2</task-id><status>failed</status></task-notification>')).toBe(
       'Task b2 failed',
     )
+    // A report inside a reminder is named after its summary, not after the reminder's first line.
+    expect(
+      taskTitle(
+        '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n<task-notification>\n<task-id>b3</task-id>\n<summary>Build finished</summary>\n</task-notification>\n</system-reminder>',
+      ),
+    ).toBe('Build finished')
     expect(skillTitle('Base directory for this skill: /opt/skills/review/\n\nBody')).toBe('review')
   })
 

@@ -46,6 +46,19 @@ describe('classifyUserText', () => {
     )
   })
 
+  test('counts a task report inside a reminder as a task report', () => {
+    const report =
+      '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Build finished</summary>\n</task-notification>'
+    const wrapped = `<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event.\n\n${report}\n</system-reminder>`
+    expect(classifyUserText(wrapped)).toBe('task-reports')
+    // A reminder that names the tag in a sentence is a reminder.
+    expect(
+      classifyUserText('<system-reminder>\nA <task-notification> arrives when the task with <task-id> ends.\n</system-reminder>'),
+    ).toBe('injections')
+    // The tag alone on a line, with no task id, is not a report.
+    expect(classifyUserText('<system-reminder>\nThe tag is:\n<task-notification>\n</system-reminder>')).toBe('injections')
+  })
+
   test('counts typed command lines and shell lines as prompts', () => {
     expect(classifyUserText('<command-name>/demo</command-name>')).toBe('prompts')
     expect(classifyUserText('<bash-input>ls</bash-input>')).toBe('prompts')

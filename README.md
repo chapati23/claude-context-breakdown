@@ -6,6 +6,10 @@ See what fills your Claude Code context window.
 
 Claude Code's own `/context` command shows a similar report, but only when you ask for it, and it shows the whole conversation as one number. This mod stays on screen, updates while you work, and splits the conversation into its parts.
 
+![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
+
+The pictures in this file show Claude Code 2.1.327 in Ghostty, in a session with a 200k window.
+
 > Status: early version. The mod uses Claude Code's mods API, which is early access and can change between releases.
 
 ## Segments
@@ -62,6 +66,8 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 
 ### Reading the bar
 
+![The bar with the pointer on its last segment. A chip beside the segment reads "Claude output 5.6k".](docs/img/bar.png)
+
 - A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour, and no gap after it.
 - Right of the bar is the total, then the largest conversation segment with its share of what is used: `364k/1M 36% · ▉ Tool results 40%`. The percent is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.
@@ -112,6 +118,10 @@ The bar is always visible above the prompt. The pane has three levels:
 1. **Segments.** Every segment with its tokens and its share of what is used.
 2. **Items.** The concrete things inside one segment: each instruction file, each tool result, each skill body, each prompt.
 3. **Content.** The text of one item as loaded, which is the text the model received.
+
+| Items of one segment | Content of one item |
+| --- | --- |
+| ![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](docs/img/pane-items.png) | ![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](docs/img/pane-content.png) |
 
 Open the pane:
 
@@ -176,6 +186,7 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - The sizes of the conversation segments are the mod's own estimate. It counts the characters of each kind of content and applies those shares to the engine's total for the conversation.
 - The size of a conversation item is its share of characters in its segment. The sizes of baseline items are the engine's own figures.
 - Claude Code sends the skills list, the MCP server instructions, the agent types and the memory files as reminders in the first message, and again after a compaction. In live sessions its breakdown counted them in the baseline, so the mod leaves them out of the conversation. The API description does not state this. Of the agent types, only the entries of custom agents are baseline; the built-in types stay under System notifications. Text after the skills list in the same reminder also stays under System notifications. Other reminders, such as the environment, the sandbox rules, the list of tools that load on demand and the date, are counted under System notifications, because no breakdown category names them. It is not known how Claude Code's own breakdown counts them.
+- Claude Code can put the report of a background task inside a reminder that says the text is not your input. The mod counts that whole reminder under Task reports. A reminder that shares its text block with other content stays under System notifications.
 - The output of a local command counts under System notifications, also where it has no tag: in the form the mod reads, the report of `/context` comes as plain text right after the command line.
 - In the items of Skills list and custom agents, a skill or agent opens its entry as loaded. The MCP server instructions open as loaded too. A row opens only when the conversation still holds its reminder.
 - Directly after a compaction, Claude Code has no new measurement until the next model response. Until then the mod estimates the conversation from its text and marks the total with `~`.
@@ -201,7 +212,7 @@ tsc -p .
 
 `tsc` needs TypeScript 5.4 or newer and the API declarations in `.claude-plugin/types/`. Claude Code writes them when it loads the folder as a mod, for example with `claude --plugin-dir .`.
 
-A pull request that changes a file under `hooks/`, `types/` or `.claude-plugin/` must raise the version in `.claude-plugin/plugin.json`. Without a new version, an installed copy does not update. The rule is in "Releases" in [AGENTS.md](AGENTS.md).
+A pull request that changes a file under `hooks/`, `types/` or `.claude-plugin/` must raise the version in `.claude-plugin/plugin.json`. Without a new version, an installed copy does not update. The rule is in "Releases" in [AGENTS.md](AGENTS.md). `scripts/check-version.sh origin/main` checks it, and CI runs that script on every pull request. A pull request merges only when this check passed.
 
 The desktop app has no `--plugin-dir` flag. To load the folder in its local sessions, add two entries to the `env` block of `~/.claude/settings.json`, then start a new session:
 

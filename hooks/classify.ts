@@ -2,7 +2,7 @@
 // into conversation segments and counts their characters.
 
 import type { ContextBreakdownConversationId } from '../types'
-import { NO_KEYS, baselinePart } from './listing'
+import { NO_KEYS, baselinePart, reminderSpans } from './listing'
 import type { BaselineKeys } from './listing'
 import { SPLIT_IDS } from './segments'
 
@@ -63,11 +63,35 @@ export function emptyChars(): ConversationChars {
   return out
 }
 
+/**
+ * The opening tag of a task report, alone on its line. Claude Code can put
+ * the report of a background task inside a `<system-reminder>` that says the
+ * text is not the person's input (seen in Claude Code 2.1.327). A reminder
+ * that only names the tag in a sentence is not a report.
+ */
+const TASK_REPORT_LINE = /^[ \t]*<task-notification>[ \t]*$/m
+
+/**
+ * Whether a block is one reminder that holds a task report: the tag on its
+ * own line, and a task id. A block gets one segment, so a block that holds
+ * a second reminder, or text after the reminder, stays a system
+ * notification: its other content is not a report.
+ */
+function isWrappedTaskReport(text: string): boolean {
+  const spans = reminderSpans(text)
+  const only = spans[0]
+  if (spans.length !== 1 || only === undefined || text.slice(only.end).trim() !== '') {
+    return false
+  }
+
+  return TASK_REPORT_LINE.test(only.body) && only.body.includes('<task-id>')
+}
+
 /** Which segment a user-role text block belongs to, by its known renderings. */
 export function classifyUserText(text: string): SplitId {
   const head = text.trimStart()
   if (head.startsWith('<system-reminder>')) {
-    return 'injections'
+    return isWrappedTaskReport(text) ? 'task-reports' : 'injections'
   }
   // Checked before the other tags, which a command's output may quote.
   if (isCommandOutput(text)) {

@@ -88,6 +88,19 @@ From a shell:
 claude plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
+## Update
+
+By default, Claude Code does not update this mod by itself. From a shell:
+
+```
+claude plugin marketplace update claude-context-breakdown
+claude plugin update context-breakdown@claude-context-breakdown
+```
+
+Then restart Claude Code. The first command reads the newest version from GitHub, and the second one installs it.
+
+To get new versions without these commands, turn on auto-update for the marketplace: run `/plugin`, open **Marketplaces**, choose `claude-context-breakdown`, and choose **Enable auto-update**. Claude Code then updates the mod in the background and tells you when to reload.
+
 ## Use
 
 The bar is always visible above the prompt. The pane has three levels:
@@ -173,6 +186,8 @@ tsc -p .
 ```
 
 `tsc` needs TypeScript 5.4 or newer and the API declarations in `.claude-plugin/types/`. Claude Code writes them when it loads the folder as a mod, for example with `claude --plugin-dir .`.
+
+A pull request that changes a file under `hooks/`, `types/` or `.claude-plugin/` must raise the version in `.claude-plugin/plugin.json`. Without a new version, an installed copy does not update. The rule is in "Releases" in [AGENTS.md](AGENTS.md).
 
 Project terms are defined in [CONTEXT.md](CONTEXT.md). Decision records are in [docs/adr](docs/adr).
 

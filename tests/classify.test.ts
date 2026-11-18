@@ -57,6 +57,20 @@ describe('classifyUserText', () => {
     ).toBe('injections')
     // The tag alone on a line, with no task id, is not a report.
     expect(classifyUserText('<system-reminder>\nThe tag is:\n<task-notification>\n</system-reminder>')).toBe('injections')
+    // The whole block counts in one segment, at its full length.
+    expect(sortBlock('user', text(wrapped))).toEqual({ id: 'task-reports', chars: wrapped.length })
+    // A block with a second reminder, or with text after the reminder, is not one report.
+    const date = '<system-reminder>\nToday is a day.\n</system-reminder>'
+    expect(classifyUserText(`${date}\n${wrapped}`)).toBe('injections')
+    expect(classifyUserText(`${wrapped}\n${date}`)).toBe('injections')
+    expect(classifyUserText(`${wrapped}\nPlease go on.`)).toBe('injections')
+  })
+
+  test('a memory file that quotes a task report does not move the next reminder to task reports', () => {
+    const memory = `<system-reminder>\nContents of /home/user/project/CLAUDE.md (project instructions):\n\nExample:\n<task-notification>\n<task-id>x</task-id>\n</task-notification>\n</system-reminder>`
+    const date = '<system-reminder>\nToday is a day.\n</system-reminder>'
+    const keys: BaselineKeys = { memoryPaths: ['/home/user/project/CLAUDE.md'], agentTypes: [] }
+    expect(sortBlock('user', text(`${memory}\n${date}`), keys)?.id).toBe('injections')
   })
 
   test('counts typed command lines and shell lines as prompts', () => {

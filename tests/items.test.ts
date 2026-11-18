@@ -153,6 +153,14 @@ describe('conversation items', () => {
     expect(read!.loaded?.()).toBe('     1\talpha\n     2\tbeta\n')
   })
 
+  test('a task report inside a reminder is listed under task reports, named after its summary', () => {
+    const wrapped =
+      '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n<task-notification>\n<task-id>b3</task-id>\n<summary>Build finished</summary>\n</task-notification>\n</system-reminder>'
+    const data = { ...DATA, messages: [{ role: 'user', content: [{ type: 'text', text: wrapped }] }] as MessageLike[] }
+    expect(titles('task-reports', data)).toEqual(['Build finished'])
+    expect(titles('injections', data)).toEqual([])
+  })
+
   test('each kind of block gets a title from its content', () => {
     expect(titles('prompts')).toEqual(['Please read the notes file and list the folder.'])
     expect(titles('injections')).toEqual(['The task list is empty.'])
@@ -233,12 +241,6 @@ describe('titles', () => {
     expect(taskTitle('<task-notification><task-id>b2</task-id><status>failed</status></task-notification>')).toBe(
       'Task b2 failed',
     )
-    // A report inside a reminder is named after its summary, not after the reminder's first line.
-    expect(
-      taskTitle(
-        '<system-reminder>\n[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n<task-notification>\n<task-id>b3</task-id>\n<summary>Build finished</summary>\n</task-notification>\n</system-reminder>',
-      ),
-    ).toBe('Build finished')
     expect(skillTitle('Base directory for this skill: /opt/skills/review/\n\nBody')).toBe('review')
   })
 

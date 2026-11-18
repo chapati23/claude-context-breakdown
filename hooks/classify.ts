@@ -2,7 +2,7 @@
 // into conversation segments and counts their characters.
 
 import type { ContextBreakdownConversationId } from '../types'
-import { NO_KEYS, baselinePart } from './listing'
+import { NO_KEYS, baselinePart, reminderSpans } from './listing'
 import type { BaselineKeys } from './listing'
 import { SPLIT_IDS } from './segments'
 
@@ -71,9 +71,20 @@ export function emptyChars(): ConversationChars {
  */
 const TASK_REPORT_LINE = /^[ \t]*<task-notification>[ \t]*$/m
 
-/** Whether a reminder holds a task report: the tag on its own line, and a task id. */
+/**
+ * Whether a block is one reminder that holds a task report: the tag on its
+ * own line, and a task id. A block gets one segment, so a block that holds
+ * a second reminder, or text after the reminder, stays a system
+ * notification: its other content is not a report.
+ */
 function isWrappedTaskReport(text: string): boolean {
-  return TASK_REPORT_LINE.test(text) && text.includes('<task-id>')
+  const spans = reminderSpans(text)
+  const only = spans[0]
+  if (spans.length !== 1 || only === undefined || text.slice(only.end).trim() !== '') {
+    return false
+  }
+
+  return TASK_REPORT_LINE.test(only.body) && only.body.includes('<task-id>')
 }
 
 /** Which segment a user-role text block belongs to, by its known renderings. */

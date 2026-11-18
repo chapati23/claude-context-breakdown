@@ -1,4 +1,8 @@
-// j, k and the arrows at levels 1 and 2: the focus ring one row down or up.
+// j, k and the arrows at levels 1 and 2 on the terminal: the focus ring one
+// row down or up. Only the terminal reports every move of the ring to the
+// mod. Every other surface moves the ring with Tab and Shift+Tab and raises
+// no event for them, so there the mod draws no j and k and leaves the arrows
+// to the app.
 //
 // The ring moves through `$.ui.focus`. A held key can press faster than the
 // engine answers and raises `ui.focus`, so the mod keeps its own record of
@@ -23,12 +27,6 @@
 
 import type { ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
 import { LIST_DOWN, LIST_UP } from './scroll'
-
-/**
- * Whether the arrows move the ring at levels 1 and 2. Set it to false to give
- * the arrows back to the engine's scroll, should the live check fail.
- */
-export const ARROWS_MOVE_RING = true
 
 /** The keys of the rows that open, in drawing order; none at level 3. */
 export function rowKeys(view: ContextBreakdownView, snapshot: ContextBreakdownSnapshot | null): string[] {
@@ -93,12 +91,8 @@ export type PersonScroll = { by: number; pointer?: unknown }
  * of one row with no pointer: an arrow. The wheel carries a pointer, and a
  * page key or Home and End move more than one row.
  */
-export function arrowStep(
-  e: PersonScroll,
-  state: { isFocused: boolean; level: 1 | 2 | 3 },
-  enabled: boolean = ARROWS_MOVE_RING,
-): 1 | -1 | null {
-  if (!enabled || !state.isFocused || state.level === 3 || e.pointer !== undefined || Math.abs(e.by) !== 1) {
+export function arrowStep(e: PersonScroll, state: { isFocused: boolean; level: 1 | 2 | 3 }): 1 | -1 | null {
+  if (!state.isFocused || state.level === 3 || e.pointer !== undefined || Math.abs(e.by) !== 1) {
     return null
   }
 

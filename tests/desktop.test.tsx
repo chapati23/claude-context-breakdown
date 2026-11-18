@@ -5,13 +5,18 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { targetAt } from '../hooks/barclient'
-import type { BarClientProps, BarRun } from '../hooks/barclient'
+import { bandTree } from '../hooks/band'
+import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
+import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
 import { desktopHotkeyOf } from '../hooks/pane'
-import { HOTKEY_CELLS } from '../hooks/table'
+import { HOTKEY_CELLS, TABLE_MAX_COLUMNS } from '../hooks/table'
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
-import { BAND, CHAT, FOCUSED_PANE, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, richUsage, realSession, world } from './fixtures'
+import type { BandModel } from '../hooks/view'
+import { BAND, CHAT, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, richUsage, realSession, usage, world } from './fixtures'
+import type { World } from './fixtures'
+import { flatten, mountPane } from './e2e/helpers'
+import { level2 } from './e2e/journeys'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
 const WIDE = { ...BAND, props: { ...BAND.props, bodyColumns: 100 } } as const
@@ -49,6 +54,27 @@ function targetOfColor(runs: readonly BarRun[], color: string): number {
   expect(run).toBeDefined()
 
   return run!.target as number
+}
+
+/** What the Client posts for a click on part `target`: its index and its identity. */
+function postOf(props: BarClientProps, target: number): BarClientPost {
+  const identity = props.parts[String(target)]
+
+  expect(identity).toBeDefined()
+
+  return { open: target, ...identity! }
+}
+
+/** The column where the first run of `target` starts. */
+function columnOf(runs: readonly BarRun[], target: BarRun['target']): number {
+  let start = 0
+  for (const run of runs) {
+    if (run.target === target) {
+      return start
+    }
+    start += [...run.text].length
+  }
+  throw new Error('no run')
 }
 
 async function measured($: Engine, on: On) {
@@ -136,20 +162,11 @@ test('the desktop band’s hover texts name the segments and never outgrow the l
 })
 
 test('the Client module draws the runs, swaps the legend for a name under the pointer, and posts a click', async ($, on) => {
-  await measured($, on)
+  const w = await measured($, on)
   const ui = await $.ui.mount({ ...WIDE, surface: 'desktop' })
   const { runs, hovers } = (await clientOf(ui)).props
   const claude = targetOfColor(runs, DARK.segments['claude-output'])
-  const column = (target: BarRun['target']) => {
-    let start = 0
-    for (const run of runs) {
-      if (run.target === target) {
-        return start
-      }
-      start += [...run.text].length
-    }
-    throw new Error('no run')
-  }
+  const column = (target: BarRun['target']) => columnOf(runs, target)
   const drawnText = async () => (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => text.text).join('')
 
   expect(await drawnText()).toBe(runs.map(run => run.text).join(''))
@@ -164,6 +181,10 @@ test('the Client module draws the runs, swaps the legend for a name under the po
 
   await ui.pointer({ type: 'leave', x: 0, y: 0 })
   expect(await drawnText()).toContain('Tool results 45%')
+
+  // A left press on a segment posts it, and the hooks module opens the pane.
+  await ui.pointer({ type: 'down', x: column(claude), y: 0, button: 'left' })
+  expect(w.opened).toEqual(['context-breakdown'])
   await ui.unmount()
 })
 
@@ -175,8 +196,9 @@ test('a click posted from the band opens the pane; the total opens level 1', asy
   await $.session.start(START)
   await w.clock.advance(0)
   const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
-  const { runs } = (await clientOf(band)).props
-  const keysOf = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
+  const props = (await clientOf(band)).props
+  const { runs } = props
+  const keysOf =async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
     (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith(prefix))
   const pane = async () => {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
@@ -188,7 +210,7 @@ test('a click posted from the band opens the pane; the total opens level 1', asy
 
   // Claude output is a cell of its own: a click opens its items (level 2).
   const claude = targetOfColor(runs, DARK.segments['claude-output'])
-  await band.post({ open: claude }, { in: CLIENT })
+  await band.post(postOf(props, claude), { in: CLIENT })
   expect(w.opened).toEqual(['context-breakdown'])
   const items = await pane()
   expect(items.items.length).toBeGreaterThan(0)
@@ -201,8 +223,9 @@ test('a click posted from the band opens the pane; the total opens level 1', asy
   expect(overview.items).toEqual([])
   expect(overview.rows).toContain('row-tool-results')
 
-  // Nothing opens for a part that is not a segment, or an index that is not a part.
-  await band.post({ open: 99 }, { in: CLIENT })
+  // Nothing opens for an index without an identity, an identity no part has, or no index.
+  await band.post({ open: claude }, { in: CLIENT })
+  await band.post({ open: 99, id: 'mcp', members: ['mcp'] }, { in: CLIENT })
   await band.post({ nothing: true }, { in: CLIENT })
   expect(w.opened).toHaveLength(2)
   await band.unmount()
@@ -211,11 +234,11 @@ test('a click posted from the band opens the pane; the total opens level 1', asy
 test('a click on a merged cell opens level 1, not one member’s items', async ($, on) => {
   const w = await measured($, on)
   const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
-  const { runs } = (await clientOf(band)).props
+  const props = (await clientOf(band)).props
 
   // The task report is merged into the tool results here: the cell holds two segments.
-  const merged = targetOfColor(runs, DARK.segments['tool-results'])
-  await band.post({ open: merged }, { in: CLIENT })
+  const merged = targetOfColor(props.runs, DARK.segments['tool-results'])
+  await band.post(postOf(props, merged), { in: CLIENT })
   expect(w.opened).toEqual(['context-breakdown'])
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
   const keys = (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '')
@@ -249,6 +272,155 @@ test('targetAt maps a column to the target of the run that covers it', () => {
   expect(targetAt([], 0)).toBeNull()
   // A character is a cell, a surrogate pair too.
   expect(targetAt([{ text: '😀a', target: 3 }, { text: 'b', target: 4 }], 1)).toBe(3)
+})
+
+test('hoveredPart reads the segment under a column from the runs it is given; isFaded dims the other segments', () => {
+  const runs: BarRun[] = [
+    { text: '██', target: 0 },
+    { text: '█', target: 1 },
+    { text: '··', target: null },
+    { text: ' 9k', target: 'total' },
+  ]
+  expect(hoveredPart(runs, null)).toBeNull()
+  expect(hoveredPart(runs, 1)).toBe(0)
+  expect(hoveredPart(runs, 2)).toBe(1)
+  // Free space and the total are no segment.
+  expect(hoveredPart(runs, 3)).toBeNull()
+  expect(hoveredPart(runs, 6)).toBeNull()
+  // After a relayout the same column names the part now under it.
+  expect(hoveredPart([{ text: '█', target: 0 }, { text: '██', target: 1 }], 1)).toBe(1)
+
+  expect(isFaded(runs[0]!, 1)).toBe(true)
+  expect(isFaded(runs[1]!, 1)).toBe(false)
+  expect(isFaded(runs[2]!, 1)).toBe(false)
+  expect(isFaded(runs[3]!, 1)).toBe(false)
+  expect(isFaded(runs[0]!, null)).toBe(false)
+})
+
+/** A new measurement of `messages`, `chars` characters in all. */
+async function remeasure($: Engine, w: World, messages: readonly unknown[], chars: number) {
+  w.messages = messages
+  w.usage = usage(26_000 + chars, chars)
+  await $.session.measure({ context: w.usage.context!, rateLimits: [], changed: ['context'] })
+  await w.clock.advance(0)
+}
+
+/** Longer prompts: their cell grows, so the columns after it shift. */
+const longerPrompts = ($: Engine, w: World) =>
+  remeasure($, w, [{ role: 'user', content: [{ type: 'text', text: 'p'.repeat(20_000) }] }, ...MESSAGES.slice(1)], 58_100)
+
+/** A skill body: a new cell before the prompts and Claude output, so their indices shift. */
+const skillBody = ($: Engine, w: World) =>
+  remeasure($, w, [...MESSAGES, { role: 'user', content: [{ type: 'text', text: `Base directory for this skill: ${'s'.repeat(10_000)}` }] }], 50_031)
+
+test('a click posted before a relayout opens the segment it was on, never the part now at its index', async ($, on) => {
+  const w = await measured($, on)
+  const first = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const before = (await clientOf(first)).props
+  const claude = targetOfColor(before.runs, DARK.segments['claude-output'])
+  const old = postOf(before, claude)
+  await first.unmount()
+
+  await skillBody($, w)
+  const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const after = (await clientOf(band)).props
+  // Another segment now stands at the index the click names.
+  expect(after.parts[String(claude)]).toBeDefined()
+  expect(after.parts[String(claude)]?.id).not.toBe('claude-output')
+
+  await band.post(old, { in: CLIENT })
+  if (w.opened.length > 0) {
+    const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
+    expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('Claude output')
+    await pane.unmount()
+  }
+  await band.unmount()
+})
+
+// The test kit cannot raise `ui.fault`, so this asks `bandTree` directly,
+// with an element table whose every element returns its tag and props.
+test('after the bar Client failed, bandTree draws the desktop bar as the picture row with the total as a Button', () => {
+  type Drawn = { type: string; props: Record<string, unknown> & { children?: unknown } }
+  const ui = new Proxy({}, { get: (_, type) => (props: Drawn['props']) => ({ type: String(type), props }) }) as never
+  const model: BandModel = {
+    label: '9k/20k 45%',
+    legend: null,
+    parts: [{ kind: 'segment', id: 'system', members: ['system'], tokens: 9000, cells: 4 }, { kind: 'free', cells: 4 }],
+    chips: [],
+  }
+  const opened: unknown[] = []
+  const draw = (clientFailed: boolean) =>
+    bandTree(ui, model, DARK, part => opened.push(part), null, { tokensOf: () => 9000, used: 9000 }, 'desktop', clientFailed) as unknown as Drawn
+  const all = (node: unknown): Drawn[] => {
+    if (Array.isArray(node)) {
+      return node.flatMap(all)
+    }
+    if (typeof node !== 'object' || node === null || !('type' in node)) {
+      return []
+    }
+    const drawn = node as Drawn
+
+    return [drawn, ...all(drawn.props.children)]
+  }
+
+  expect(draw(false).type).toBe('Client')
+  const fallback = all(draw(true))
+  expect(fallback.filter(node => node.type === 'Client')).toEqual([])
+  expect(fallback.filter(node => node.type === 'Svg').length).toBeGreaterThan(0)
+  const total = fallback.find(node => node.type === 'Button' && node.props.key === 'context-total')
+  expect(total).toBeDefined()
+  ;(total!.props.onPress as () => void)()
+  expect(opened).toEqual([null])
+})
+
+test('the Client names the segment under the pointer after a relayout, not the part that was there', async ($, on) => {
+  const w = await measured($, on)
+  const ui = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const before = (await clientOf(ui)).props
+  const x = columnOf(before.runs, targetOfColor(before.runs, DARK.segments['claude-output']))
+  await ui.pointer({ type: 'move', x, y: 0 })
+
+  await longerPrompts($, w)
+  const after = (await clientOf(ui)).props
+  const now = hoveredPart(after.runs, x)
+  const drawn = (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => text.text).join('')
+  expect(now).not.toBeNull()
+  expect(drawn).toContain(after.hovers[String(now)]!)
+  await ui.unmount()
+})
+
+test('an enter names no segment until a move places the pointer', async ($, on) => {
+  await measured($, on)
+  const ui = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const { runs, hovers } = (await clientOf(ui)).props
+  const claude = targetOfColor(runs, DARK.segments['claude-output'])
+  const drawnText = async () => (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => text.text).join('')
+
+  await ui.pointer({ type: 'move', x: columnOf(runs, claude), y: 0 })
+  await ui.pointer({ type: 'leave', x: columnOf(runs, claude), y: 0 })
+  // The enter carries the column the last move reported, wherever the pointer came back in.
+  await ui.pointer({ type: 'enter', x: columnOf(runs, claude), y: 0 })
+  expect(await drawnText()).not.toContain(hovers[String(claude)]!)
+  expect(await drawnText()).toContain('Tool results 45%')
+  await ui.unmount()
+})
+
+test('with no room for a name, the pointer on a segment still dims the other segments', async ($, on) => {
+  await measured($, on)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 54 } })
+  const { runs, hovers } = (await clientOf(ui)).props
+  expect(hovers).toEqual({})
+  const pointed = targetOfColor(runs, DARK.segments['claude-output'])
+
+  await ui.pointer({ type: 'move', x: columnOf(runs, pointed), y: 0 })
+  const drawn = await ui.findAll({ type: 'Text', in: CLIENT })
+  expect(drawn.map(text => text.text)).toEqual(runs.map(run => run.text))
+  runs.forEach((run, index) => {
+    if (typeof run.target === 'number') {
+      expect(drawn[index]?.props.dimColor === true).toBe(run.target !== pointed)
+    }
+  })
+  await ui.unmount()
 })
 
 /** A desktop row: the Box that holds the Button keyed `key`. */
@@ -544,10 +716,139 @@ test('the desktop key line keeps one set of controls in one order when Esc takes
 
     return keys
   }
-  expect(await check()).toEqual(['list-down', 'list-up', 'back', 'close', 'refresh'])
+  // No Down and Up at any level: Tab moves the ring along the rows, and the
+  // app scrolls the text. The key words name Tab alone.
+  expect(await check()).toEqual(['back', 'close', 'refresh'])
+  expect(await words()).toEqual(['tab: Move', '⏎ or 1-9: Open'])
   await ui.press({ key: 'row-tool-results' })
-  expect(await check()).toEqual(['list-down', 'list-up', 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
+  expect(await check()).toEqual(['back', 'sort', 'prev', 'next', 'close', 'refresh'])
+  expect(await words()).toEqual(['tab: Move', '⏎ or 1-9: Open'])
   await ui.press({ key: 'item-r:tu2' })
-  expect((await check()).slice(0, 2)).toEqual(['scroll-down', 'scroll-up'])
+  expect(await check()).toEqual(['back', 'prev', 'next', 'format', 'view', 'copy', 'mention', 'close', 'refresh'])
   await ui.unmount()
+})
+
+test('desktop plain lines line up with the rows, and the table stops at its cap', async ($, on) => {
+  const w = await measured($, on)
+  // One MCP server whose tool is not loaded: a server line under MCP tools.
+  const base = usage(66_000)
+  const mcpTools = [{ name: 'mcp__tickets__find', serverName: 'tickets', tokens: 4000, isLoaded: false }]
+  w.usage = { ...base, context: { ...base.context, breakdown: { ...base.context.breakdown!, mcpTools } } }
+  const first = await mountPane($, 'desktop')
+  await first.press({ key: 'refresh' })
+  await w.clock.advance(0)
+  await first.unmount()
+  /** The cells of `line` before `text` starts, and up to where it ends. */
+  const span = (line: string, text: string) => {
+    const at = line.indexOf(text)
+    expect(at, `${text} in ${JSON.stringify(line)}`).toBeGreaterThanOrEqual(0)
+
+    return { start: cellWidth(line.slice(0, at)), end: cellWidth(line.slice(0, at + text.length)) }
+  }
+  const rowsAt: Record<number, string> = {}
+  // At 32 columns a swatch leads each row and the key cap follows it.
+  for (const columns of [32, 45, 64, 88, 140]) {
+    const ui = await mountPane($, 'desktop', { columns })
+    // The flattened desktop text draws a key cap as "4: " before the label.
+    const lines = flatten(await ui.drawn(), { surface: 'desktop' }).map(line => line.replace(/[⟦⟧⟪⟫⟨⟩]/g, ''))
+    const line = (pattern: RegExp) => lines.find(text => pattern.test(text)) ?? ''
+    const row = line(/Tool results .*30k/)
+    rowsAt[columns] = row
+    const name = span(row, 'Tool results').start
+    const tokens = span(row, '30k').end
+    // Where the row's colour starts: the swatch in a narrow pane, else the length bar.
+    const color = cellWidth(row.slice(0, row.search(/[█▉▊▋▌▍▎▏]/)))
+    const share = cellWidth(row.trimEnd())
+    const where = `${columns} columns`
+    // Group headings: the name in the rows' column, the share at the rows' end.
+    for (const heading of ['Baseline', 'Conversation']) {
+      const text = line(new RegExp(`^ *${heading} `))
+      expect({ where, heading, at: span(text, heading).start, end: cellWidth(text.trimEnd()) }).toEqual({ where, heading, at: name, end: share })
+    }
+    // Free space, Reserve and the Not loaded lines: the name in the rows'
+    // column, the tokens at the rows' tokens column.
+    for (const [label, figure] of [
+      ['Free space', '101k'],
+      ['Reserve', '33k'],
+      ['MCP tools', '9k'],
+    ] as const) {
+      // In a narrow pane Free space and Reserve show their glyph in the swatch's place.
+      const text = line(new RegExp(`(^|\\s)${label} `))
+      expect({ where, label, at: span(text, label).start, end: span(text, figure).end }).toEqual({ where, label, at: name, end: tokens })
+    }
+    // Free space and Reserve draw the bar's own glyph where a row's colour starts.
+    for (const [label, glyph] of [
+      ['Free space', '··'],
+      ['Reserve', '▒▒'],
+    ] as const) {
+      expect({ where, label, glyph: span(line(new RegExp(`(^|\\s)${label} `)), glyph).start }).toEqual({ where, label, glyph: color })
+    }
+    expect({ where, at: span(line(/^ *Not loaded$/), 'Not loaded').start }).toEqual({ where, at: name })
+    // An MCP server line stands under MCP tools, indented past its name.
+    const server = line(/^ +tickets /)
+    expect({ where, indented: span(server, 'tickets').start > name, end: span(server, '4k').end }).toEqual({
+      where,
+      indented: true,
+      end: tokens,
+    })
+    // The row never reaches the pane's edge, and stops at the cap.
+    expect({ where, fits: cellWidth(row.trimEnd()) < columns }).toEqual({ where, fits: true })
+    expect({ where, capped: cellWidth(row.trimEnd()) <= TABLE_MAX_COLUMNS }).toEqual({ where, capped: true })
+    await ui.unmount()
+  }
+  // A wide pane draws the same row as one at the cap.
+  expect(rowsAt[140]).toBe(rowsAt[88])
+})
+
+test('a rebuild that puts a new item first keeps the autoFocus key on the row that had it', async ($, on) => {
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  w.files = { [NOTES]: 'alpha\nbeta\n', [PROJECT_MD]: `${PROJECT_TEXT}\n` }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
+  await ui.press({ key: 'row-tool-results' })
+  const ringed = async () => (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)
+  const items = async () => (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('item-'))
+  const before = await ringed()
+  expect(before).toEqual([(await items())[0]])
+
+  // A new result, the newest and the largest: first in either order.
+  w.messages = [
+    ...CHAT,
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'fresh', name: 'Bash', input: { command: 'seq' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'fresh', content: 'x'.repeat(40_000) }] },
+  ]
+  await ui.press({ key: 'refresh' })
+  await w.clock.advance(0)
+  expect((await items())[0]).toBe('item-r:fresh')
+  // A desktop moves the focus to a new autoFocus key: the key stays on the row it was on.
+  expect(await ringed()).toEqual(before)
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+})
+
+test('a desktop control that does not apply is drawn dimmer than a live one, with no child', async ($, on) => {
+  await measured($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
+  await ui.press({ key: 'row-tool-results' })
+  // A list of one page: Back is live, Previous page is off.
+  const back = await ui.find({ key: 'back' })
+  const prev = await ui.find({ key: 'prev' })
+  // The native button shows its label only and drops a child: `dimColor` on
+  // the Button is the one way to draw it dimmer.
+  expect({ dim: back?.props.dimColor === true, children: back?.children }).toEqual({ dim: false, children: [] })
+  expect({ dim: prev?.props.dimColor === true, children: prev?.children }).toEqual({ dim: true, children: [] })
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+
+  // The terminal draws as before: every control dim, an off one in the faint colour.
+  const terminal = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  await terminal.press({ key: 'row-tool-results' })
+  expect((await terminal.find({ key: 'back' }))?.props.dimColor).toBe(true)
+  const off = await terminal.find({ key: 'prev' })
+  expect(off?.props.dimColor).toBeUndefined()
+  expect((off?.children ?? []).filter(isNode).map(child => child.props?.color)).toEqual(['subtle'])
+  await terminal.unmount()
 })

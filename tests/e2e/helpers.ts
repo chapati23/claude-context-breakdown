@@ -656,7 +656,8 @@ export async function rowsOf(ui: PaneUi): Promise<string[]> {
  * before the session starts. The kit has no answer for a mod's own
  * `$.ui.focus` (it rejects: "no implementation for ui.focus", and no hook
  * of a test hears the call), so this record is what a test can see of the
- * focus requests, on the desktop as on the terminal.
+ * focus requests. Only the terminal writes a row's key; every surface
+ * writes "null" when a new tree starts.
  */
 export function ringWrites(on: On): string[] {
   const keys: string[] = []

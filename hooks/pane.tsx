@@ -17,7 +17,6 @@ import type { Ui } from './band'
 import { FILLED, FREE, RESERVE } from './bar'
 import { baselineOf } from './categories'
 import { formatTokens } from './format'
-import { lineMove, shownFacts, shownMarkdown, shownRuns, topOf } from './lines'
 import { colorOf } from './palette'
 import type { Palette } from './palette'
 import { LIST_DOWN, LIST_UP, SCROLL_DOWN, SCROLL_UP } from './scroll'
@@ -32,6 +31,7 @@ import {
   itemNames,
   largestOf,
   lengthBarParts,
+  lineFacts,
   listFacts,
   nameText,
   notLoadedRows,
@@ -40,7 +40,7 @@ import {
   tableLayout,
 } from './table'
 import type { LengthBarParts, Table } from './table'
-import { cellWidth } from './text'
+import { cellWidth, codeRuns } from './text'
 import { paneHeading } from './view'
 
 export type PaneActions = {
@@ -652,77 +652,9 @@ function listBody(
 export const NEXT_BELOW = 'next-below'
 
 /**
- * Where level 3's text starts on `surface`: the terminal scrolls the pane's
- * window, so its text always starts at the page's top; elsewhere j and k
- * move the start (lines.ts).
- */
-export function shownTop(item: ContextBreakdownContent, surface: RenderSurface): number {
-  return surface === 'terminal' ? 0 : topOf(item)
-}
-
-/** Rows a text takes in `columns`, wrapped. */
-function rowsOf(text: string, columns: number): number {
-  return Math.max(1, Math.ceil(cellWidth(text) / Math.max(1, columns)))
-}
-
-/**
- * About how many rows of level 3 stand above its text (the title, the facts,
- * the notes, the keys line and its margins) and below it (Next page), so a
- * page entered from its end can show about one window of text. An estimate:
- * the surface wraps and draws key caps its own way.
- */
-export function contentHeadRows(
-  view: Extract<ContextBreakdownView, { level: 3 }>,
-  columns: number,
-  isFocused: boolean,
-  surface: RenderSurface,
-): number {
-  const { item } = view
-  const def = segmentDef(view.list.segment)
-  const none = () => undefined
-  const actions: PaneActions = {
-    close: none,
-    refresh: none,
-    openSegment: none,
-    openItem: none,
-    back: none,
-    toggleSort: none,
-    listPage: none,
-    contentPage: none,
-    toggleSource: none,
-    copy: none,
-    mention: none,
-  }
-  const hasCaps = isFocused || surface !== 'terminal'
-  // A control: its label, a key cap (about three cells and a space), and the gap of two.
-  const controlCells = controls(view, actions, isFocused, surface).reduce(
-    (sum, control) => sum + cellWidth(control.label) + (hasCaps ? 4 : 0) + 2,
-    0,
-  )
-  let rows = rowsOf(`██ ${def.short} › ${item.title}`, columns) + 1
-  if (item.isChanged && item.source === 'loaded') {
-    rows += rowsOf('! The file changed on disk since it was loaded.', columns)
-  }
-  if (item.note !== null) {
-    rows += rowsOf(item.note, columns)
-  }
-  if (item.notice !== null) {
-    rows += 1
-  }
-  // The keys line's margin, the hint, the controls, and the text's margin.
-  rows += 1 + (isFocused ? 0 : rowsOf(keysHint(surface), columns)) + rowsOf(' '.repeat(controlCells), columns) + 1
-  if (item.page + 1 < item.pages) {
-    rows += 2
-  }
-
-  return rows
-}
-
-/**
  * Level 3: the title, the facts line, then `keys` (the controls), then the
  * text. The controls stand above the text so that the ring, which the engine
- * brings into view on every new tree, keeps the heading in view too. `top`:
- * the units j and k skipped at the page's top, 0 on the terminal.
+ * brings into view on every new tree, keeps the heading in view too.
  */
 function contentBody(
   el: Ui,
@@ -732,7 +664,6 @@ function contentBody(
   keys: RenderElement,
   actions: PaneActions,
   ring: string | null,
-  top = 0,
 ) {
   const { Box, Button, Code, Markdown, Text } = el
   const def = segmentDef(segment)
@@ -742,15 +673,14 @@ function contentBody(
     item.source === 'loaded' ? 'as loaded' : 'on disk',
   ]
   // Where the page lies in the whole item: a page holds hundreds of lines,
-  // so a page number alone says little. Once j moved the text, from the
-  // first line shown.
-  const place = shownFacts({ ...item, top })
+  // so a page number alone says little.
+  const place = lineFacts(item)
   if (place !== '') {
     facts.push(place)
   }
   // The raw view promises every character: a line too long for the engine's
   // Code element is split, and the facts line says so.
-  const code = item.format === 'raw' && item.text !== '' ? shownRuns(item.text, item.startLine, top) : null
+  const code = item.format === 'raw' && item.text !== '' ? codeRuns(item.text, item.startLine) : null
   if (code?.isSplit === true) {
     facts.push('long lines split')
   }
@@ -779,7 +709,7 @@ function contentBody(
           <Text dimColor>(empty)</Text>
         ) : code === null ? (
           // No onLinkPress: a link is the surface's to open, as in a reply.
-          <Markdown key="content-formatted" text={shownMarkdown(item.text, top)} />
+          <Markdown key="content-formatted" text={item.text} />
         ) : (
           code.runs.map((run, index) => (
             <Code
@@ -823,22 +753,25 @@ function downKey(view: ContextBreakdownView): string {
   return view.level === 3 ? SCROLL_DOWN : LIST_DOWN
 }
 
+/**
+ * Whether the keys line draws Down and Up (j and k). Only the terminal draws
+ * them, and only with the keyboard: a click moves one row, which the wheel
+ * does better. Elsewhere Tab moves the ring along the rows and the app's own
+ * scrolling moves the text.
+ */
+function hasSteps(isFocused: boolean, surface: RenderSurface): boolean {
+  return surface === 'terminal' && isFocused
+}
+
 function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean, surface: RenderSurface): Control[] {
   const out: Control[] = []
   const add = (key: string, label: string, hotkey: string, isOn: boolean, onPress: Control['onPress']) =>
     out.push({ key, label, hotkey, isOn, onPress: isOn ? onPress : () => undefined })
-  // j and k on the terminal only with the keyboard: a click moves one row,
-  // which the wheel does better. A desktop draws them in both states, so its
-  // line keeps one set of controls when Esc takes the keys; a click there
-  // does what the key does. The register's `ui.press` hooks do the move
-  // (ring.ts, scroll.ts, lines.ts), so the Buttons' own presses do nothing.
-  // Off the terminal, j and k at level 3 move where the text starts
-  // (lines.ts): each is off where a press would do nothing.
-  if (isFocused || surface !== 'terminal') {
-    const canDown = view.level !== 3 || surface === 'terminal' || lineMove(view.item, 1) !== null
-    const canUp = view.level !== 3 || surface === 'terminal' || lineMove(view.item, -1) !== null
-    add(downKey(view), 'Down', 'j', canDown, () => undefined)
-    add(view.level === 3 ? SCROLL_UP : LIST_UP, 'Up', 'k', canUp, () => undefined)
+  // The register's `ui.press` hooks do the move (ring.ts, scroll.ts), so the
+  // Buttons' own presses do nothing.
+  if (hasSteps(isFocused, surface)) {
+    add(downKey(view), 'Down', 'j', true, () => undefined)
+    add(view.level === 3 ? SCROLL_UP : LIST_UP, 'Up', 'k', true, () => undefined)
   }
   // b at level 1 too: a reflex press there must not leave the pane.
   add('back', 'Back', 'b', view.level !== 1, actions.back)
@@ -881,19 +814,22 @@ export function keysHint(surface: RenderSurface): string {
 
 /** The words that say how the ring moves along the rows: the arrows and Tab (j and k are controls of their own). */
 export const MOVE_WORDS = '↑↓ tab: Move'
+/** Off the terminal only Tab moves the ring: the arrows scroll the pane there. */
+export const TAB_WORDS = 'tab: Move'
 
 /**
  * The words before the controls, with the keyboard: the arrows and Tab walk
- * the rows and Enter or a digit opens one. Without it, none: the hint stands
- * on its own line, and the controls keep only their labels, so a click
- * still works and no key is offered that would go to the prompt.
+ * the rows (off the terminal, Tab alone) and Enter or a digit opens one.
+ * Without it, none: the hint stands on its own line, and the controls keep
+ * only their labels, so a click still works and no key is offered that
+ * would go to the prompt.
  */
-export function keyWords(hasRows: boolean, columns: number, isFocused: boolean): string[] {
+export function keyWords(hasRows: boolean, columns: number, isFocused: boolean, surface: RenderSurface = 'terminal'): string[] {
   if (!isFocused || !hasRows) {
     return []
   }
 
-  return [MOVE_WORDS, showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
+  return [surface === 'terminal' ? MOVE_WORDS : TAB_WORDS, showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
 }
 
 /**
@@ -902,8 +838,13 @@ export function keyWords(hasRows: boolean, columns: number, isFocused: boolean):
  * first control, or the control under the text when k crossed back into the
  * page. Null when the tree has no such element.
  */
-export function ringKey(view: ContextBreakdownView, snapshot: ContextBreakdownSnapshot | null, isFocused: boolean): string | null {
-  const firstControl = isFocused ? downKey(view) : 'back'
+export function ringKey(
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  isFocused: boolean,
+  surface: RenderSurface = 'terminal',
+): string | null {
+  const firstControl = hasSteps(isFocused, surface) ? downKey(view) : 'back'
   if (view.level === 3) {
     return view.item.atEnd && view.item.page + 1 < view.item.pages ? NEXT_BELOW : firstControl
   }
@@ -947,7 +888,7 @@ function keysLine(
         </Text>
       )}
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {keyWords(hasRows, columns, isFocused || surface !== 'terminal').map(words => (
+        {keyWords(hasRows, columns, isFocused || surface !== 'terminal', surface).map(words => (
           <Text dimColor>{words}</Text>
         ))}
         {controls(view, actions, isFocused, surface).map(control => {
@@ -961,8 +902,15 @@ function keysLine(
             onPress: (press: { surface: RenderSurface }) => void control.onPress(press.surface),
           }
 
-          // A control that does not apply draws its label in the theme's
-          // faint colour, a step below the others' dim.
+          // A desktop draws a native button that shows only its label and
+          // drops a child: a live control is drawn as it is, and one that
+          // does not apply is drawn dim.
+          if (surface !== 'terminal') {
+            return control.isOn ? <Button {...props} /> : <Button {...props} dimColor />
+          }
+
+          // On the terminal a control that does not apply draws its label in
+          // the theme's faint colour, a step below the others' dim.
           return control.isOn ? (
             <Button {...props} dimColor />
           ) : (
@@ -998,7 +946,7 @@ export function paneTree(
   ringNow: string | null = null,
 ): RenderElement {
   const { Box, Text } = el
-  const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused)
+  const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
   // Where the ring is: the last focus event's element, or, before the first
   // one for this tree, the element that asks for the ring. A pane without
   // the keyboard shows no ring.
@@ -1006,7 +954,7 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, false, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, view.list.segment, view.item, palette, keys, actions, ring, shownTop(view.item, surface))
+    return contentBody(el, view.list.segment, view.item, palette, keys, actions, ring)
   }
   let body: RenderElement
   let hasRows = false

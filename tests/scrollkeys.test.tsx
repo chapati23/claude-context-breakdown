@@ -71,14 +71,26 @@ function ourScroll($: Engine, standing: number, contentRows = 60, bodyRows = 20)
   })
 }
 
-test('j and k are hotkeys at every level while the pane has the keyboard; without it the terminal drops them', async ($, on) => {
+test('on the terminal j and k are hotkeys at every level while the pane has the keyboard; elsewhere there are none', async ($, on) => {
   await scrollWorld($, on)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    const hotkeys = async () => (await ui.findAll({ type: 'Button' })).map(button => button.props.hotkey)
     // Levels 1 and 2 key them apart from level 3, so no tree of one level
-    // holds the key of level 3's first control (scroll.ts).
+    // holds the key of level 3's first control (scroll.ts). Off the terminal
+    // no level has Down and Up and no j or k key cap: Tab moves the ring
+    // along the rows, and the app's own scrolling moves the text.
     const check = async (down: string, up: string) => {
+      if (surface !== 'terminal') {
+        for (const key of ['scroll-down', 'scroll-up', 'list-down', 'list-up']) {
+          expect(await ui.find({ key })).toBeUndefined()
+        }
+        expect(await hotkeys()).not.toContain('j')
+        expect(await hotkeys()).not.toContain('k')
+
+        return
+      }
       expect((await ui.find({ key: down }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
       expect((await ui.find({ key: up }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
       const other = down === 'scroll-down' ? ['list-down', 'list-up'] : ['scroll-down', 'scroll-up']
@@ -93,17 +105,14 @@ test('j and k are hotkeys at every level while the pane has the keyboard; withou
     expect(await ui.find({ type: 'Code' })).toBeDefined()
     await check('scroll-down', 'scroll-up')
 
-    // Without the keyboard: the hint as before. The terminal drops j and k; a
-    // desktop keeps them to click, with their hotkeys drawn as key caps (a
-    // hotkey presses only while the pane holds the keys), so its line does
-    // not change.
+    // Without the keyboard: the hint as before, and no j or k at level 3.
     await ui.redraw({ ...PANE.props })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeDefined()
-    for (const [key, ch] of [['scroll-down', 'j'], ['scroll-up', 'k']] as const) {
-      const control = await ui.find({ key })
-      expect(control === undefined).toBe(surface === 'terminal')
-      expect(control?.props.hotkey).toBe(surface === 'terminal' ? undefined : ch)
+    for (const key of ['scroll-down', 'scroll-up']) {
+      expect(await ui.find({ key })).toBeUndefined()
     }
+    expect(await hotkeys()).not.toContain('j')
+    expect(await hotkeys()).not.toContain('k')
     await ui.redraw({ ...FOCUSED_PANE.props })
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
@@ -115,8 +124,8 @@ test('a press moves the window one row from where it stands, within the tree', a
   let standing = 0
   const { seen } = await scrollWorld($, on, BIG, () => standing)
 
-  // The terminal only: off it j and k at level 3 move the text, not the
-  // window (tests/desktoplines.test.tsx).
+  // The terminal only: off it level 3 draws no j and k, and the app scrolls
+  // the text (tests/e2e/longitem.test.tsx).
   for (const surface of TERMINAL) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     await ui.press({ key: 'row-tool-results' })
@@ -206,98 +215,6 @@ test('presses that overlap step one after the other, each from the row the last 
   await ui.unmount()
 })
 
-test('quick presses while the engine still reports the old row go on row by row, and the wheel wins', async ($, on) => {
-  // The engine's window lags (seen in the desktop app, before j and k there
-  // stopped scrolling; the terminal keeps this path), so each scroll it
-  // raises still stands at 5 while the window has moved on.
-  let standing = 5
-  const { seen } = await scrollWorld($, on, BIG, () => standing)
-  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
-  await ui.press({ key: 'row-tool-results' })
-  await ui.press({ key: 'item-r:big' })
-  seen.length = 0
-
-  await ui.press({ key: 'scroll-down' })
-  await ui.press({ key: 'scroll-down' })
-  await ui.press({ key: 'scroll-down' })
-  expect(seen.map(one => one.offset)).toEqual([6, 7, 8])
-  // k goes back from 8, not from the stale 5.
-  await ui.press({ key: 'scroll-up' })
-  expect(seen.at(-1)?.offset).toBe(7)
-
-  // The wheel moves the window to 12, untouched, and the next j starts there.
-  await $.ui.scroll({
-    component: 'Pane',
-    requestId: 'context-breakdown',
-    offset: 12,
-    by: 3,
-    bodyRows: 20,
-    contentRows: 60,
-    origin: { kind: 'person' },
-  })
-  expect(seen.at(-1)?.offset).toBe(12)
-  standing = 12
-  await ui.press({ key: 'scroll-down' })
-  expect(seen.at(-1)?.offset).toBe(13)
-  await ui.unmount()
-})
-
-test('quick presses while the engine has caught up only part of the way go on from the last target', async ($, on) => {
-  // The engine reports 5, then 5 again, then 6: the window is already at 7.
-  const reports = [5, 5, 6]
-  const { seen } = await scrollWorld($, on, BIG, () => reports.shift() ?? 6)
-  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
-  await ui.press({ key: 'row-tool-results' })
-  await ui.press({ key: 'item-r:big' })
-  seen.length = 0
-  reports.splice(0, reports.length, 5, 5, 6)
-
-  await ui.press({ key: 'scroll-down' })
-  // The pane draws the first target before the engine's own row moves: the
-  // drawing does not end the lag.
-  await ui.redraw({ ...FOCUSED_PANE.props, scroll: { offset: 6, bodyRows: 20 } })
-  await ui.press({ key: 'scroll-down' })
-  await ui.press({ key: 'scroll-down' })
-  expect(seen.map(one => one.offset)).toEqual([6, 7, 8])
-  await ui.unmount()
-})
-
-test('j, k, k while the engine catches up part of the way: the last k still moves the window', async ($, on) => {
-  // The engine reports 5, 5, then 6, the row of the first step: the window is at 5.
-  const reports = [5, 5, 6]
-  const { seen } = await scrollWorld($, on, BIG, () => reports.shift() ?? 6)
-  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
-  await ui.press({ key: 'row-tool-results' })
-  await ui.press({ key: 'item-r:big' })
-  seen.length = 0
-  reports.splice(0, reports.length, 5, 5, 6)
-
-  await ui.press({ key: 'scroll-down' })
-  await ui.press({ key: 'scroll-up' })
-  await ui.press({ key: 'scroll-up' })
-  expect(seen.map(one => one.offset)).toEqual([6, 5, 4])
-  await ui.unmount()
-})
-
-test('quick presses that reach the bottom while the engine lags open the next page', async ($, on) => {
-  // 560 rows in a 66-row window: the last offset is 494. The engine stays at 492.
-  const at: Window = { standing: 492, contentRows: 560, bodyRows: 66 }
-  const { seen } = await scrollWorld($, on, BIG, () => at)
-  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
-  await ui.press({ key: 'row-tool-results' })
-  await ui.press({ key: 'item-r:big' })
-  seen.length = 0
-
-  await ui.press({ key: 'scroll-down' })
-  await ui.press({ key: 'scroll-down' })
-  expect(seen.map(one => one.offset)).toEqual([493, 494])
-  expect(await shownLines(ui)).toBe('1-500')
-  // The third press steps from 494, the bottom, so it crosses.
-  await ui.press({ key: 'scroll-down' })
-  expect(await shownLines(ui)).toBe('501-1,000')
-  await ui.unmount()
-})
-
 test('after a page change the keys stay, and nothing of an earlier press moves the window', async ($, on) => {
   const { seen } = await scrollWorld($, on, BIG)
 
@@ -305,12 +222,16 @@ test('after a page change the keys stay, and nothing of an earlier press moves t
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     await ui.press({ key: 'row-tool-results' })
     await ui.press({ key: 'item-r:big' })
-    // In the kit the press's own call is refused: the press settles quietly.
-    await ui.press({ key: 'scroll-down' })
-    await ui.press({ key: 'scroll-down' })
+    if (surface === 'terminal') {
+      // In the kit the press's own call is refused: the press settles quietly.
+      await ui.press({ key: 'scroll-down' })
+      await ui.press({ key: 'scroll-down' })
+    }
     await ui.press({ key: 'next' })
     expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(501)
-    expect((await ui.find({ key: 'scroll-down' }))?.props.hotkey).toBe('j')
+    // Off the terminal level 3 draws no Down: the app scrolls the text.
+    const down = await ui.find({ key: 'scroll-down' })
+    expect(surface === 'terminal' ? down?.props.hotkey : down).toBe(surface === 'terminal' ? 'j' : undefined)
     // The engine keeps the window across pages; the mod then asks for the top.
     // No press is under way, so that scroll lands on row 0, not where the
     // window stood (30).
@@ -339,8 +260,8 @@ test('j at the bottom opens the next page; k at the top opens the previous one; 
   let at: Window = { standing: 0, contentRows: 560, bodyRows: 66 }
   await scrollWorld($, on, BIG, () => at)
 
-  // The terminal only: off it j and k at level 3 move the text, not the
-  // window (tests/desktoplines.test.tsx).
+  // The terminal only: off it level 3 draws no j and k, and the app scrolls
+  // the text (tests/e2e/longitem.test.tsx).
   for (const surface of TERMINAL) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     await ui.press({ key: 'row-tool-results' })
@@ -395,8 +316,8 @@ test('a page that fits whole in the window: j and k go to the next and previous 
   const at: Window = { standing: 0, contentRows: 540, bodyRows: 600 }
   await scrollWorld($, on, BIG, () => at)
 
-  // The terminal only: off it j and k at level 3 move the text, not the
-  // window (tests/desktoplines.test.tsx).
+  // The terminal only: off it level 3 draws no j and k, and the app scrolls
+  // the text (tests/e2e/longitem.test.tsx).
   for (const surface of TERMINAL) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     await ui.press({ key: 'row-tool-results' })
@@ -418,8 +339,8 @@ test('an item of one page: j and k step inside it and never change it', async ($
   let at: Window = { standing: 0, contentRows: 40, bodyRows: 20 }
   const { seen } = await scrollWorld($, on, CHAT, () => at)
 
-  // The terminal only: off it j and k at level 3 move the text, not the
-  // window (tests/desktoplines.test.tsx).
+  // The terminal only: off it level 3 draws no j and k, and the app scrolls
+  // the text (tests/e2e/longitem.test.tsx).
   for (const surface of TERMINAL) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     await ui.press({ key: 'row-tool-results' })
@@ -453,7 +374,8 @@ test('levels 1 and 2 taller than a small pane: j and k move the ring, never the 
     expect(seen.map(one => one.offset), key).toEqual([0])
   }
 
-  for (const surface of SURFACES) {
+  // The terminal only: elsewhere the lists draw no j and k.
+  for (const surface of TERMINAL) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, scroll: { offset: 3, bodyRows: 12 } } })
     await untouched(ui, 'list-down')
 
@@ -542,6 +464,26 @@ test('five quick j presses put the ring on the fifth row, and k after them on th
   await ui.unmount()
 })
 
+test('on the terminal a Shift+Tab back onto a row j visited is where the next j starts', async ($, on) => {
+  await scrollWorld($, on, manyResults(45))
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  for (const level of [1, 2]) {
+    if (level === 2) {
+      await ui.press({ key: 'row-tool-results' })
+    }
+    const rows = await rowsOf(ui)
+    await ui.press({ key: 'list-down' })
+    await ui.press({ key: 'list-down' })
+    expect(await litRow(ui), `level ${level}`).toBe(rows[2])
+    // The person's Shift+Tab: back onto the row the first j visited.
+    await ringOn($, rows[1]!)
+    expect(await litRow(ui), `level ${level}`).toBe(rows[1])
+    await ui.press({ key: 'list-down' })
+    expect(await litRow(ui), `level ${level}`).toBe(rows[2])
+  }
+  await ui.unmount()
+})
+
 test('at level 1 the ends stop; from a control j goes to the first row and k to the last', async ($, on) => {
   await scrollWorld($, on)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
@@ -566,56 +508,43 @@ test('at level 1 the ends stop; from a control j goes to the first row and k to 
 
 test('at level 2 j past the last row opens the next page on its first row, and k before the first the previous page on its last', async ($, on) => {
   await scrollWorld($, on, manyResults(45))
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  await ui.press({ key: 'row-tool-results' })
+  const keys = async () => (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('item-'))
+  const ringed = async () =>
+    (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)
+  const page1 = await keys()
+  expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
 
-  for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
-    await ui.press({ key: 'row-tool-results' })
-    const keys = async () => (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('item-'))
-    const ringed = async () =>
-      (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)
-    const page1 = await keys()
-    expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
-
-    // k on the first row of the first page: no page before it.
-    await ui.press({ key: 'list-up' })
-    expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
-    if (surface === 'terminal') {
-      expect(await litRow(ui)).toBe(page1[0])
-    }
-    for (let n = 1; n < page1.length; n += 1) {
-      await ui.press({ key: 'list-down' })
-    }
-    if (surface === 'terminal') {
-      expect(await litRow(ui)).toBe(page1.at(-1))
-    }
+  // k on the first row of the first page: no page before it.
+  await ui.press({ key: 'list-up' })
+  expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
+  expect(await litRow(ui)).toBe(page1[0])
+  for (let n = 1; n < page1.length; n += 1) {
     await ui.press({ key: 'list-down' })
-    expect(await ui.find({ type: 'Text', text: /page 2 of 3$/ })).toBeDefined()
-    const page2 = await keys()
-    expect(await ringed()).toEqual([page2[0]])
-    if (surface === 'terminal') {
-      expect(await litRow(ui)).toBe(page2[0])
-    }
-    await ui.press({ key: 'list-up' })
-    expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
-    expect(await ringed()).toEqual([page1.at(-1)])
-    if (surface === 'terminal') {
-      expect(await litRow(ui)).toBe(page1.at(-1))
-    }
-
-    // The last page: j on its last row stays there.
-    await ui.press({ key: 'next' })
-    await ui.press({ key: 'next' })
-    const page3 = await keys()
-    for (let n = 0; n < page3.length + 2; n += 1) {
-      await ui.press({ key: 'list-down' })
-    }
-    expect(await ui.find({ type: 'Text', text: /page 3 of 3$/ })).toBeDefined()
-    if (surface === 'terminal') {
-      expect(await litRow(ui)).toBe(page3.at(-1))
-    }
-    await ui.press({ key: 'back' })
-    await ui.unmount()
   }
+  expect(await litRow(ui)).toBe(page1.at(-1))
+  await ui.press({ key: 'list-down' })
+  expect(await ui.find({ type: 'Text', text: /page 2 of 3$/ })).toBeDefined()
+  const page2 = await keys()
+  expect(await ringed()).toEqual([page2[0]])
+  expect(await litRow(ui)).toBe(page2[0])
+  await ui.press({ key: 'list-up' })
+  expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ })).toBeDefined()
+  expect(await ringed()).toEqual([page1.at(-1)])
+  expect(await litRow(ui)).toBe(page1.at(-1))
+
+  // The last page: j on its last row stays there.
+  await ui.press({ key: 'next' })
+  await ui.press({ key: 'next' })
+  const page3 = await keys()
+  for (let n = 0; n < page3.length + 2; n += 1) {
+    await ui.press({ key: 'list-down' })
+  }
+  expect(await ui.find({ type: 'Text', text: /page 3 of 3$/ })).toBeDefined()
+  expect(await litRow(ui)).toBe(page3.at(-1))
+  await ui.press({ key: 'back' })
+  await ui.unmount()
 })
 
 test('an arrow at level 1 or 2 moves the ring and keeps the window; the wheel, the page keys and level 3 scroll', async ($, on) => {
@@ -737,7 +666,7 @@ test('after a click on Down or Up, j and k step on from the row the ring was on'
   await ui.unmount()
 })
 
-test('a click on Down or Up while the desktop pane does not hold the keys changes nothing', async ($, on) => {
+test('off the terminal the mod keeps no record of the ring: a focus move there writes nothing', async ($, on) => {
   // Every write of the ring key, as the mod makes it.
   const ringWrites: unknown[] = []
   on('state.set', async (_, e, next) => {
@@ -749,15 +678,18 @@ test('a click on Down or Up while the desktop pane does not hold the keys change
     return next(e)
   })
   await scrollWorld($, on)
-  const desktop = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  ringWrites.length = 0
-  // From the first row, Down would move the ring to the second with the keys.
-  await desktop.press({ key: 'list-down' })
-  await desktop.press({ key: 'list-down' })
-  await settle()
-  await desktop.unmount()
-  // The ring key is not written.
-  expect(ringWrites).toEqual([])
+  for (const props of [FOCUSED_PANE.props, PANE.props]) {
+    const desktop = await $.ui.mount({ ...PANE, surface: 'desktop', props })
+    const rows = await rowsOf(desktop)
+    ringWrites.length = 0
+    // The desktop reports a click on a row, and the mod's own focus calls, as
+    // the person's moves; it reports no Tab at all. So it notes none of them.
+    await ringOn($, rows[3]!)
+    await ringOff($)
+    await settle()
+    expect(ringWrites).toEqual([])
+    await desktop.unmount()
+  }
   // The desktop draws no lit row, so the terminal shows where the mod has
   // the ring: where the tree asks for it, the first row. j steps from there,
   // so the mod's record did not move either.
@@ -811,23 +743,23 @@ test('f keeps the line the window shows: the other view opens on the page that h
     at = { standing: 500, contentRows: 560, bodyRows: 60 }
     seen.length = 0
     await ui.press({ key: 'format' })
-    // The scroll that read the window left it where it stood.
-    expect(seen.map(one => one.offset)).toEqual([500])
     if (surface !== 'terminal') {
-      // Off the terminal the text then starts at that line (lines.ts,
-      // `topAtLine`), and the window goes to its top.
-      expect(await shownLines(ui)).toBe('1,000-1,200')
-      // Back to raw from the top of the window: line 1,000 first, on raw page 2.
-      at = { standing: 0, contentRows: 260, bodyRows: 60 }
+      // Off the terminal f reads no window: the engine there clamps the
+      // mod's own offsets. The scroll raised for the press is not moved, and
+      // the other view opens on the page that holds the first line of the
+      // page shown before, at its top.
+      expect(seen.map(one => one.offset)).toEqual([0])
+      expect(await shownLines(ui)).toBe('500-997')
+      // Back to raw: line 500 is on raw page 1.
       await ui.press({ key: 'format' })
-      expect(String((await ui.find({ type: 'Text', text: / · line [\d,]+ of / }))?.text)).toMatch(
-        /line 1,000 of 1,200, page 2 of 3$/,
-      )
+      expect(await shownLines(ui)).toBe('1-500')
       await ui.press({ key: 'back' })
       await ui.press({ key: 'back' })
       await ui.unmount()
       continue
     }
+    // The scroll that read the window left it where it stood.
+    expect(seen.map(one => one.offset)).toEqual([500])
     expect(await shownLines(ui)).toBe('998-1,200')
     // Back to raw from the top of that page: line 998, on raw page 2.
     at = { standing: 0, contentRows: 260, bodyRows: 60 }

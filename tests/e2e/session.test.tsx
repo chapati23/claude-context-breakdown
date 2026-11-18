@@ -7,6 +7,7 @@ import type { RenderNode } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import type { BarClientProps } from '../../hooks/barclient'
 import { DARK, LIGHT } from '../../hooks/palette'
 import { BAND, MESSAGES, PANE, SUMMARY, TRANSCRIPT, usage, world } from '../fixtures'
 import type { World } from '../fixtures'
@@ -189,13 +190,15 @@ test('J7 desktop: the bar is one Client; a click opens the pane; the widget and 
 
   // A click on Claude output's cell, posted from the Client, opens the pane on that segment.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 100 } })
-  const client = (await band.drawn()) as { props: { props: { runs: { color?: string; target: number | string | null }[] } } }
-  const claude = client.props.props.runs.find(run => run.color === DARK.segments['claude-output'] && typeof run.target === 'number')?.target
-  if (typeof claude !== 'number') {
+  const client = (await band.drawn()) as { props: { props: BarClientProps } }
+  const { runs, parts } = client.props.props
+  const claude = runs.find(run => run.color === DARK.segments['claude-output'] && typeof run.target === 'number')?.target
+  const identity = typeof claude === 'number' ? parts[String(claude)] : undefined
+  if (typeof claude !== 'number' || identity === undefined) {
     throw new Error('no run targets Claude output')
   }
   expect(w.opened).toEqual([])
-  await band.post({ open: claude }, { in: CLIENT })
+  await band.post({ open: claude, ...identity }, { in: CLIENT })
   expect(w.opened).toEqual(['context-breakdown'])
   const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
   expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('Claude output')
@@ -220,12 +223,19 @@ test('J7 desktop: the bar is one Client; a click opens the pane; the widget and 
   expect(totalOf((await bandAt($, 'desktop', 100)).lines)).toBe('~28k/200k 14%')
   expect((await paneNow($, 'desktop')).lines[0]).toMatch(/^~28k used · /)
 
-  // The light theme reaches the Client's runs and the pane's rows.
+  // The light theme reaches the Client's runs, the pane's rows and the widget's pictures.
   await lightTheme($, w)
+  const isDark = (color: string) => Object.values(DARK.segments).includes(color) || color === DARK.reserve || color === DARK.free
   for (const colors of [(await bandAt($, 'desktop', 100)).colors, (await paneNow($, 'desktop')).colors]) {
     expect(colors.has(LIGHT.segments['compaction-summary'])).toBe(true)
-    expect([...colors].filter(color => Object.values(DARK.segments).includes(color) || color === DARK.reserve || color === DARK.free)).toEqual([])
+    expect([...colors].filter(isDark)).toEqual([])
   }
+  const widget = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, placement: 'widget', bodyColumns: 100 } })
+  const pictures = (await widget.findAll({ type: 'Svg' })).map(svg => String(svg.props.source)).join('')
+  const fills = [...pictures.matchAll(/fill:(#[0-9A-Fa-f]{6})/g)].map(match => match[1]!)
+  expect(fills).toContain(LIGHT.segments['compaction-summary'])
+  expect(fills.filter(isDark)).toEqual([])
+  await widget.unmount()
 
   // /clear: the Client is gone until the next measurement.
   w.usage = usage(26_500, 500)

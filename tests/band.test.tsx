@@ -462,10 +462,10 @@ test('the widget seat’s glance draws the legend as a swatch picture in the seg
   const words = await ui.find({ type: 'Text', text: 'Tool results 45%' })
   expect(words?.props).toMatchObject({ mono: true, dimColor: true })
   const swatch = (await ui.findAll({ type: 'Svg' }))[1]
-  // Both palettes: the picture follows the page's light or dark scheme.
-  expect(String(swatch?.props.source)).toContain(`fill:${LIGHT.segments['tool-results']}`)
-  expect(String(swatch?.props.source)).toContain(`@media (prefers-color-scheme: dark){`)
+  // The Claude Code theme's palette, as the bar's: not the page's light or dark scheme.
   expect(String(swatch?.props.source)).toContain(`fill:${DARK.segments['tool-results']}`)
+  expect(String(swatch?.props.source)).not.toContain(`fill:${LIGHT.segments['tool-results']}`)
+  expect(String(swatch?.props.source)).not.toContain('prefers-color-scheme')
   await ui.unmount()
 })
 
@@ -539,6 +539,21 @@ test('pressing a segment opens the pane', async ($, on) => {
   await ui.unmount()
 
   // The desktop opens it by a click posted from the Client: see desktop.test.tsx.
+  expect(w.opened).toEqual(['context-breakdown'])
+})
+
+test('the mobile app, which has no Client, draws the bar as a picture and the total as a Button to level 1', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...WIDE, surface: 'mobile' })
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThan(0)
+  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('66k/200k 33%')
+  await ui.press({ key: 'context-total' })
+  await ui.unmount()
+
   expect(w.opened).toEqual(['context-breakdown'])
 })
 

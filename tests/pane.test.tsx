@@ -63,8 +63,6 @@ test('the pane lists every segment by group, merged ones too', async ($, on) => 
       'row-task-reports',
       'row-prompts',
       'row-claude-output',
-      // A desktop keeps j and k in the line without the keyboard too, so the line does not change on Esc.
-      ...(surface === 'terminal' ? [] : ['list-down', 'list-up']),
       'back',
       'close',
       'refresh',
@@ -450,7 +448,8 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     // The pane takes the keyboard: the keys show.
     await ui.redraw({ ...PANE.props, isFocused: true })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: '↑↓ tab: Move' })).toBeDefined()
+    // Off the terminal the arrows scroll the pane: Tab alone moves the ring.
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
     expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
     expect((await ui.find({ key: 'row-system' }))?.text.startsWith('1: ')).toBe(false)
@@ -471,6 +470,9 @@ test('the key words for each state', () => {
   expect(keyWords(true, 88, true)).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
   expect(keyWords(true, 24, true)).toEqual(['↑↓ tab: Move', '⏎: Open'])
   expect(keyWords(false, 88, true)).toEqual([])
+  // Off the terminal the mod leaves the arrows to the app: Tab alone moves the ring.
+  expect(keyWords(true, 88, true, 'desktop')).toEqual(['tab: Move', '⏎ or 1-9: Open'])
+  expect(keyWords(true, 88, true, 'terminal')).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
 })
 
 test('rows after the ninth: Tab reaches them from the first row, which takes the ring', async ($, on) => {
@@ -512,7 +514,8 @@ test('b puts the ring back on the row it came from, on its page; a new list ring
     expect(await ringed(ui)).toEqual(['item-r:real0'])
     await ui.press({ key: 'item-r:real3' })
     // Level 3: the first control takes the ring, and it stands above the text.
-    expect(await ringed(ui)).toEqual(['scroll-down'])
+    // Off the terminal that is Back: level 3 there draws no Down and Up.
+    expect(await ringed(ui)).toEqual([surface === 'terminal' ? 'scroll-down' : 'back'])
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['item-r:real3'])
     await ui.press({ key: 'back' })

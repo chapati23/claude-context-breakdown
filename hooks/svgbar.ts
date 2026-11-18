@@ -1,16 +1,12 @@
 // The bar as one SVG picture, for the surfaces that draw text in a
 // proportional face and a Button as a native button (the desktop app, the
-// editor, the mobile app). Worked out without drawing.
-//
-// The picture carries both palettes and picks one with
-// `prefers-color-scheme`: the surface draws it in the page's colour scheme,
-// while the Claude Code theme name, which picks the terminal's palette, need
-// not follow the desktop app's light or dark look.
+// editor, the mobile app). Worked out without drawing. The fills come from
+// the palette of the Claude Code theme, as the bar's do.
 
 import type { ContextBreakdownSegmentId } from '../types'
 import { formatPercent, formatTokens } from './format'
 import type { LayoutPart } from './layout'
-import { DARK, LIGHT, colorOf } from './palette'
+import { colorOf } from './palette'
 import type { Palette } from './palette'
 import { segmentDef } from './segments'
 
@@ -34,18 +30,13 @@ function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** One palette's fills as CSS rules for the classes `ids` name. */
-function rules(palette: Palette, ids: readonly string[]): string {
+/** The palette's fills as a style sheet for the classes `ids` name. */
+function styleFor(palette: Palette, ids: readonly string[]): string {
   const free = `.${classOf('free')}{fill:${palette.free};fill-opacity:${palette.name === 'light' ? 0.55 : 0.8}}`
   const reserve = `.${classOf('reserve')}{fill:${palette.reserve}}`
   const segments = ids.map(id => `.${classOf(id)}{fill:${colorOf(palette, id)}}`).join('')
 
-  return free + reserve + segments
-}
-
-/** Both palettes, the light one by default and the dark one where the page is dark. */
-function styleFor(ids: readonly string[]): string {
-  return `<style>${rules(LIGHT, ids)}@media (prefers-color-scheme: dark){${rules(DARK, ids)}}</style>`
+  return `<style>${free}${reserve}${segments}</style>`
 }
 
 /** A segment's tooltip: "Tool results: 40k, 19% of used" (a merged cell names each member). */
@@ -73,7 +64,7 @@ export function svgBarWidth(parts: readonly LayoutPart[]): number {
  * right end. Every segment carries a `<title>`, which the surface shows as a
  * tooltip where it draws the picture interactive.
  */
-export function barSvg(parts: readonly LayoutPart[], tokensOf: TokensOf, used: number): string {
+export function barSvg(parts: readonly LayoutPart[], palette: Palette, tokensOf: TokensOf, used: number): string {
   const width = svgBarWidth(parts)
   const height = SVG_BAR_HEIGHT
   const ids = [...new Set(parts.flatMap(part => (part.kind === 'segment' ? [part.id] : [])))]
@@ -99,7 +90,7 @@ export function barSvg(parts: readonly LayoutPart[], tokensOf: TokensOf, used: n
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-    styleFor(ids) +
+    styleFor(palette, ids) +
     `<clipPath id="r"><rect width="${width}" height="${height}" rx="${RADIUS_PX}" ry="${RADIUS_PX}"/></clipPath>` +
     `<g clip-path="url(#r)"><rect class="${classOf('free')}" width="${width}" height="${height}"/>${shapes.join('')}</g>` +
     `</svg>`
@@ -107,12 +98,12 @@ export function barSvg(parts: readonly LayoutPart[], tokensOf: TokensOf, used: n
 }
 
 /** The legend's swatch: a small rounded square in the colour of the cell `id` names. */
-export function swatchSvg(id: string): string {
+export function swatchSvg(id: string, palette: Palette): string {
   const size = SVG_SWATCH_PX
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
-    styleFor([id]) +
+    styleFor(palette, [id]) +
     `<rect class="${classOf(id)}" width="${size}" height="${size}" rx="2" ry="2"/></svg>`
   )
 }

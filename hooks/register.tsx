@@ -8,9 +8,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Engine, Register, RenderSurface, UiPressArgument, UiPressResult } from 'claude-code'
 
 import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
-import { BAR_CLIENT, bandTree, glanceTree, pictureFigures } from './band'
+import { BAR_CLIENT, bandTree, glanceTree, partOfPost, pictureFigures } from './band'
 import type { OpenPane } from './band'
-import type { BarClientPost } from './barclient'
 import { createChipHold } from './focus'
 import {
   LEVEL_1,
@@ -32,8 +31,7 @@ import {
   toggleSource,
 } from './navigate'
 import type { NavIo } from './navigate'
-import { lineMove } from './lines'
-import { contentHeadRows, paneTree, ringKey } from './pane'
+import { paneTree, ringKey } from './pane'
 import { paletteFor } from './palette'
 import { createRefresher } from './refresh'
 import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from './ring'
@@ -54,10 +52,8 @@ import {
   stepAnswer,
   stepOf,
 } from './scroll'
-import type { StepToken } from './scroll'
 import { matchSegment } from './segments'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
-import { trace } from './trace'
 import { bandModelFor } from './view'
 import type { LayoutPart, SegmentPart } from './layout'
 
@@ -116,53 +112,22 @@ const win = createPaneScroll()
  * A reload that resets it only gives the ring back to the first control.
  */
 let keepsPlace = false
-/** j, k and the arrows at levels 1 and 2: the mod's record of the ring, and its presses (ring.ts). */
+/**
+ * j, k and the arrows at levels 1 and 2 on the terminal: the mod's record of
+ * the ring, and its presses (ring.ts).
+ */
 const ring = createRingMoves()
 /**
  * What an arrow's `ui.scroll` and a press of j or k are read against, with no
  * wait: whether the pane held the keys when the render hook last drew it; the
- * view, which every write of it also sets, so a new level counts at once; the
- * snapshot the render hook last drew from; and the ring key last noted in
- * `ringAtom`. Hints only.
+ * view, which every write of it also sets, so a new level counts at once; and
+ * the snapshot the render hook last drew from. Hints only.
  */
 let paneFocused = false
 let shownView: ContextBreakdownView = LEVEL_1
 let shownSnapshot: ContextBreakdownSnapshot | null = null
-let shownNoted: string | null = null
-/**
- * The pane's columns and the rows its body may show, as the render hook last
- * read them (null before it read any): how many lines k shows when it enters
- * the previous page from its end, off the terminal. Hints only.
- */
-let shownColumns = 0
 /** The surface the pane was last drawn on. */
-let shownSurface: string = 'terminal'
-/**
- * The keys this mod asked the ring onto and has not yet seen echoed. A
- * desktop reports every focus move as the person's, this mod's own too: such
- * an echo of an older target must not put the record back (ring.ts).
- */
-const ringAsked: string[] = []
-let shownBodyRows: number | null = null
-/**
- * The presses at level 3 off the terminal that change what the text shows
- * (j, k, f, v, n, p, the Next page below the text, and r), one after the
- * other in the order pressed and never dropped: each starts from where the
- * last one left the view, and a press that crosses to another page finishes
- * before the next counts.
- */
-const lineLane = createLane(Number.POSITIVE_INFINITY)
-/** The presses in `lineLane` that have not finished: 0 while it is idle. */
-let lineHeld = 0
-
-/** Queues `work` in `lineLane`, counted in `lineHeld`. */
-function inLineLane<T>(work: () => Promise<T>): Promise<{ value: T } | null> {
-  lineHeld += 1
-
-  return lineLane.run(work).finally(() => {
-    lineHeld -= 1
-  })
-}
+let shownSurface: RenderSurface = 'terminal'
 
 /**
  * Writes the view, and notes it for the hooks that cannot wait for a read.
@@ -178,14 +143,9 @@ function writeView($: Engine, change: (view: ContextBreakdownView) => ContextBre
   })
 }
 
-/** Writes the ring key, and notes it as `writeView` does the view. */
+/** Writes the ring key. */
 function writeRing($: Engine, change: (key: string | null) => string | null): Promise<string | null> {
-  return update($, ringAtom, key => {
-    const next = change(key)
-    shownNoted = next
-
-    return next
-  })
+  return update($, ringAtom, change)
 }
 
 /**
@@ -259,15 +219,8 @@ function navOf($: Engine): NavIo {
  * scroll on as the engine resolved it, as it carries no step.
  */
 async function applyRing($: Engine, key: string): Promise<{ deny?: string }> {
-  ringAsked.push(key)
-  if (ringAsked.length > 32) {
-    ringAsked.shift()
-  }
   const answer = await $.ui.focus({ requestId: PANE_ID, key })
-  trace($, { at: 'ring', key, answer })
-  // A desktop brings the focused control into view itself, and refuses a
-  // scroll to a key (seen live: "no element of its own is drawn under that key").
-  if (answer.deny === undefined && shownSurface === 'terminal') {
+  if (answer.deny === undefined) {
     await $.ui.scroll({ in: PANE_ID, to: { key }, block: 'nearest' })
   }
 
@@ -275,7 +228,7 @@ async function applyRing($: Engine, key: string): Promise<{ deny?: string }> {
 }
 
 /**
- * One step of the ring at levels 1 and 2, for j, k or an arrow, from the key
+ * One step of the ring at levels 1 and 2 on the terminal, for j, k or an arrow, from the key
  * `stepStart` gives. Past the end of a page it opens the next or the
  * previous page, with the ring on its first or last row. The focus call is
  * not waited for: the next press steps on. If the engine refuses it, the
@@ -296,15 +249,14 @@ async function moveRing($: Engine, step: number): Promise<void> {
     const before = ring.mark()
     let key: string | undefined
     if ('page' in move) {
-      // A new page, as the render hook's moves open one: no step to continue from.
+      // A new page, as the render hook's moves open one.
       keepsPlace = false
-      steps.forget()
       await listPage(navOf($), move.page, move.page > 0 ? 'first' : 'last')
       const keys = rowKeys(await read($, viewAtom), snapshot)
       key = move.page > 0 ? keys[0] : keys[keys.length - 1]
       if (move.page > 0) {
         // The engine keeps the window across a new tree: the next page from its top.
-        atNewTop(win, steps)
+        atNewTop(win)
         await quietly($.ui.scroll(TOP_SCROLL))
       }
     } else {
@@ -315,44 +267,18 @@ async function moveRing($: Engine, step: number): Promise<void> {
     }
     const target = key
     ring.set(target)
-    // Lit at once on the terminal, before the engine answers: a held key
-    // shows where it is. Not on a desktop: the write redraws the pane with
-    // the ring asked onto the new row, the focus call moves it again and the
-    // desktop's report of the move redraws once more: the outline flickers.
-    // There the report alone writes the key, as for a Tab.
-    let noted = shownSurface === 'terminal' ? null : await read($, ringAtom)
-    if (shownSurface === 'terminal') {
-      await quietly(
-        writeRing($, now => {
-          noted = now
+    // Lit at once, before the engine answers: a held key shows where it is.
+    let noted: string | null = null
+    await quietly(
+      writeRing($, now => {
+        noted = now
 
-          return target
-        }),
-      )
-    }
+        return target
+      }),
+    )
     void ring.focus(
       target,
-      async next => {
-        // Off the terminal the key is written once the focus call is over,
-        // unless a later move took the record: where the desktop's report
-        // already wrote it, this write changes nothing and draws nothing.
-        const note = async () => {
-          if (shownSurface !== 'terminal' && ring.local() === next) {
-            await quietly(writeRing($, () => next))
-          }
-        }
-        try {
-          const answer = await applyRing($, next)
-          if (answer.deny === undefined) {
-            await note()
-          }
-
-          return answer
-        } catch (error) {
-          await note()
-          throw error
-        }
-      },
+      next => applyRing($, next),
       async () => {
         ring.restore(before)
         await quietly(writeRing($, now => (now === target ? noted : now)))
@@ -362,135 +288,26 @@ async function moveRing($: Engine, step: number): Promise<void> {
 }
 
 /**
- * j (1) or k (-1) at level 3 off the terminal: the text starts one unit
- * later or earlier (lines.ts), one write of the view and no scroll. At a
- * page's edge it opens the next page at its top, or the previous one at its
- * end with about one window of text showing.
- */
-async function stepLines($: Engine, step: number, surface: RenderSurface): Promise<void> {
-  const view = await read($, viewAtom)
-  if (view.level !== 3) {
-    return
-  }
-  const move = lineMove(view.item, step)
-  if (move === null) {
-    return
-  }
-  // The move is worked out again on the view as the write finds it, and
-  // whatever move applies there is made: a step, or a page crossing (a
-  // press never does nothing while a move exists). `update` may run the
-  // change more than once; the last run counts.
-  const found: { cross: 1 | -1 | null } = { cross: 'page' in move ? move.page : null }
-  if ('top' in move) {
-    await writeView($, current => {
-      found.cross = null
-      if (current.level !== 3) {
-        return current
-      }
-      const again = lineMove(current.item, step)
-      if (again === null) {
-        return current
-      }
-      if ('page' in again) {
-        found.cross = again.page
-
-        return current
-      }
-
-      return { ...current, item: { ...current.item, top: again.top } }
-    })
-  }
-  const { cross } = found
-  if (cross === null) {
-    return
-  }
-  const rows =
-    shownBodyRows === null
-      ? Number.POSITIVE_INFINITY
-      : Math.max(0, shownBodyRows - contentHeadRows(view, shownColumns, paneFocused, surface))
-  await contentPage(navOf($), cross, false, cross > 0 ? 0 : { endRows: rows })
-}
-
-/**
- * A new page, level or item from `work`, at its top: no step to continue
- * from, the ring where the new tree puts it, and the window at the top.
+ * A new page, level or item from `work`, at its top: the ring where the new
+ * tree puts it, and the window at the top.
  */
 function thenTopOf($: Engine, work: () => Promise<unknown>): Promise<unknown> {
   return quietly(
     (async () => {
       keepsPlace = false
-      // A new level or item: no step to continue from. The link stays as
-      // it is: a step at the top of the new tree proves nothing.
-      steps.forget()
       // The new tree's ring is where `ringKey` puts it until an event says otherwise.
       ring.forget()
       await quietly(writeRing($, () => null))
       await work()
-      atNewTop(win, steps)
+      // The link stays as it is: a step at the top of the new tree proves nothing.
+      atNewTop(win)
       await quietly($.ui.scroll(TOP_SCROLL))
-      const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
+      const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true, shownSurface)
       if (key !== null) {
         await $.ui.focus({ requestId: PANE_ID, key })
       }
     })(),
   )
-}
-
-/**
- * f at level 3 off the terminal: the other view, with the line the window
- * shows first (lines.ts, `topAtLine`), and the window at its top. That line
- * counts from the line shown first after j and k, and from where the window
- * stands when a scroll of the person's moved it and `measure` (pushed as the
- * press came, as the terminal's f does) reads it.
- */
-async function formatLines($: Engine, measure: StepToken | null): Promise<void> {
-  let share = 0
-  if (measure !== null) {
-    try {
-      let answer: { deny?: string } | null = null
-      try {
-        answer = await $.ui.scroll(STEP_SCROLL)
-      } catch {
-        answer = null
-      }
-      win.link = learnLink(win.link, measure, answer, win.shown)
-      share = measure.seen ? measure.share : 0
-    } finally {
-      steps.drop(measure)
-    }
-  }
-  await toggleFormat(navOf($), share, true)
-  await quietly($.ui.scroll(TOP_SCROLL))
-}
-
-/**
- * n, p, the Next page below the text, v or r at level 3 off the terminal,
- * on the view as the queue reaches it: a press that does not apply there
- * does nothing. v keeps the line shown first when the other text has it.
- */
-async function itemPress($: Engine, element: string, refresh: () => Promise<unknown>): Promise<void> {
-  if (element === 'refresh') {
-    await refresh()
-
-    return
-  }
-  const view = await read($, viewAtom)
-  if (view.level !== 3) {
-    return
-  }
-  const nav = navOf($)
-  if (element === 'view') {
-    if (view.item.canToggle) {
-      await thenTopOf($, () => toggleSource(nav, true))
-    }
-
-    return
-  }
-  const delta = element === 'prev' ? -1 : 1
-  const page = view.item.page + delta
-  if (page >= 0 && page < view.item.pages) {
-    await thenTopOf($, () => contentPage(nav, delta))
-  }
 }
 
 /** What a `ui.press` hook calls to run the hooks beneath and the onPress. */
@@ -502,24 +319,11 @@ type PressNext = (e: UiPressArgument) => Promise<UiPressResult>
  * registered hook asked for, never one from onPress (see scroll.ts). One
  * press at a time, so each steps from the row the last one left. At a
  * page's edge the press opens the next page at its top, or the previous
- * page at its bottom.
- *
- * Off the terminal no scroll at all: the engine there clamps a plugin's
- * scroll to a height it recorded when the pane opened, so after a long item
- * opens every step would be cut back to row 0. j and k move where the text
- * starts instead (lines.ts), in order, every press counted; the person's
- * wheel and arrows still scroll the window.
+ * page at its bottom. Only the terminal draws j and k at level 3: elsewhere
+ * the app's own scrolling moves the text.
  */
 async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Promise<UiPressResult> {
   const step = stepOf(e.element)
-  if (e.surface !== 'terminal') {
-    // Queued before `next`, so the presses keep the order they came in.
-    const moved = inLineLane(() => stepLines($, step, e.surface))
-    const result = await next(e)
-    await quietly(moved)
-
-    return result
-  }
   const ran = await lane.run(async () => {
     const token = steps.push(step)
     let retry: typeof token | null = null
@@ -536,7 +340,6 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
         // No pane to scroll, or no surface: the press does nothing.
       }
       win.link = learnLink(win.link, token, answer, win.shown)
-      trace($, { at: 'learnLink', link: win.link, seen: token.seen, answer, shown: win.shown })
       // The engine believed the window already stood at `start` and raised
       // no event: ask once more, for `end`, which it must move to.
       if (needsRetry(token, answer, win.link)) {
@@ -548,7 +351,6 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
           again = null
         }
         win.link = learnLink(win.link, retry, again, win.shown)
-        trace($, { at: 'retry', link: win.link, seen: retry.seen, answer: again, shown: win.shown })
       }
       // Only the hook sets `cross`, from the window's own numbers.
       const cross = retry?.seen === true ? retry.cross : token.cross
@@ -570,9 +372,7 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
             }
             await contentPage(nav, delta, delta < 0)
             if (delta > 0) {
-              atNewTop(win, steps)
-            } else {
-              steps.forget()
+              atNewTop(win)
             }
             // The next page from its top; the previous one from its bottom,
             // so k keeps going up line by line. The ring goes where the
@@ -605,29 +405,18 @@ async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Prom
  * hook sees its scrolls: one reads where the window stands, and after the
  * switch one puts the window at the same line of the other view. Without
  * the hook (or when that is not known) the other view opens at its top.
+ *
+ * Off the terminal the other view always opens at its top: the engine there
+ * clamps this mod's own offsets to a stale height, so neither the read nor
+ * the placing can be trusted. Offset 0 is safe.
  */
 async function formatPress($: Engine, e: UiPressArgument, next: PressNext): Promise<UiPressResult> {
   if (e.surface !== 'terminal') {
-    // In the one queue of level 3's presses, before `next`, as j and k.
-    // The switch waits for the press to pass, as the terminal's does. The
-    // read of the window is pushed now only while the queue is idle: a
-    // scroll of an earlier press (a new page goes to its top) would take it.
-    const canMeasure = win.link !== 'absent'
-    const early = canMeasure && lineHeld === 0 ? steps.push(0, 'measure') : null
-    let passed = () => undefined as void
-    const pressed = new Promise<void>(resolve => {
-      passed = resolve
-    })
-    const switched = inLineLane(async () => {
-      await pressed
-      await formatLines($, early ?? (canMeasure && win.link !== 'absent' ? steps.push(0, 'measure') : null))
-    })
-    try {
-      return await next(e)
-    } finally {
-      passed()
-      await quietly(switched)
-    }
+    const result = await next(e)
+    await quietly(toggleFormat(navOf($)))
+    await quietly($.ui.scroll(TOP_SCROLL))
+
+    return result
   }
   const nav: NavIo = {
     usage: () => $.session.usage({ breakdown: 'summary' }),
@@ -803,7 +592,7 @@ export const register: Register = on => {
       if (share !== null) {
         // The ring first, and wait for it: a window put back before the
         // engine has brought the ring into view is moved again.
-        const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true)
+        const key = ringKey(await read($, viewAtom), await read($, snapshotAtom), true, shownSurface)
         if (key !== null) {
           await quietly($.ui.focus({ requestId: PANE_ID, key }))
         }
@@ -992,7 +781,6 @@ export const register: Register = on => {
   // keyboard (Esc, typing, a click elsewhere), so each move onto a segment
   // also starts a timer that ends the chip (focus.ts).
   on('ui.focus', { component: 'AbovePrompt', plugin: '*' }, async ($, e, next) => {
-    trace($, { hook: 'ui.focus', component: e.component, origin: e.origin, element: e.element ?? null })
     const result = await next(e)
     if (result.deny === undefined) {
       const isOurs = e.plugin === 'context-breakdown' && e.element?.startsWith('seg-') === true
@@ -1024,7 +812,6 @@ export const register: Register = on => {
   // A ring that moves in a pane means the band no longer holds the keyboard.
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
-    trace($, { hook: 'ui.focus', component: e.component, origin: e.origin, element: e.element ?? null })
     const result = await next(e)
     // Our pane's ring moved: onto `element`, whose row is drawn in one
     // highlight, or onto one of the engine's stops (the close mark), which
@@ -1032,14 +819,14 @@ export const register: Register = on => {
     // would stay drawn as if it held it.
     // While a move of j, k or an arrow is under way, this mod's own events
     // are answers to older targets: the record keeps the newest (ring.ts).
-    // A report of a move this mod asked for: one of an older target is stale.
-    const asked = e.element === undefined ? -1 : ringAsked.indexOf(e.element)
-    const isEcho = e.origin.kind === 'person' && asked >= 0
-    if (isEcho) {
-      ringAsked.splice(0, asked + 1)
-    }
-    const isStale = isEcho && ring.local() !== e.element
-    if (!isStale && result.deny === undefined && e.requestId === PANE_ID && notesRing(e.origin, PLUGIN, ring.busy())) {
+    // Only the terminal keeps the record and the key: elsewhere Tab and
+    // Shift+Tab raise no event, so both would go stale.
+    if (
+      result.deny === undefined &&
+      e.requestId === PANE_ID &&
+      shownSurface === 'terminal' &&
+      notesRing(e.origin, PLUGIN, ring.busy())
+    ) {
       const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
       ring.set(key)
       await quietly(writeRing($, () => key))
@@ -1067,74 +854,26 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // j and k at levels 1 and 2: the ring one row down or up (ring.ts). A
-  // registered hook, as for the scroll below, so the engine raises this
-  // mod's `ui.focus` hook for the move. Every press counts: none is dropped.
-  // A pane without the keys has no ring to move (a click on the desktop's
-  // Down or Up): the press changes nothing.
+  // j and k at levels 1 and 2 on the terminal: the ring one row down or up
+  // (ring.ts). A registered hook, as for the scroll below, so the engine
+  // raises this mod's `ui.focus` hook for the move. Every press counts: none
+  // is dropped. A pane without the keys has no ring to move.
   on('ui.press', { component: 'Pane', requestId: 'context-breakdown', element: ['list-down', 'list-up'] }, async ($, e, next) => {
-    trace($, { hook: 'ui.press', element: e.element, surface: e.surface })
     const result = await next(e)
-    if (paneFocused) {
+    if (e.surface === 'terminal' && paneFocused) {
       await quietly(moveRing($, stepOf(e.element)))
     }
 
     return result
   }).catch(($, e, next) => next(e))
 
-  // Level 3's presses that change what the text shows: j and k
-  // (`scrollPress`), f (`formatPress`), and n, p, the Next page below the
-  // text, v and r. One hook for all of them, so each press reaches it in
-  // the order pressed: the engine walks a press past each earlier hook that
-  // does not match it, so presses that meet separate hooks can overtake.
-  //
-  // Off the terminal n, p, the Next page below the text, v and r go into the
-  // one queue with j, k and f (lineLane), queued as the press comes, so they
-  // apply in the order pressed. The hook takes the press: the Button's own
-  // onPress would run outside the queue. The terminal, and n, p and r at
-  // levels 1 and 2, pass on to the onPress untouched.
+  // j and k at level 3 (`scrollPress`) and f (`formatPress`). A registered
+  // hook, not the Buttons' onPress, asks for their scrolls (scroll.ts says
+  // why). n, p, v and r pass on to their onPress.
   // Literal matchers, as the render hook's: the engine reads them as written.
-  on(
-    'ui.press',
-    {
-      component: 'Pane',
-      requestId: 'context-breakdown',
-      element: ['scroll-down', 'scroll-up', 'format', 'prev', 'next', 'next-below', 'view', 'refresh'],
-    },
-    async ($, e, next) => {
-      trace($, { hook: 'ui.press', element: e.element, surface: e.surface })
-      if (e.element === 'scroll-down' || e.element === 'scroll-up') {
-        return scrollPress($, e, next)
-      }
-      if (e.element === 'format') {
-        return formatPress($, e, next)
-      }
-      const isItemOnly = e.element === 'next-below' || e.element === 'view'
-      if (e.surface === 'terminal' || !(isItemOnly || shownView.level === 3)) {
-        return next(e)
-      }
-      const refresh = () =>
-        refresher
-          .now({
-            after: (ms, fn) => $.clock.after(ms, fn),
-            now: () => $.clock.now(),
-            usage: () => $.session.usage({ breakdown: 'summary' }),
-            messages: () => $.session.messages({ as: 'api' }),
-            write: fn => update($, snapshotAtom, fn),
-            rebuild: async data => {
-              if ((await read($, viewAtom)).level !== 1) {
-                await writeView($, current => rebuildView(current, data))
-              }
-            },
-          })
-          .then(() => refreshItem(navOf($)))
-      await quietly(inLineLane(() => itemPress($, e.element, refresh)))
-
-      return { element: e.element }
-    },
+  on('ui.press', { component: 'Pane', requestId: 'context-breakdown', element: ['scroll-down', 'scroll-up', 'format'] }, async ($, e, next) =>
+    e.element === 'format' ? formatPress($, e, next) : scrollPress($, e, next),
   ).catch(($, e, next) => next(e))
-
-
 
   // The scroll a j or k press asked for lands one row from where the window
   // stands. Matched on this plugin's origin, so the person's wheel and arrows
@@ -1143,27 +882,24 @@ export const register: Register = on => {
   // the press hook then stops asking (`link`).
   on('ui.scroll', { component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'plugin', name: 'context-breakdown' } }, ($, e, next) => {
     const offset = stepAnswer(e, PLUGIN, steps)
-    trace($, { hook: 'ui.scroll', origin: e.origin, by: e.by, offset: e.offset, pointer: e.pointer !== undefined, returned: offset ?? e.offset, bodyRows: e.bodyRows, contentRows: e.contentRows })
 
     return offset === null ? next(e) : next({ ...e, offset })
   }).catch(($, e, next) => next({ ...e, offset: heldOffset(e, PLUGIN) }))
 
-  // The person's scrolls of the pane. An arrow at level 1 or 2 moves the
-  // ring instead of the window when the ring can move that way (a row or a
-  // page): the scroll is answered without `next`, so the window stays, and
-  // the move is not waited for here. That is decided at once, from what the
-  // mod knows now. Any other scroll (the wheel, the page keys, an arrow at
-  // the first or last row, every scroll at level 3) passes on untouched, and
-  // a j or k after it steps from where it leaves the window.
+  // The person's scrolls of the pane. On the terminal an arrow at level 1 or
+  // 2 moves the ring instead of the window when the ring can move that way (a
+  // row or a page): the scroll is answered without `next`, so the window
+  // stays, and the move is not waited for here. That is decided at once, from
+  // what the mod knows now. Any other scroll (the wheel, the page keys, an
+  // arrow at the first or last row, every scroll at level 3, every scroll off
+  // the terminal) passes on untouched, and a j or k after it steps from where
+  // it leaves the window.
   on('ui.scroll', { component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'person' } }, ($, e, next) => {
-    const step = arrowStep(e, { isFocused: paneFocused, level: shownView.level })
+    const step = shownSurface === 'terminal' ? arrowStep(e, { isFocused: paneFocused, level: shownView.level }) : null
     const moves =
       step !== null &&
-      ringTarget(rowKeys(shownView, shownSnapshot), stepStart(shownView, shownSnapshot, shownNoted), step, pagesOf(shownView)) !== null
-    trace($, { hook: 'ui.scroll', origin: e.origin, by: e.by, offset: e.offset, pointer: e.pointer !== undefined, ring: moves ? step : null, bodyRows: e.bodyRows, contentRows: e.contentRows })
+      ringTarget(rowKeys(shownView, shownSnapshot), stepStart(shownView, shownSnapshot, null), step, pagesOf(shownView)) !== null
     if (step === null || !moves) {
-      steps.forget()
-
       return next(e)
     }
     void quietly(moveRing($, step))
@@ -1173,6 +909,9 @@ export const register: Register = on => {
 
   // The parts the band drew last, for a click the desktop's bar posts.
   let bandParts: readonly LayoutPart[] = []
+  // Set when the desktop's bar Client fails: the band draws the picture row
+  // from then on, until the hooks module loads again.
+  let barClientFailed = false
 
   /**
    * What a click on the band opens: a segment its items, a merged cell or
@@ -1207,27 +946,25 @@ export const register: Register = on => {
       })(),
     )
 
-  // A click on the desktop's bar (barclient.tsx): the part under it, or the total.
+  // A click on the desktop's bar (barclient.tsx): the segment it names, or the total.
   on('ui.message', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const data = e.data as Partial<BarClientPost> | null
-    if (e.element !== BAR_CLIENT || data === null || typeof data !== 'object' || data.open === undefined) {
+    const part = e.element === BAR_CLIENT ? partOfPost(bandParts, e.data) : undefined
+    if (part === undefined) {
       return next(e)
     }
-    const nav: NavIo = {
-      usage: () => $.session.usage({ breakdown: 'summary' }),
-      messages: () => $.session.messages({ as: 'api' }),
-      snapshot: () => read($, snapshotAtom),
-      view: () => read($, viewAtom),
-      write: fn => writeView($, fn),
-      readFile: path => $.fs.read(path),
-    }
-    const part = data.open === 'total' ? null : bandParts[data.open]
-    if (part === undefined || (part !== null && part.kind !== 'segment')) {
-      return next(e)
-    }
-    await openFromBand(nav, bandActs($), part)
+    await openFromBand(navOf($), bandActs($), part)
 
     return {}
+  })
+
+  // The desktop's bar Client failed: the engine draws the band again, and
+  // from now on it draws the picture row.
+  on('ui.fault', { component: 'AbovePrompt' }, ($, e, next) => {
+    if (e.element === BAR_CLIENT) {
+      barClientFailed = true
+    }
+
+    return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -1256,10 +993,10 @@ export const register: Register = on => {
     // A segment opens its items; a merged cell, which holds several, the list.
     const acts = bandActs($)
     const openPane: OpenPane = part => openFromBand(nav, acts, part)
-    // The desktop's bar posts the index of the part a click landed on.
+    // The desktop's bar posts which part a click landed on.
     bandParts = model.parts
 
-    return bandTree($.ui.resolve(e), model, palette, openPane, focused, pictureFigures(snapshot), e.surface)
+    return bandTree($.ui.resolve(e), model, palette, openPane, focused, pictureFigures(snapshot), e.surface, barClientFailed)
   })
 
   on('ui.render', { component: 'Pane', requestId: 'context-breakdown' }, async ($, e) => {
@@ -1270,21 +1007,15 @@ export const register: Register = on => {
       return glanceTree($.ui.resolve(e), snapshot, e.props.bodyColumns, palette, e.surface)
     }
     win.shown = e.props.scroll?.offset ?? 0
-    shownColumns = e.props.bodyColumns
     shownSurface = e.surface
-    shownBodyRows = e.props.scroll?.bodyRows ?? null
     const view = await read($, viewAtom)
     paneFocused = e.props.isFocused === true
     shownView = view
     shownSnapshot = snapshot
-    trace($, { hook: 'ui.render', isFocused: e.props.isFocused === true, offset: win.shown, level: view.level, surface: e.surface, scroll: e.props.scroll ?? null, columns: e.props.bodyColumns })
-    // The ring's key. The terminal reads it from the state, so a move draws
-    // the row lit. A desktop draws no lit row, and each redraw there makes the
-    // focus outline flash: its drawing takes the key from the mod's own
-    // record and so does not follow the state's writes (seen live: two
-    // redraws for each j, none for a Tab).
-    const ringNow = e.surface === 'terminal' ? await read($, ringAtom) : (ring.local() ?? shownNoted)
-    shownNoted = ringNow
+    // The ring's key, read from the state, so a move draws the row lit. Only
+    // the terminal draws a lit row; elsewhere the key is not read, so its
+    // writes draw nothing.
+    const ringNow = e.surface === 'terminal' ? await read($, ringAtom) : null
     const nav: NavIo = {
       usage: () => $.session.usage({ breakdown: 'summary' }),
       messages: () => $.session.messages({ as: 'api' }),

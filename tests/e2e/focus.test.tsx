@@ -8,7 +8,9 @@
 // tenth has none. After Escape the drawing is the first one again, and no
 // column of a row moves between the two; on a desktop a row with a key cap
 // and a row without one start their names in one column. At every level
-// and in both states no two Buttons hold the same hotkey.
+// and in both states no two Buttons hold the same hotkey. Only the terminal,
+// with the keys, draws Down and Up (j and k); the desktop draws them at no
+// level, in either state.
 
 import { expect, test } from 'claude-code/testing'
 
@@ -83,6 +85,13 @@ async function rowHotkeys(ui: PaneUi): Promise<(string | undefined)[]> {
 /** The hotkeys of every Button drawn. */
 const allHotkeys = hotkeysOf
 
+/** The Down and Up controls and any Button that holds j or k, as "key:hotkey". */
+async function stepsOf(ui: PaneUi): Promise<string[]> {
+  return (await ui.findAll({ type: 'Button' }))
+    .filter(button => /^(list|scroll)-(down|up)$/.test(button.key ?? '') || button.props.hotkey === 'j' || button.props.hotkey === 'k')
+    .map(button => `${button.key ?? ''}:${String(button.props.hotkey)}`)
+}
+
 /** Characters that a regular expression reads as syntax, escaped. */
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
@@ -144,11 +153,14 @@ for (const surface of SURFACES) {
         } else if (level < 3) {
           // No dim mark of the mod's own: the digit is the key cap's.
           expect({ where, dim: first.some(line => /⟨[1-9]: ⟩/.test(line)) }).toEqual({ where, dim: false })
+          // No Down and Up and no j or k: Tab moves the ring along the rows.
+          expect({ where, steps: await stepsOf(ui) }).toEqual({ where, steps: [] })
           const keys = await rowHotkeys(ui)
           expect({ where, keys: keys.slice(0, digits.length) }).toEqual({ where, keys: digits })
           expect({ where, rest: keys.slice(digits.length).every(key => key === undefined) }).toEqual({ where, rest: true })
         } else {
-          expect({ where, keys: firstHotkeys.slice(0, 3) }).toEqual({ where, keys: ['j', 'k', 'b'] })
+          // Level 3 off the terminal has no j and k: the app scrolls the text.
+          expect({ where, keys: firstHotkeys.slice(0, 3) }).toEqual({ where, keys: ['b', 'p', 'n'] })
         }
 
         // Tab in: the hint goes, the first nine rows take 1-9, the tenth none
@@ -162,8 +174,12 @@ for (const surface of SURFACES) {
           expect({ where, keys: keys.slice(0, digits.length) }).toEqual({ where, keys: digits })
           expect({ where, rest: keys.slice(digits.length).every(key => key === undefined) }).toEqual({ where, rest: true })
           expect({ where, tenth: keys.length >= 10 }).toEqual({ where, tenth: true })
+          // With the keys only the terminal draws Down and Up (j and k).
+          const steps = surface === 'terminal' ? ['list-down:j', 'list-up:k'] : []
+          expect({ where, steps: await stepsOf(ui) }).toEqual({ where, steps })
         } else {
-          expect({ where, keys: (await allHotkeys(ui)).slice(0, 3) }).toEqual({ where, keys: ['j', 'k', 'b'] })
+          const first3 = surface === 'terminal' ? ['j', 'k', 'b'] : ['b', 'p', 'n']
+          expect({ where, keys: (await allHotkeys(ui)).slice(0, 3) }).toEqual({ where, keys: first3 })
         }
 
         // On a desktop the keys change no hotkey: Tab in removes the hint only.

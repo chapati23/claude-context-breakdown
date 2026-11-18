@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownList, ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
-import { ARROWS_MOVE_RING, arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from '../hooks/ring'
+import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from '../hooks/ring'
 
 const KEYS = ['row-a', 'row-b', 'row-c']
 
@@ -61,7 +61,6 @@ test('ringTarget: the ends stop, unless the list has a page that way', () => {
 })
 
 test('arrowStep: only an arrow at level 1 or 2 while the pane holds the keys moves the ring', () => {
-  expect(ARROWS_MOVE_RING).toBe(true)
   const at = (level: 1 | 2 | 3, isFocused = true) => ({ isFocused, level })
   expect(arrowStep({ by: 1 }, at(1))).toBe(1)
   expect(arrowStep({ by: -1 }, at(2))).toBe(-1)
@@ -74,8 +73,6 @@ test('arrowStep: only an arrow at level 1 or 2 while the pane holds the keys mov
   // Level 3 scrolls; a pane without the keys too.
   expect(arrowStep({ by: 1 }, at(3))).toBeNull()
   expect(arrowStep({ by: 1 }, at(1, false))).toBeNull()
-  // Turned off, the arrows scroll everywhere.
-  expect(arrowStep({ by: 1 }, at(1), false)).toBeNull()
 })
 
 test('notesRing: the person always moves the record; this mod only while none of its moves is under way', () => {

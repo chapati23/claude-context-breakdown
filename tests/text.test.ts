@@ -13,7 +13,6 @@ import {
   NAME_MAX_CHARS,
   pageStarts,
   plainName,
-  safeCut,
   shortenPath,
   textPage,
 } from '../hooks/text'
@@ -132,42 +131,6 @@ describe('cells and cuts', () => {
     // The cut lands inside a pair: the lone second half is dropped.
     const short = shortenPath(`/srv/${'😀'.repeat(30)}`, 6)
     expect(short).toBe(`…${'😀'.repeat(2)}`)
-  })
-
-  test('a cut moves back before the base of a character, never onto a mark', () => {
-    // A combining mark stays with its e.
-    expect(safeCut('abe\u0301cd', 3)).toBe(2)
-    // Two marks on one base.
-    expect(safeCut('ae\u0301\u0302b', 3)).toBe(1)
-    // A variation selector stays with its heart.
-    expect(safeCut('a\u2764\ufe0fb', 2)).toBe(1)
-    // A zero-width joiner sequence stays whole: on the joiner and after it.
-    const family = 'a\u{1f469}\u200d\u{1f467}b'
-    expect(safeCut(family, 3)).toBe(1)
-    expect(safeCut(family, 4)).toBe(1)
-    expect(safeCut(family, 5)).toBe(1)
-    expect(safeCut(family, 6)).toBe(6)
-    // The second half of a pair, as before.
-    expect(safeCut('a\u{1f600}b', 2)).toBe(1)
-    expect(safeCut('abc', 1)).toBe(1)
-  })
-
-  test('a line of marks only keeps its cut, so a piece is never empty', () => {
-    const marks = '\u0301'.repeat(10)
-    expect(safeCut(marks, 4)).toBe(4)
-    // With a start, the cut never goes back to it.
-    expect(safeCut(`abc${marks}`, 8, 3)).toBe(8)
-    expect(safeCut(`abe${marks}`, 8, 1)).toBe(2)
-  })
-
-  test('the raw view never starts a piece with a mark', () => {
-    const line = `${'a'.repeat(CODE_LINE_CHARS - 1)}${'e\u0301'.repeat(200)}`
-    const pieces = codeRuns(line, null).runs[0]!.source.split('\n')
-    expect(pieces.length).toBeGreaterThan(1)
-    expect(pieces.join('')).toBe(line)
-    expect(pieces.every(piece => !/^\p{M}/u.test(piece))).toBe(true)
-    const marks = '\u0301'.repeat(CODE_LINE_CHARS + 5)
-    expect(codeRuns(marks, null).runs[0]!.source.split('\n').join('')).toBe(marks)
   })
 
   test('fit counts cells, so a row of wide text keeps its width', () => {

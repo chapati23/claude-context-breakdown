@@ -120,7 +120,9 @@ describe('acts on the pane', () => {
     expect(digit).toMatch(/^[1-9]$/)
     const before = flatten(await ui.drawn(), { surface: 'desktop' })
     expect(await hotkey(ui, digit)).toBe(false)
-    expect(await hold(ui, 'j', 3)).toBe(0)
+    // The desktop draws no j: a drawn control's key stands in for it.
+    expect((await ui.find({ key: 'refresh' }))?.props.hotkey).toBe('r')
+    expect(await hold(ui, 'r', 3)).toBe(0)
     expect(flatten(await ui.drawn(), { surface: 'desktop' })).toEqual(before)
 
     // With the keyboard the same key opens the row; a redraw that takes it away stops it again.

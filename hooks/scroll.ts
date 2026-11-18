@@ -1,6 +1,6 @@
 // j and k: the pane's body one row down or up, and on to the next or the
 // previous page at a page's edge. Level 3 uses this on the terminal only:
-// elsewhere j and k there move where the text starts (lines.ts).
+// elsewhere the app's own scrolling moves the text.
 //
 // `$.ui.scroll` takes no row number, only a thing to reveal. So a press asks
 // for the pane's `start`, and this mod's own `ui.scroll` hook rewrites the
@@ -19,15 +19,6 @@
 // whether the hook saw it (`seen`). Once a step moved the window without the
 // hook, a press asks for no scroll at all: without the hook, a step to
 // `start` would jump to the top. The wheel and the arrows need no hook.
-//
-// The engine's own window can lag behind (seen on the desktop app, where the
-// window lives in another process): a quick second press then reads a row
-// between the one the first press started from and the one it went to. So a
-// step continues from the mod's own last target while the engine still
-// reports a row on that way (`last` in `Steps`). The render props do not end
-// that: they can show the target before the engine's own row has caught up.
-// A row off that way, a new tree, or any scroll that is not a step (the
-// person's wheel, arrows and page keys too) ends it, so those always win.
 //
 // The engine also keeps a pane's window across a new tree (it only clamps
 // it), so a page or level change asks for `TOP_SCROLL` itself. It also
@@ -111,17 +102,10 @@ export function shareAcross(before: LineSpan, share: number, after: LineSpan): n
   return span <= 0 ? 0 : Math.min(1, Math.max(0, (line - after.firstLine) / span))
 }
 
-/** Where the engine says the window stands before a scroll. */
-export function standingOf(window: ScrollWindow): number {
-  return window.offset - window.by
-}
-
-/**
- * The offset one step moves the window to: one row past `from`, clamped to
- * the tree. `from` is where the window stands, unless the mod knows better.
- */
-export function stepOffset(window: ScrollWindow, step: number, from = standingOf(window)): number {
-  const wanted = Math.round(from + step)
+/** The offset one step moves the window to: one row past where it stands, clamped to the tree. */
+export function stepOffset(window: ScrollWindow, step: number): number {
+  const standing = window.offset - window.by
+  const wanted = Math.round(standing + step)
 
   return Math.min(lastOffset(window), Math.max(0, wanted))
 }
@@ -129,12 +113,12 @@ export function stepOffset(window: ScrollWindow, step: number, from = standingOf
 /** Which page a step asks for: the next from the bottom (or a tree that fits), the previous from the top. */
 export type Crossing = 'next' | 'prev' | null
 
-/** Whether a step from `from` crosses a page's edge; `from` as for `stepOffset`. */
-export function crossingOf(window: ScrollWindow, step: number, from = standingOf(window)): Crossing {
-  if (step > 0 && from >= lastOffset(window)) {
+export function crossingOf(window: ScrollWindow, step: number): Crossing {
+  const standing = window.offset - window.by
+  if (step > 0 && standing >= lastOffset(window)) {
     return 'next'
   }
-  if (step < 0 && from <= 0) {
+  if (step < 0 && standing <= 0) {
     return 'prev'
   }
 
@@ -171,63 +155,19 @@ export type StepKind = 'step' | 'probe' | 'measure' | 'place'
 export type StepToken = { readonly step: number; readonly kind: StepKind; share: number; seen: boolean; cross: Crossing }
 
 /**
- * The rows the window has been asked through since the engine last agreed
- * with us: `lo` and `hi`, the smallest and largest of every row the engine
- * reported and every target since the lag began, and `to`, the last target.
- * A lagging engine reports a row from `lo` to `hi`.
- */
-export type LastStep = { lo: number; hi: number; to: number }
-
-/**
  * The scrolls of ours the engine has not raised yet, oldest first. A press
  * adds one and drops it when its call settles, so a call the engine refused
  * leaves nothing for a later scroll to pick up.
- *
- * `last` is the range of the steps under lag, until the engine reports a row
- * off it (`stepBase`) or a new tree or another scroll moves the window (`forget`).
  */
 export type Steps = {
   push: (step: number, kind?: StepKind, share?: number) => StepToken
   take: () => StepToken | undefined
   drop: (token: StepToken) => void
   size: () => number
-  last: () => LastStep | null
-  setLast: (move: LastStep | null) => void
-  /** A new tree or a scroll that is not a step: no step to continue from. */
-  forget: () => void
-}
-
-/**
- * Where a step starts. The engine's row, unless it reports a row inside the
- * range of the steps under lag and not yet their last target: then the engine
- * lags, and the step continues from that target. A row off the range means
- * something else moved the window: it wins.
- */
-export function stepBase(standing: number, last: LastStep | null): number {
-  if (last === null || standing === last.to) {
-    return standing
-  }
-
-  return standing >= last.lo && standing <= last.hi ? last.to : standing
-}
-
-/**
- * The record after a step from the engine's row `standing` to `to`. A row
- * inside the range is lag: the range grows to take in the row and the target.
- * The engine at the last target (the lag is over) or a row off the range
- * (something else moved the window) starts the range again at that row.
- */
-export function nextStep(standing: number, last: LastStep | null, to: number): LastStep {
-  const isLag = last !== null && standing !== last.to && standing >= last.lo && standing <= last.hi
-  const lo = isLag ? Math.min(last.lo, standing) : standing
-  const hi = isLag ? Math.max(last.hi, standing) : standing
-
-  return { lo: Math.min(lo, to), hi: Math.max(hi, to), to }
 }
 
 export function createSteps(): Steps {
   const queue: StepToken[] = []
-  let last: LastStep | null = null
 
   return {
     push: (step, kind = 'step', share = 0) => {
@@ -244,13 +184,6 @@ export function createSteps(): Steps {
       }
     },
     size: () => queue.length,
-    last: () => last,
-    setLast: move => {
-      last = move
-    },
-    forget: () => {
-      last = null
-    },
   }
 }
 
@@ -304,8 +237,8 @@ export type Link = 'unknown' | 'works' | 'absent'
  * the top it says nothing, as a tree that fits the window has its end there.
  */
 export function learnLink(link: Link, token: StepToken, answer: { deny?: string } | null, standing: number): Link {
-  // Once proven, an unseen scroll does not undo it: on the desktop a quick
-  // press can find the engine's window behind, and `start` then moves nothing.
+  // Once proven, an unseen scroll does not undo it: a quick press can find
+  // the engine's window behind, and `start` then moves nothing.
   if (token.seen || link === 'works') {
     return 'works'
   }
@@ -326,14 +259,13 @@ export function createPaneScroll(): PaneScroll {
 }
 
 /**
- * A new tree asks for its top. No step to continue from, and the offset is
- * the top's from now on: a quick press before the next drawing must not read
- * the old tree's offset and conclude the link is absent. The link stays as
- * it is: a step at the top of the new tree proves nothing, and a proven link
- * must still ask again for `end` (`needsRetry`).
+ * A new tree asks for its top. The offset is the top's from now on: a quick
+ * press before the next drawing must not read the old tree's offset and
+ * conclude the link is absent. The link stays as it is: a step at the top of
+ * the new tree proves nothing, and a proven link must still ask again for
+ * `end` (`needsRetry`).
  */
-export function atNewTop(pane: PaneScroll, steps: Steps): void {
-  steps.forget()
+export function atNewTop(pane: PaneScroll): void {
   pane.shown = 0
 }
 
@@ -374,15 +306,9 @@ export function stepAnswer(e: ScrollEvent, plugin: string, steps: Steps): number
   }
   const token = steps.take()
   if (token === undefined) {
-    // Our own top or bottom: a step after it starts from where it went.
-    steps.forget()
-
     return null
   }
   token.seen = true
-  if (token.kind !== 'step') {
-    steps.forget()
-  }
   switch (token.kind) {
     case 'probe':
       return null
@@ -392,15 +318,10 @@ export function stepAnswer(e: ScrollEvent, plugin: string, steps: Steps): number
       return stepOffset(e, 0)
     case 'place':
       return Math.round(token.share * lastOffset(e))
-    case 'step': {
-      const standing = standingOf(e)
-      const from = stepBase(standing, steps.last())
-      token.cross = crossingOf(e, token.step, from)
-      const to = stepOffset(e, token.step, from)
-      steps.setLast(nextStep(standing, steps.last(), to))
+    case 'step':
+      token.cross = crossingOf(e, token.step)
 
-      return to
-    }
+      return stepOffset(e, token.step)
   }
 }
 

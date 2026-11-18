@@ -155,47 +155,17 @@ export function shortenPath(path: string, max = 48): string {
     return `…/${tail}`
   }
   const from = tail.length - Math.max(1, max - 1)
-  // Start after the character the cut falls in, never inside it.
-  let start = Math.max(0, from)
-  while (start > 0 && start < tail.length && safeCut(tail, start) !== start) {
-    start += 1
-  }
+  // Start after a surrogate pair's first half, never inside the pair.
+  const start = from > 0 && safeCut(tail, from) !== from ? from + 1 : Math.max(0, from)
 
   return `…${tail.slice(start)}`
 }
 
-/** Code points that belong to the character before them: marks, variation selectors, joiners. */
-const JOINS_BACK = /^[\p{M}\u200d\ufe00-\ufe0f\u{e0100}-\u{e01ef}]/u
-
-/** Whether a piece starting at `at` would start inside a character. */
-function isInside(text: string, at: number): boolean {
+/** Moves an offset off the second half of a surrogate pair. */
+export function safeCut(text: string, at: number): number {
   const code = text.charCodeAt(at)
-  if (code >= 0xdc00 && code <= 0xdfff) {
-    return true
-  }
-  if (JOINS_BACK.test(text.slice(at, at + 2))) {
-    return true
-  }
-  // The part after a zero-width joiner joins the part before it.
-  return text.charCodeAt(at - 1) === 0x200d
-}
 
-/**
- * Moves an offset back to the start of its character: off the second half of a
- * surrogate pair, a combining mark, a variation selector, or a part of a
- * zero-width joiner sequence. When no start is found before `from`, the offset
- * stays as it was, so a cut of a non-empty piece never becomes 0.
- */
-export function safeCut(text: string, at: number, from = 0): number {
-  if (at <= from || at >= text.length) {
-    return at
-  }
-  let cut = at
-  while (cut > from && isInside(text, cut)) {
-    cut -= 1
-  }
-
-  return cut > from ? cut : at
+  return at > 0 && at < text.length && code >= 0xdc00 && code <= 0xdfff ? at - 1 : at
 }
 
 /**
@@ -212,7 +182,7 @@ export function pageStarts(text: string): number[] {
       const newline = text.indexOf('\n', end)
       const lineEnd = newline === -1 ? text.length : newline + 1
       if (lineEnd - start > PAGE_CHARS) {
-        end = lines === 0 ? safeCut(text, start + PAGE_CHARS, start) : end
+        end = lines === 0 ? safeCut(text, start + PAGE_CHARS) : end
         break
       }
       end = lineEnd
@@ -301,11 +271,11 @@ export const CODE_LINE_CHARS = 1000
 export type CodeRun = { source: string; startLine: number | null }
 
 /** Cuts a line into pieces of at most `max` characters; never splits a character. */
-export function pieces(line: string, max: number): string[] {
+function pieces(line: string, max: number): string[] {
   const out: string[] = []
   let at = 0
   while (line.length - at > max) {
-    const end = Math.max(at + 1, safeCut(line, at + max, at))
+    const end = Math.max(at + 1, safeCut(line, at + max))
     out.push(line.slice(at, end))
     at = end
   }

@@ -80,7 +80,7 @@ test('a baseline segment lists its items; its sort key is there but does nothing
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'row-mcp' })
-    expect(isOff(await ui.find({ key: 'sort' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'sort' }), surface)).toBe(true)
     await ui.press({ key: 'sort' })
     expect(await ui.find({ type: 'Text', text: /largest first|newest first/ })).toBeUndefined()
     // Tool schemas have no text: rows, not buttons.
@@ -103,11 +103,11 @@ test('the sort toggle and the pages', async ($, on) => {
     expect(keys[0]).toBe('item-r:b1')
     expect(await ui.find({ type: 'Text', text: /^25 more items, .*, on other pages$/ })).toBeDefined()
     // p on the first page is still a control, so the key stays in the pane; it does nothing.
-    expect(isOff(await ui.find({ key: 'prev' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(true)
     expect((await ui.find({ key: 'prev' }))?.props.hotkey).toBe('p')
     await ui.press({ key: 'prev' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b1')
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(false)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(false)
 
     await ui.press({ key: 'sort' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b45')
@@ -120,7 +120,7 @@ test('the sort toggle and the pages', async ($, on) => {
     await ui.press({ key: 'next' })
     keys = await itemKeys(ui)
     expect(keys).toHaveLength(5)
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(true)
     await ui.press({ key: 'next' })
     expect(await itemKeys(ui)).toHaveLength(5)
     expect(await ui.find({ type: 'Text', text: /^40 more items/ })).toBeDefined()
@@ -157,7 +157,7 @@ test('a long item pages with n and p, and the facts line says which lines it sho
     await ui.press({ key: 'format' })
     expect(await ui.find({ type: 'Text', text: /· formatted · as loaded · lines [\d,]+-1,230 of 1,230$/ })).toBeDefined()
     await ui.press({ key: 'format' })
-    while (!isOff(await ui.find({ key: 'prev' }))) {
+    while (!isOff(await ui.find({ key: 'prev' }), surface)) {
       await ui.press({ key: 'prev' })
     }
     expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(1)
@@ -213,7 +213,7 @@ test('an instruction file shows its as-loaded text, and the file when the remind
     await ui.press({ key: global! })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('Be brief.')
     expect(await ui.find({ type: 'Text', text: /shown from disk/ })).toBeDefined()
-    expect(isOff(await ui.find({ key: 'view' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'view' }), surface)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -244,7 +244,7 @@ test('c copies the path and m mentions it; for an item without a path they do no
     await ui.press({ key: 'item-r:tu2' })
     // Still controls with their keys, so v, c and m stay in the pane.
     for (const key of ['copy', 'mention', 'view']) {
-      expect(isOff(await ui.find({ key }))).toBe(true)
+      expect(isOff(await ui.find({ key }), surface)).toBe(true)
       expect((await ui.find({ key }))?.props.hotkey).toBeDefined()
       await ui.press({ key })
     }
@@ -502,12 +502,16 @@ test('level 3: the controls stand between the facts line and the text, and the f
     await ui.press({ key: 'row-tool-results' })
     await ui.press({ key: 'item-r:big' })
     const order = drawnOrder(await ui.drawn())
-    expect(order.indexOf('facts')).toBeLessThan(order.indexOf('scroll-down'))
+    // The first control: Down on the terminal; elsewhere Back, as level 3
+    // there draws no Down and Up (the app scrolls the text).
+    const first = surface === 'terminal' ? 'scroll-down' : 'back'
+    expect(order.indexOf('facts')).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf('facts')).toBeLessThan(order.indexOf(first))
     expect(order.indexOf('refresh')).toBeLessThan(order.indexOf('Code'))
     // A page with a next one ends with a control to it, under the text.
     expect(order.at(-1)).toBe('next-below')
     const ringed = (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true)
-    expect(ringed.map(button => button.key)).toEqual(['scroll-down'])
+    expect(ringed.map(button => button.key)).toEqual([first])
     await ui.press({ key: 'next-below' })
     expect(await ui.find({ type: 'Text', text: /lines 501-1,000 of 1,230$/ })).toBeDefined()
 
@@ -579,28 +583,33 @@ test('every letter key of a level is a control there, in one order, readable at 
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 45 } })
+    // Only the terminal draws Down and Up (j and k): elsewhere Tab moves the
+    // ring along the rows and the app scrolls the text.
+    const steps = (down: string, up: string) => (surface === 'terminal' ? [down, up] : [])
     // b at level 1 does nothing, but keeps the key in the pane.
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'close', 'refresh'])
-    // The words name the arrows and Tab, which move the ring; j and k say Down and Up.
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'close', 'refresh'])
+    // The words name the keys that move the ring: the arrows and Tab on the
+    // terminal, Tab alone elsewhere. j and k say Down and Up.
     const words = (await ui.findAll({ type: 'Text', text: /: (Move|Open)$/ })).map(text => text.text)
-    expect(words).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
+    expect(words).toEqual([surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move', '⏎ or 1-9: Open'])
     // The key line as drawn wraps between its parts (a gap of 2): every row,
     // words and controls, fits the pane's 45 columns, in cells.
     const rows1 = keyRows(await ui.drawn(), 45)
     expect(rows1.flat().length).toBe(2 + (await keyLine(ui)).length)
     expect(rows1.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
-    expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
-    expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
-    expect(isOff(await ui.find({ key: 'back' }))).toBe(true)
+    if (surface === 'terminal') {
+      expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
+      expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
+    }
+    expect(isOff(await ui.find({ key: 'back' }), surface)).toBe(true)
     await ui.press({ key: 'back' })
     expect(await ui.find({ key: 'row-system' })).toBeDefined()
 
     await ui.press({ key: 'row-tool-results' })
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
     await ui.press({ key: 'item-r:tu2' })
     expect(await keyLine(ui)).toEqual([
-      'scroll-down',
-      'scroll-up',
+      ...steps('scroll-down', 'scroll-up'),
       'back',
       'prev',
       'next',

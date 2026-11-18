@@ -18,7 +18,6 @@ import type { MessageLike } from './classify'
 import { NO_ITEMS, buildItems, isBaseline, listOf } from './items'
 import type { Item, ItemBreakdown, ItemData, ItemSet } from './items'
 import { defaultFormat, formattedSource, mappedLine, markdownPages, pageAtLine } from './markdown'
-import { endTop, shownFirstLine, topAtLine, topOf } from './lines'
 import { compareFile, compareRead } from './reminder'
 import { displayText, firstWords, newlines, pageLines, textPage } from './text'
 
@@ -71,15 +70,9 @@ type Outcome = 'written' | 'superseded' | 'stale'
 /**
  * Writes `next` unless the view moved on since `base` was read: the later
  * press wins over a slow earlier one, and data older than a rebuild is not
- * written. `finish` may carry over a part of the view as it is when the
- * write lands (the place j and k left, for a refresh).
+ * written.
  */
-async function commit(
-  io: NavIo,
-  base: ContextBreakdownView,
-  next: ContextBreakdownView,
-  finish?: (previous: ContextBreakdownView, next: ContextBreakdownView) => ContextBreakdownView,
-): Promise<Outcome> {
+async function commit(io: NavIo, base: ContextBreakdownView, next: ContextBreakdownView): Promise<Outcome> {
   // `update` may run the change again on a version miss; the last run counts.
   let outcome: Outcome = 'superseded'
   await io.write(previous => {
@@ -94,9 +87,8 @@ async function commit(
       return previous
     }
     outcome = 'written'
-    const written = { ...next, seq: base.seq + 1, gen: base.gen } as ContextBreakdownView
 
-    return finish === undefined ? written : finish(previous, written)
+    return { ...next, seq: base.seq + 1, gen: base.gen } as ContextBreakdownView
   })
 
   return outcome
@@ -174,8 +166,13 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
     if (view.list.items > 0 && set.items.length === 0 && set.note === NO_ITEMS) {
       return { seq: view.seq, gen, level: 1, note: ITEMS_GONE_NOTE }
     }
+    // The row that took the ring before the rebuild keeps it (`from`, which
+    // `ringKey` reads): a new item first would take it otherwise, and a
+    // desktop moves the focus to it while the person is elsewhere.
+    const ids = view.list.rows.filter(row => row.isOpenable).map(row => row.id)
+    const from = view.from !== undefined && ids.includes(view.from) ? view.from : ids[0]
 
-    return { ...view, gen, list }
+    return { ...view, gen, list, ...(from === undefined ? {} : { from }) }
   }
   const item = set.items.find(one => one.id === view.item.id)
   if (item === undefined) {
@@ -285,9 +282,7 @@ function lineRange(page: ViewPage, format: ContextBreakdownFormat, raw: string) 
  * The stored page of an item's text for one source and view; without a
  * view, the item's default. When `from` names a page of the other view, the
  * page shown is the one that holds the line at `share` of that page (its
- * first line by default), and `page` is unused. When `from` names a `line`
- * (in the raw view's lines of the text shown), the page shown is the one
- * that holds it, or the first page when the text has no such line.
+ * first line by default), and `page` is unused.
  */
 export function contentOf(
   item: Item,
@@ -296,7 +291,7 @@ export function contentOf(
   page: number,
   isChanged: boolean,
   format?: ContextBreakdownFormat,
-  from?: { format: ContextBreakdownFormat; page: number; share?: number } | { line: number },
+  from?: { format: ContextBreakdownFormat; page: number; share?: number },
 ): ContextBreakdownContent {
   const view = format ?? defaultFormat(item)
   const canToggle = item.disk !== null && item.path !== null && resolved.loaded !== null
@@ -316,15 +311,10 @@ export function contentOf(
   }
   const shownText = displayText(raw ?? '')
   // Claude's reply has a Markdown form of its own; a file on disk is itself.
-  const fromFormat = from !== undefined && 'format' in from ? from.format : undefined
-  const hasOwn = shown === 'loaded' && item.formatted !== undefined && (view === 'formatted' || fromFormat === 'formatted')
+  const hasOwn = shown === 'loaded' && item.formatted !== undefined && (view === 'formatted' || from?.format === 'formatted')
   const own = hasOwn ? displayText(item.formatted!()) : shownText
   let place: Place = page
-  if (from !== undefined && 'line' in from) {
-    // The raw view counts the text's own lines; the formatted view maps them, as `lineRange` does back.
-    const lines = view === 'raw' ? shownText.split('\n').length : rawLines(shownText)
-    place = from.line <= rawLines(shownText) ? { line: from.line, lines } : 0
-  } else if (from !== undefined && from.format !== view) {
+  if (from !== undefined && from.format !== view) {
     const before = viewPage(item, shownText, own, shown, from.format, from.page)
     const line = Math.round(before.startLine + (from.share ?? 0) * (before.endLine - before.startLine))
     place = { line, lines: before.lines }
@@ -455,17 +445,6 @@ function reopen(
     share?: number
     /** The page opens at its end (k crossed back into it). */
     atEnd?: boolean
-    /**
-     * Off the terminal, where the text starts (lines.ts): a number of units,
-     * or the units that show about `endRows` lines at the page's end.
-     */
-    top?: number | { endRows: number }
-    /**
-     * Off the terminal, a switch that keeps the place: the line shown first
-     * (in the raw view's lines). The page that holds it opens with that line
-     * first; when the new text has no such line, the first page at its top.
-     */
-    line?: number
   },
   isFresh = false,
 ): Promise<void> {
@@ -478,92 +457,38 @@ function reopen(
     if (typeof found === 'string') {
       return found
     }
-    const { source, page, format = base.item.format, share = 0, atEnd = false, top, line } = change(base.item)
+    const { source, page, format = base.item.format, share = 0, atEnd = false } = change(base.item)
     const resolved = await resolveText(io, found.item, isFresh || source === 'disk')
     const isChanged = isFresh ? isChangedOnDisk(found.item, resolved.loaded, resolved.disk) : base.item.isChanged
     const list = listOf(base.list.segment, found.set, base.list.sort, base.list.page)
     // A switch of view on the same source keeps the place, not the page number.
-    const from =
-      line !== undefined
-        ? { line }
-        : source === base.item.source
-          ? { format: base.item.format, page: base.item.page, share }
-          : undefined
-    const shown = { ...contentOf(found.item, resolved, source, page, isChanged, format, from), atEnd }
-    const at =
-      line !== undefined
-        ? line <= shown.lines
-          ? topAtLine(shown, line)
-          : 0
-        : top === undefined
-          ? 0
-          : typeof top === 'number'
-            ? top
-            : endTop(shown, top.endRows)
-    const item = at > 0 ? { ...shown, top: at } : shown
+    const from = source === base.item.source ? { format: base.item.format, page: base.item.page, share } : undefined
+    const item = { ...contentOf(found.item, resolved, source, page, isChanged, format, from), atEnd }
 
-    // A refresh keeps the place j and k left while the page shows the same text.
-    return commit(io, base, { ...base, list, item }, isFresh ? keepTop : undefined)
+    return commit(io, base, { ...base, list, item })
   })
 }
 
-/**
- * The view after a refresh, as it lands: the place j and k left on the page
- * shown before, when the refresh shows the same text there.
- */
-export function keepTop(previous: ContextBreakdownView, next: ContextBreakdownView): ContextBreakdownView {
-  if (previous.level !== 3 || next.level !== 3) {
-    return next
-  }
-  const was = previous.item
-  const now = next.item
-  const isSame =
-    was.id === now.id && was.page === now.page && was.format === now.format && was.source === now.source && was.text === now.text
-  const top = isSame ? topOf(was) : 0
-  const { top: _drop, ...rest } = now
-
-  return { ...next, item: top > 0 ? { ...rest, top } : rest }
+/** Another page; `atEnd` when k crossed back into the previous one, which then opens at its end. */
+export function contentPage(io: NavIo, delta: number, atEnd = false): Promise<void> {
+  return reopen(io, item => ({ source: item.source, page: item.page + delta, atEnd }))
 }
 
-/**
- * Another page; `atEnd` when k crossed back into the previous one, which then
- * opens at its end. `top`, off the terminal: where its text starts (lines.ts).
- */
-export function contentPage(io: NavIo, delta: number, atEnd = false, top?: number | { endRows: number }): Promise<void> {
-  return reopen(io, item => ({ source: item.source, page: item.page + delta, atEnd, ...(top === undefined ? {} : { top }) }))
-}
-
-/**
- * As loaded to on disk and back, from the first page. `keepLine`, off the
- * terminal: from the line shown first, when the other text has it.
- */
-export function toggleSource(io: NavIo, keepLine = false): Promise<void> {
-  return reopen(io, item => ({
-    source: item.source === 'loaded' ? 'disk' : 'loaded',
-    page: 0,
-    ...(keepLine ? { line: shownFirstLine(item) } : {}),
-  }))
+export function toggleSource(io: NavIo): Promise<void> {
+  return reopen(io, item => ({ source: item.source === 'loaded' ? 'disk' : 'loaded', page: 0 }))
 }
 
 /**
  * Formatted to raw and back; the page shown holds the line the window showed,
  * at `share` of the last page (0, its top, when the window is not known).
- * `keepLine`, off the terminal: that line counts from the line shown first
- * (after j and k), and the other view shows it first, or the nearest unit
- * before it.
  */
-export function toggleFormat(io: NavIo, share = 0, keepLine = false): Promise<void> {
-  return reopen(io, item => {
-    const first = shownFirstLine(item)
-
-    return {
-      source: item.source,
-      page: item.page,
-      format: item.format === 'formatted' ? 'raw' : 'formatted',
-      share,
-      ...(keepLine ? { line: Math.round(first + share * (item.lastLine - first)) } : {}),
-    }
-  })
+export function toggleFormat(io: NavIo, share = 0): Promise<void> {
+  return reopen(io, item => ({
+    source: item.source,
+    page: item.page,
+    format: item.format === 'formatted' ? 'raw' : 'formatted',
+    share,
+  }))
 }
 
 /** After `r` measured: level 3 reads its text and the file again. */

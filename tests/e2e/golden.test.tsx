@@ -7,9 +7,10 @@
 // golden module between GOLDEN-BEGIN and GOLDEN-END. To take it, run from
 // the mod's folder:
 //
-//   claude plugin test . 2>&1 | sed -n '/^GOLDEN-BEGIN$/,/^GOLDEN-END$/p' | sed '1d;$d' > tests/e2e/golden.ts.new \
-//     && mv tests/e2e/golden.ts.new tests/e2e/golden.ts
+//   claude plugin test . 2>&1 | sed -n '/^GOLDEN-BEGIN$/,/^GOLDEN-END$/p' | sed '1d;$d' > tests/e2e/golden.ts.new
+//   [ -s tests/e2e/golden.ts.new ] && mv tests/e2e/golden.ts.new tests/e2e/golden.ts || rm tests/e2e/golden.ts.new
 //
+// The second line keeps golden.ts when the run printed no golden module.
 // Then read the diff of golden.ts before you keep it. (A test here cannot
 // read or write files or the environment, so there is no UPDATE switch.)
 

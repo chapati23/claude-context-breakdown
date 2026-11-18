@@ -6,13 +6,13 @@ import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot } from '../typ
 import { FILLED, FREE, MIN_CHIP_CELLS, RESERVE, chipForms, chipsToDraw, segmentCells, segmentKey, segmentRuns } from './bar'
 import type { Chip } from './bar'
 import { inkOn } from './color'
-import type { SegmentPart } from './layout'
+import type { LayoutPart, SegmentPart } from './layout'
 import { colorOf, edgeColor } from './palette'
 import type { Palette } from './palette'
 import { segmentDef } from './segments'
 import { SVG_BAR_HEIGHT, SVG_SWATCH_PX, barSvg, svgBarWidth, swatchSvg } from './svgbar'
 import type { TokensOf } from './svgbar'
-import type { BarClientProps, BarRun } from './barclient'
+import type { BarClientProps, BarRun, PartIdentity } from './barclient'
 import { usedTokens } from './snapshot'
 import type { BandModel } from './view'
 import { LEGEND_JOIN, bandModel, fit, legendCells } from './view'
@@ -163,14 +163,14 @@ function row(
  * mobile app): the bar as one SVG, then the total and the legend in the code
  * font. Those surfaces draw a Button as a native button showing only its
  * label, so the bar cannot be a row of segment Buttons there. The total is
- * the one Button, with no label so its own text shows; `openPane` null
- * opens the segments.
+ * the one Button, with no label so its own text shows; it opens level 1.
+ * With `openPane` null nothing is pressable.
  */
 function pictureRow(
   ui: PictureUi,
   model: BandModel,
-  tokensOf: TokensOf,
-  used: number,
+  palette: Palette,
+  figures: PictureFigures,
   openPane: OpenPane | null,
 ): RenderElement {
   const { Box, Text, Button, Svg } = ui
@@ -182,7 +182,7 @@ function pictureRow(
     <Box flexDirection="row" alignItems="center" columnGap={1}>
       {hasBar && (
         <Svg
-          source={barSvg(model.parts, tokensOf, used)}
+          source={barSvg(model.parts, palette, figures.tokensOf, figures.used)}
           alt={`Context window: ${model.label}`}
           width={svgBarWidth(model.parts)}
           height={SVG_BAR_HEIGHT}
@@ -198,7 +198,7 @@ function pictureRow(
       )}
       {legend !== null && <Text mono dimColor>·</Text>}
       {legend !== null && (
-        <Svg source={swatchSvg(legend.cell)} alt={segmentDef(legend.id).label} width={SVG_SWATCH_PX} height={SVG_SWATCH_PX} />
+        <Svg source={swatchSvg(legend.cell, palette)} alt={segmentDef(legend.id).label} width={SVG_SWATCH_PX} height={SVG_SWATCH_PX} />
       )}
       {legend !== null && <Text mono dimColor>{legend.text}</Text>}
     </Box>
@@ -208,12 +208,13 @@ function pictureRow(
 /**
  * The desktop band's row as data for the surface module `barclient.tsx`:
  * the terminal's cells and colours, each run marked with the part a click
- * on it opens, and per segment the text that shows while the pointer is on
- * it.
+ * on it opens, and per segment part which segments it holds and the text
+ * that shows while the pointer is on it.
  */
 export function barClientProps(model: BandModel, palette: Palette, tokensOf: TokensOf): BarClientProps {
   const runs: BarRun[] = []
   const hovers: Record<string, string> = {}
+  const parts: Record<string, PartIdentity> = {}
   const hoverParts: { index: number; forms: string[] }[] = []
   model.parts.forEach((part, index) => {
     if (part.kind === 'free') {
@@ -237,6 +238,7 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     if (edge !== '') {
       runs.push({ text: edge, color, target: index })
     }
+    parts[String(index)] = { id: part.id, members: [...part.members] }
     hoverParts.push({ index, forms: chipForms(part, tokensOf).map(form => form.trim()) })
   })
   const { legend } = model
@@ -258,7 +260,35 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     runs.push({ text: ` ${legend.text}`, dimColor: true, target: null, isLegend: true })
   }
 
-  return { runs, hovers }
+  return { runs, hovers, parts }
+}
+
+/**
+ * The part a click the bar Client posted names (see `BarClientPost`): null
+ * for the total, the segment part with the posted identity, or undefined
+ * when no part has it. A relayout after the drawing can move the indices,
+ * so the index alone opens nothing.
+ */
+export function partOfPost(parts: readonly LayoutPart[], data: unknown): SegmentPart | null | undefined {
+  if (typeof data !== 'object' || data === null) {
+    return undefined
+  }
+  const post = data as { open?: unknown; id?: unknown; members?: unknown }
+  if (post.open === 'total') {
+    return null
+  }
+  const { id, members } = post
+  if (typeof post.open !== 'number' || typeof id !== 'string' || !Array.isArray(members)) {
+    return undefined
+  }
+
+  return parts.find(
+    (part): part is SegmentPart =>
+      part.kind === 'segment' &&
+      part.id === id &&
+      part.members.length === members.length &&
+      part.members.every((member, index) => member === members[index]),
+  )
 }
 
 /** The element table of a surface that has `Svg`. */
@@ -280,7 +310,9 @@ export type PictureFigures = { tokensOf: TokensOf; used: number }
  * The band's row for one model (see `bandModel`). `focused` is the key of
  * the bar Button that holds the keyboard focus, if any: its chip alone shows.
  * The chips are placed in text cells, so only the terminal gets them (see
- * `bandModelFor`). A surface with `Svg` gets the picture row.
+ * `bandModelFor`). The desktop gets the Client, the only table that has one,
+ * unless its Client failed (`clientFailed`). Every other surface with `Svg`
+ * gets the picture row.
  */
 export function bandTree(
   ui: Ui,
@@ -290,11 +322,15 @@ export function bandTree(
   focused: string | null,
   figures: PictureFigures,
   surface: string,
+  clientFailed: boolean,
 ): RenderElement {
-  if (drawsPicture(surface)) {
+  if (surface === 'desktop' && !clientFailed) {
     const { Client } = ui as Elements['desktop']
 
     return <Client key={BAR_CLIENT} module="./barclient.tsx" props={barClientProps(model, palette, figures.tokensOf)} />
+  }
+  if (drawsPicture(surface)) {
+    return pictureRow(ui as PictureUi, model, palette, figures, openPane)
   }
 
   return row(ui, model, palette, openPane, focused)
@@ -317,7 +353,7 @@ export function glanceTree(
   }
   const model = bandModel(snapshot, columns)
   if (drawsPicture(surface)) {
-    return pictureRow(ui as PictureUi, model, ...pictureArgs(snapshot), null)
+    return pictureRow(ui as PictureUi, model, palette, pictureFigures(snapshot), null)
   }
 
   return row(ui, model, palette, null, null)
@@ -330,10 +366,4 @@ export function pictureFigures(snapshot: ContextBreakdownSnapshot): PictureFigur
   )
 
   return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot) }
-}
-
-function pictureArgs(snapshot: ContextBreakdownSnapshot): [TokensOf, number] {
-  const { tokensOf, used } = pictureFigures(snapshot)
-
-  return [tokensOf, used]
 }

@@ -175,6 +175,7 @@ In the desktop app, the app draws each key as a small key cap inside its button,
 Reading the pane:
 
 - The heading gives the tokens in use and the tokens that are free before a compaction: `283k used · 684k free before compaction`.
+- When free space is below 10% of the window, the heading warns. Its free part, for example `33k free before compaction`, takes Claude Code's warning colour and stays bold. The line below it names the largest segment and its share of what is used, where it has room: `1M window · largest: Tool results 61%`. A narrow pane that has room for one figure only shows the free figure, `33k free`, in place of the used figure. Above 10% the heading and the line below it do not change.
 - The group headings say what each group holds, where the table has room: `Baseline · before your first prompt` and `Conversation · since the session started`. The reserve's row says `Reserve for compaction` where its name column has room.
 - In the terminal, a dim line below the table says what the row with the focus ring holds, for example `Tool results: the output of tool calls, such as file reads and command output.` It always takes two rows, so no line below it moves when the ring moves. The rows stay blank while the ring is on a control or the pane does not have the keyboard. A text longer than two rows ends in `…`. Other surfaces do not tell the mod where the focus is, so they draw no such line.
 - In the items, the line under the title gives the segment's definition. The facts (`9 items · largest first`) and the column name (`% of segment`) share one row where they fit on it. A row that does not open is dim all through.
@@ -214,6 +215,7 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - The mod shows the main session only. It does not show the windows of subagents.
 - The system prompt has no finer split, because Claude Code does not report one.
 - The mod does not show how the window grew over time.
+- The 10% threshold for the heading's warning is the mod's own, not a Claude Code setting. Only the pane's heading warns: the bar and the minimized pane do not. After a compaction the used figure is an estimate, so the warning can come and go between two measurements.
 - The mod reads at most the newest 4,096 messages of a conversation. The pane says so when older items are not listed.
 - The mod reads a file from disk only when you open an item that has one. It never writes files and never sends content anywhere.
 - In the terminal, the pane keeps the letter of a key that left the line through a control that it does not draw. `tab` also stops on such a control, and no ring shows there for that one press. The mods API offers no other way to take a key without drawing it. Other surfaces do not take those letters: there they go to the prompt.

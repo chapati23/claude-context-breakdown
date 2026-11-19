@@ -2,11 +2,12 @@
 // share (hotkey mark, name, length bar, figures) and the length bar's cells.
 // One layout serves every row of a level, so the columns line up.
 
-import type { ContextBreakdownDeferred, ContextBreakdownServer } from '../types'
+import type { ContextBreakdownDeferred, ContextBreakdownSegment, ContextBreakdownServer, ContextBreakdownSnapshot } from '../types'
 import { FILLED, TEXTURE, TEXTURED } from './bar'
 import { formatCount, formatShare, formatTokens } from './format'
+import { segmentDef } from './segments'
 import { cellWidth, shortenPath } from './text'
-import { fit } from './view'
+import { fit, isLowFree } from './view'
 
 /** Cells a hotkey's mark ("1: ") takes before a plain Button's label. */
 export const HOTKEY_CELLS = 3
@@ -282,6 +283,31 @@ export function columnHeader(table: Table, left: string, right: string): string 
   }
 
   return `${head}${right.padStart(figureCells(true))}`.trimEnd()
+}
+
+/**
+ * Level 1's column header on the left: "1M window". While free space is low
+ * it also names the largest segment and its share of what is used, "1M
+ * window · largest: Tool results 61%", with the short name where the full one
+ * does not fit the name and bar columns. Where neither fits, the window alone.
+ * The share has the share column's format, so it matches the bold row.
+ */
+export function windowText(
+  table: Table,
+  snapshot: ContextBreakdownSnapshot,
+  largest: ContextBreakdownSegment | null,
+  used: number,
+): string {
+  const window = `${formatTokens(snapshot.window)} window`
+  if (largest === null || !isLowFree(snapshot)) {
+    return window
+  }
+  const def = segmentDef(largest.id)
+  // Marked as the heading is: the share comes from the same estimate.
+  const share = `${snapshot.isEstimate ? '~' : ''}${formatShare(largest.tokens, used)}`
+  const forms = [def.label, def.short].map(name => `${window} · largest: ${name} ${share}`)
+
+  return forms.find(form => cellWidth(form) <= nameAndBarCells(table)) ?? window
 }
 
 /**

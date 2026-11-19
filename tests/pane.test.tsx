@@ -208,6 +208,8 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     expect(await ui.find({ type: 'Text', text: '283k used · 684k free before compaction' })).toBeDefined()
+    // 68% free is not low: no warning, and the column header names the window alone.
+    expect((await ui.findAll({ type: 'Text' })).filter(text => text.props.color === 'warning')).toHaveLength(0)
     expect(await ui.find({ type: 'Text', text: /^ +1M window +% of used$/ })).toBeDefined()
     if (surface === 'terminal') {
       // A desktop's row Button holds the name alone: see desktop.test.tsx.
@@ -233,6 +235,35 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
     // One estimate note.
     expect(await ui.findAll({ type: 'Text', text: /estimate/ })).toHaveLength(1)
     await ui.unmount()
+  }
+})
+
+test('while free space is low, the heading draws the free part in the warning colour and names the largest segment', async ($, on) => {
+  const w = world(on)
+  // 156k used of 200k with 33k reserve: 11k free, 5.5% of the window.
+  w.usage = usage(156_000, 130_000)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+    // The words read whole, so colour is not the only signal.
+    const heading = await ui.find({ type: 'Text', text: '156k used · 11k free before compaction' })
+    expect(heading?.props.weight).toBe('bold')
+    const warned = (await ui.findAll({ type: 'Text' })).filter(text => text.props.color === 'warning')
+    expect(warned.map(text => text.text)).toEqual(['11k free before compaction'])
+    // The run takes the heading's bold; a weight of its own would add a bold Text.
+    expect(warned[0]?.props.weight).toBeUndefined()
+    // Tool results: 75% of the conversation's 130k, 97.5k of 156k used.
+    expect(await ui.find({ type: 'Text', text: /^ +200k window · largest: Tool results 63% +% of used$/ })).toBeDefined()
+    await ui.unmount()
+
+    // A narrow pane keeps the free figure, still in the warning colour.
+    const narrow = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 16 } })
+    const free = (await narrow.findAll({ type: 'Text' })).filter(text => text.props.color === 'warning')
+    expect(free.map(text => text.text)).toEqual(['11k free'])
+    expect(await narrow.find({ type: 'Text', text: /used/ })).toBeUndefined()
+    await narrow.unmount()
   }
 })
 

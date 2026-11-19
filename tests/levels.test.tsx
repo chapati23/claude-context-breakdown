@@ -282,6 +282,101 @@ test('n onto another item opens it in its own default view, as loaded, not in th
   }
 })
 
+/** A Bash call and its result of `size` characters. */
+function bashStep(id: string, size: number): unknown[] {
+  return [
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: `step ${id}` } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'o'.repeat(size) }] },
+  ]
+}
+
+test('n steps in the list as it is now: an item that joined since, with no rebuild, is the next one', async ($, on) => {
+  const before = [...bashStep('big', 3000), ...bashStep('small', 1000)]
+  const w = await chatWorld($, on, before)
+
+  for (const surface of SURFACES) {
+    w.messages = before
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:big' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · / })).toBeDefined()
+    // A result between the two in size joins; no measurement rebuilt the
+    // stored view, whose place still names the small one as next.
+    w.messages = [...before, ...bashStep('mid', 2000)]
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step mid$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 3 · / })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('n onto another file opens it as loaded, though the item before was shown on disk', async ($, on) => {
+  const TODO = '/home/user/project/todo.txt'
+  const readOf = (id: string, path: string, lines: string[]) => [
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: path } }] },
+    {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: id, content: `${lines.map((line, i) => `     ${i + 1}\t${line}`).join('\n')}\n` }],
+    },
+  ]
+  const w = await chatWorld($, on, [...readOf('first', NOTES, ['alpha', 'beta', 'gamma', 'delta']), ...readOf('second', TODO, ['one'])])
+  w.files[TODO] = 'one\n'
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:first' })
+    await ui.press({ key: 'view' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · on disk$/ })).toBeDefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Read {2}~\/project\/todo\.txt$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · .* · as loaded$/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('a page or view change of the open item counts its place and its list page as they are now', async ($, on) => {
+  const long = [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'long', name: 'Bash', input: { command: 'seq' } }] },
+    {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'long', content: Array.from({ length: 1230 }, (_, i) => `row ${i + 1}`).join('\n') }],
+    },
+  ]
+  /** `n` results larger than the long one, which go before it, largest first. */
+  const larger = (n: number) => Array.from({ length: n }, (_, k) => bashStep(`l${k}`, 12_000)).flat()
+  const w = await chatWorld($, on, long)
+
+  for (const surface of SURFACES) {
+    w.messages = long
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:long' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 1 · / })).toBeDefined()
+    // 25 larger results join, with no rebuild: the item moves to the 26th
+    // place, on the second page of the list. The next page of its text says so.
+    w.messages = [...larger(25), ...long]
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 26 of 26 · .* · lines 501-1,000 of 1,230$/ })).toBeDefined()
+    // b opens the page that holds it, with the ring on its row.
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 2 of 2/ })).toBeDefined()
+    expect((await ui.find({ key: 'item-r:long' }))?.props.autoFocus).toBe(true)
+    // One more joins: a switch of view counts it.
+    await ui.press({ key: 'item-r:long' })
+    w.messages = [...larger(26), ...long]
+    await ui.press({ key: 'format' })
+    expect(await ui.find({ type: 'Text', text: /^item 27 of 27 · .* · formatted · / })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('an item of one page that is the only one of its list that opens: p and n leave the line', async ($, on) => {
   await chatWorld($, on, [
     { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'date' } }] },
@@ -721,38 +816,6 @@ function keyGroupsOf(node: unknown): string[][] | null {
   return null
 }
 
-/**
- * The drawn key line laid out in rows of `columns` cells, by its rule: a gap
- * of 2 between parts; a row breaks only between groups; a group wider than
- * the row wraps inside itself, between its parts.
- */
-function keyRows(node: unknown, columns: number): string[][] {
-  const rows: string[][] = []
-  let shared = false
-  for (const group of keyGroupsOf(node) ?? []) {
-    const row = rows.at(-1)
-    if (row !== undefined && shared && cellWidth([...row, ...group].join('  ')) <= columns) {
-      row.push(...group)
-      continue
-    }
-    // A new row for the group; it wraps inside itself when it is wider.
-    const own: string[][] = []
-    for (const part of group) {
-      const last = own.at(-1)
-      if (last !== undefined && cellWidth([...last, part].join('  ')) <= columns) {
-        last.push(part)
-      } else {
-        own.push([part])
-      }
-    }
-    rows.push(...own)
-    // Only a group that took one row leaves room beside it for the next.
-    shared = own.length === 1
-  }
-
-  return rows
-}
-
 test('the keys stand in fixed groups, in one order; a control that cannot apply here leaves the line', async ($, on) => {
   await chatWorld($, on)
   type Buttons = { findAll: (q: { type: string }) => Promise<{ key: string | undefined; props: Record<string, unknown> }[]> }
@@ -783,8 +846,14 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
       ['⏎ 1-9 0: Open', ...steps('j: ↓', 'k: ↑')],
       ['r: Refresh', 'x: Close'],
     ])
-    // Every row of the line, as its rule lays it, fits the pane's 45 columns.
-    expect(keyRows(await ui.drawn(), 45).every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
+    // The drawn line, as the groups wrap at the pane's 45 columns: on the
+    // desktop both groups fit on one row.
+    const lines1 = flatten(await ui.drawn(), { surface, columns: 45 })
+    const keys1 = lines1.slice(lines1.findIndex(line => line.startsWith('⏎ ')))
+    expect(keys1).toEqual(
+      surface === 'terminal' ? ['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'] : ['⏎ 1-9 0: Open  r: Refresh  x: Close'],
+    )
+    expect(keys1.every(line => cellWidth(line) <= 45)).toBe(true)
     if (surface === 'terminal') {
       expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: '↓' })
       expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: '↑' })
@@ -810,8 +879,17 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
       ['f: Formatted'],
       ['r: Refresh', 'x: Close'],
     ])
-    const rows3 = keyRows(await ui.drawn(), 45)
-    expect(rows3.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
+    // On the terminal the move group is wider than 45 columns: it wraps
+    // inside itself, and the next groups start a row of their own.
+    const lines3 = flatten(await ui.drawn(), { surface, columns: 45 })
+    const at3 = lines3.findIndex(line => /^[jb]: /.test(line))
+    const keys3 =
+      surface === 'terminal'
+        ? ['j: ↓  k: ↑  b: Back  p: Prev item', 'n: Next item', 'f: Formatted  r: Refresh  x: Close']
+        : ['b: Back  p: Prev item  n: Next item', 'f: Formatted  r: Refresh  x: Close']
+    const drawn3 = lines3.slice(at3, at3 + keys3.length + 1)
+    expect(drawn3).toEqual([...keys3, ''])
+    expect(drawn3.every(line => cellWidth(line) <= 45)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()

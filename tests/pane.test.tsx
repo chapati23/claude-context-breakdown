@@ -11,6 +11,8 @@ import { cellWidth } from '../hooks/text'
 import { FOCUSED_PANE, PANE, SUMMARY, SURFACES, TRANSCRIPT, realSession, usage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
+/** Level 1's note when no server has tools that are not loaded any more. */
+const ALL_LOADED_NOTE = 'All MCP tools are loaded now.'
 
 test('/ctx opens the pane and prints no text', async ($, on) => {
   const w = world(on)
@@ -505,7 +507,7 @@ test('/ctx not, not-loaded and the starts of "not loaded" open the servers; the 
   await w.clock.advance(0)
   await run('not')
   const none = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await none.find({ type: 'Text', text: 'No segment matches "not".' })).toBeDefined()
+  expect(await none.find({ type: 'Text', text: ALL_LOADED_NOTE })).toBeDefined()
   expect(await none.find({ key: 'row-system' })).toBeDefined()
   await none.unmount()
 })
@@ -556,6 +558,81 @@ test('with no MCP tools category, the level 1 row shows the servers’ sum, the 
   expect((await ui.find({ key: 'row-not-loaded' }))?.text).toMatch(/MCP tools · 2 servers, 6 tools +5k *$/)
   await ui.press({ key: 'row-not-loaded' })
   expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  5k once loaded')
+  await ui.unmount()
+})
+
+/** `usage` with the MCP tools category's own figure set to `tokens`. */
+function withCategory(usage: ReturnType<typeof withServers>, tokens: number) {
+  const breakdown = usage.context.breakdown
+  const categories = breakdown.categories.map(category => (category.name === 'MCP tools (deferred)' ? { ...category, tokens } : category))
+
+  return { ...usage, context: { ...usage.context, breakdown: { ...breakdown, categories } } }
+}
+
+test('the list of servers takes its total from the breakdown it lists; level 1 keeps the measurement', async ($, on) => {
+  const w = world(on)
+  w.usage = withCategory(withServers(TEN_SERVERS), 160_000)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  await ui.press({ key: 'row-not-loaded' })
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  160k once loaded')
+
+  // A server and the category's figure grew, and no measurement ran since:
+  // s lists the servers from a fresh breakdown, and the title, the column
+  // name and the shares take that breakdown's figure.
+  w.usage = withCategory(withServers([...TEN_SERVERS, ['many', 50, 100]]), 200_000)
+  await ui.press({ key: 'sort' })
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  200k once loaded')
+  expect(await ui.find({ type: 'Text', text: /^11 servers · 183 tools · most tools first +% of 200k$/ })).toBeDefined()
+  const rows = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => /tools? +[█▉▊▋▌▍▎▏]/.test(text))
+  expect(rows.find(row => /^ +tickets /.test(row))).toMatch(/ 40k +20%$/)
+
+  // Level 1's row reads the measurement in state until the next one.
+  await ui.press({ key: 'back' })
+  expect((await ui.find({ key: 'row-not-loaded' }))?.text).toMatch(/ 160k *$/)
+  await ui.unmount()
+})
+
+test('a server list with no server to show, or a breakdown that cannot be read, shows level 1 with a note that says so', async ($, on) => {
+  const w = world(on)
+  w.usage = withServers([['tickets', 4, 1000]])
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  const run = (args: string) =>
+    $.command.run({ command: 'ctx', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  const READ_FAILED = 'The breakdown could not be read.'
+  const atLevel1With = async (note: string) => ({
+    level1: (await ui.find({ key: 'row-system' })) !== undefined,
+    note: (await ui.find({ type: 'Text', text: note })) !== undefined,
+  })
+
+  // The breakdown cannot be read: a press on the row, and /ctx not.
+  w.usageFailures = 1
+  await ui.press({ key: 'row-not-loaded' })
+  expect(await atLevel1With(READ_FAILED)).toEqual({ level1: true, note: true })
+  w.usageFailures = 1
+  await run('not')
+  expect(await atLevel1With(READ_FAILED)).toEqual({ level1: true, note: true })
+
+  // In an open list, s cannot read the breakdown: level 1 says so too.
+  await ui.press({ key: 'row-not-loaded' })
+  expect(await ui.find({ type: 'Text', text: /^Context › Not loaded › MCP tools/ })).toBeDefined()
+  w.usageFailures = 1
+  await ui.press({ key: 'sort' })
+  expect(await atLevel1With(READ_FAILED)).toEqual({ level1: true, note: true })
+
+  // The servers' tools loaded since the last measurement, so level 1 still
+  // has the row: s in an open list, a press on the row and /ctx not all say so.
+  await ui.press({ key: 'row-not-loaded' })
+  w.usage = usage(66_000)
+  await ui.press({ key: 'sort' })
+  expect(await atLevel1With(ALL_LOADED_NOTE)).toEqual({ level1: true, note: true })
+  await ui.press({ key: 'row-not-loaded' })
+  expect(await atLevel1With(ALL_LOADED_NOTE)).toEqual({ level1: true, note: true })
+  await run('not')
+  expect(await atLevel1With(ALL_LOADED_NOTE)).toEqual({ level1: true, note: true })
   await ui.unmount()
 })
 

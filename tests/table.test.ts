@@ -26,7 +26,7 @@ import {
   withAdded,
 } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
-import { LOW_FREE_SHARE, headingLine, isLowFree, paneHeading } from '../hooks/view'
+import { LOW_FREE_SHARE, fit, headingLine, isLowFree, paneHeading } from '../hooks/view'
 
 /** The session the critique looked at: 283k of 1M used, 33k reserve. */
 const REAL: ContextBreakdownSnapshot = {
@@ -471,5 +471,26 @@ describe('the longer forms of the names', () => {
     const narrow = serverNames(tableLayout(24, 40, false), rows)
     expect(narrow[0]!.detail).toBe('  130')
     expect(narrow[1]!.detail).toBe('    2')
+  })
+
+  test('a server row too narrow for its name and its count shows the name alone, cut to the column', () => {
+    const rows = [
+      { title: 'tickets', detail: '130 tools' },
+      { title: 'notes', detail: '2 tools' },
+    ]
+    // Name columns of 1 to 6 cells: the count and its gap would leave the
+    // name fewer than two cells. From 7 cells the count shows.
+    for (const columns of [8, 9, 10, 11, 12, 13]) {
+      const table = tableLayout(columns, 40, false)
+      expect({ columns, names: serverNames(table, rows) }).toEqual({
+        columns,
+        names: rows.map(row => ({ title: fit(row.title, table.name), detail: '' })),
+      })
+    }
+    expect(tableLayout(13, 40, false).name).toBe(6)
+    expect(serverNames(tableLayout(14, 40, false), rows)).toEqual([
+      { title: 't…', detail: '  130' },
+      { title: 'n…', detail: '    2' },
+    ])
   })
 })

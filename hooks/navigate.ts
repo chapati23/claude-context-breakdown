@@ -31,6 +31,9 @@ export const GONE_NOTE = 'The item that was open is no longer in the context.'
 /** The level-1 line when every item of an open list left the context. */
 export const ITEMS_GONE_NOTE = 'The items that were open are no longer in the context.'
 
+/** The level-1 line when no server has tools that are not loaded any more: they loaded since the last measurement. */
+export const ALL_LOADED_NOTE = 'All MCP tools are loaded now.'
+
 /** The level-1 line for a `/ctx` word that names no segment. */
 export function noMatchNote(word: string): string {
   return `No segment matches "${firstWords(word, 40)}".`
@@ -381,16 +384,26 @@ export function contentOf(
 // Moves that read the conversation, the breakdown or a file.
 
 /**
- * Level 2 for a segment, or the servers that are not loaded, from its first
- * page, largest first. With no server, level 1 shows instead, with `none` as
- * its note when it is given (`/ctx not` names a list that is empty).
+ * Level 1's note in place of a list of servers with no row: the breakdown
+ * could not be read, or every server's tools loaded since the last
+ * measurement. Null for any other list, or one with rows.
  */
-export function openSegment(io: NavIo, segment: ContextBreakdownListId, none?: string): Promise<void> {
+function emptyServers(segment: ContextBreakdownListId, set: ItemSet): string | null {
+  return segment === NOT_LOADED && set.items.length === 0 ? (set.note ?? ALL_LOADED_NOTE) : null
+}
+
+/**
+ * Level 2 for a segment, or the servers that are not loaded, from its first
+ * page, largest first. With no server to list, level 1 shows instead, with
+ * a note that says why.
+ */
+export function openSegment(io: NavIo, segment: ContextBreakdownListId): Promise<void> {
   return retried(async () => {
     const base = await io.view()
     const set = buildItems(segment, await gather(io))
-    if (segment === NOT_LOADED && set.items.length === 0) {
-      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, ...(none === undefined ? {} : { note: none }) })
+    const none = emptyServers(segment, set)
+    if (none !== null) {
+      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, note: none })
     }
 
     return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: listOf(segment, set, 'size', 0) })
@@ -420,6 +433,10 @@ function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: Conte
     }
     const { sort, page } = change(list)
     const set = buildItems(list.segment, await gather(io))
+    const none = emptyServers(list.segment, set)
+    if (none !== null) {
+      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, note: none })
+    }
     const next = listOf(list.segment, set, sort, page)
     const ids = next.rows.filter(row => row.isOpenable).map(row => row.id)
     const from = at === undefined ? undefined : at === 'first' ? ids[0] : ids[ids.length - 1]

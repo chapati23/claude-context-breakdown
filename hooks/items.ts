@@ -10,7 +10,7 @@ import type {
   ContextBreakdownSegmentId,
   ContextBreakdownSort,
 } from '../types'
-import { apportion, baselineOf, isMemoryUnattributed, memorySegment, notLoadedServers } from './categories'
+import { apportion, baselineOf, isMemoryUnattributed, memorySegment, notLoadedServers, splitCategories } from './categories'
 import type { CategoryLike, MemoryFileLike } from './categories'
 import { blockChars, isCommandOutput, localCommandOf, sortMessage } from './classify'
 import type { BlockLike, MessageLike, SplitId } from './classify'
@@ -21,7 +21,7 @@ import type { Markup } from './markdown'
 import { loadedFileText } from './reminder'
 import { NOT_LOADED, isSegmentList, segmentDef } from './segments'
 import { DEFAULT_CHARS_PER_TOKEN, MAX_API_MESSAGES } from './snapshot'
-import { countOf } from './table'
+import { countOf, notLoadedRows } from './table'
 import { firstWords, hashText, shortenPath } from './text'
 
 /** Rows on one page of level 2. */
@@ -88,6 +88,8 @@ export type Item = {
 export type ItemSet = {
   items: Item[]
   note: string | null
+  /** The servers that are not loaded only: the MCP tools category's figure, when it has one. */
+  categoryTokens?: number
 }
 
 export function isBaseline(segment: ContextBreakdownSegmentId): boolean {
@@ -653,9 +655,15 @@ function serverItems(data: ItemData): ItemSet {
   if (data.breakdown === null) {
     return { items: [], note: 'The breakdown could not be read.' }
   }
+  const servers = notLoadedServers(data.breakdown.mcpTools)
+  // The category that holds the servers, found as level 1 finds it, and its
+  // own figure: the list's total comes from the same breakdown as its rows.
+  const { deferred } = splitCategories(data.breakdown)
+  const holder = notLoadedRows(deferred, servers, name => baselineOf(name) === 'mcp').find(row => row.servers.length > 0)
+  const figure = deferred.find(category => category.name === holder?.name)?.tokens ?? 0
 
   return {
-    items: notLoadedServers(data.breakdown.mcpTools).map((server, order) => ({
+    items: servers.map((server, order) => ({
       id: `n:${hashText(server.name)}`,
       title: server.name,
       detail: countOf(server.tools, 'tool'),
@@ -669,6 +677,7 @@ function serverItems(data: ItemData): ItemSet {
       count: server.tools,
     })),
     note: null,
+    ...(figure > 0 ? { categoryTokens: figure } : {}),
   }
 }
 
@@ -793,6 +802,7 @@ export function listOf(
     items: sorted.length,
     tokens,
     ...(isServers ? { tools: sorted.reduce((sum, item) => sum + (item.count ?? 0), 0) } : {}),
+    ...(set.categoryTokens === undefined ? {} : { categoryTokens: set.categoryTokens }),
     hiddenItems: sorted.length - shown.length,
     hiddenTokens: tokens - shownTokens,
     note: set.note,

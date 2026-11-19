@@ -280,6 +280,8 @@ export function factsRow(table: Table, facts: string, column: string): string | 
 
 /** The fewest cells a server's name keeps before the count drops its word "tools". */
 const SERVER_NAME_MIN_CELLS = 8
+/** The fewest cells a server's name keeps beside the count: one character and the ellipsis. */
+const SERVER_NAME_CUT_CELLS = 2
 
 /**
  * The rows of the servers that are not loaded, in the name column: the name
@@ -287,7 +289,8 @@ const SERVER_NAME_MIN_CELLS = 8
  * ending at the column's end, so the counts line up. The count says "tools"
  * while the names keep SERVER_NAME_MIN_CELLS, or all of the widest name
  * when it is shorter; a narrower pane shows the number alone, the same form
- * on every row.
+ * on every row. Where even the number would leave a name fewer than
+ * SERVER_NAME_CUT_CELLS, each row shows its name alone, cut to the column.
  */
 export function serverNames(table: Table, rows: readonly { title: string; detail: string }[]): { title: string; detail: string }[] {
   const room = table.name
@@ -297,7 +300,10 @@ export function serverNames(table: Table, rows: readonly { title: string; detail
   const names = Math.max(0, ...rows.map(row => cellWidth(row.title)))
   const form = room - 2 - widest(long) >= Math.min(SERVER_NAME_MIN_CELLS, names) ? long : number
   const countCells = widest(form)
-  const nameCells = Math.max(0, room - 2 - countCells)
+  const nameCells = room - 2 - countCells
+  if (nameCells < Math.min(SERVER_NAME_CUT_CELLS, names)) {
+    return rows.map(row => ({ title: fit(row.title, room), detail: '' }))
+  }
 
   return rows.map(row => {
     const line = fit(`${fit(row.title, nameCells)}  ${form(row.detail).padStart(countCells)}`, room)

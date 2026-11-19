@@ -241,12 +241,14 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   expect(Math.abs(addedIn(desktop.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
 
   // Prompts that are not the person's own words keep the base: a task
-  // notification, a peer, a plugin, a slash command such as /ctx, a prompt
-  // the person does not see. A new base would hide the column, as nothing
-  // grew since.
+  // notification, a scheduled trigger, a peer, a plugin, one with no origin
+  // the engine can name, a slash command such as /ctx, a prompt the person
+  // does not see. A new base would hide the column, as nothing grew since.
   await prompt($, { origin: { kind: 'task-notification' } })
+  await prompt($, { origin: { kind: 'scheduled-trigger' } })
   await prompt($, { origin: { kind: 'peer' } })
   await prompt($, { origin: { kind: 'plugin', name: 'other' } })
+  await prompt($, { origin: { kind: 'unclassified' } })
   await prompt($, { text: '/ctx', command: { name: 'ctx', args: '' } })
   await prompt($, { isMeta: true })
   await w.clock.advance(0)
@@ -262,6 +264,14 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   await measure()
   expect(hasColumn(await paneAt(88))).toBe(true)
   await prompt($, { origin: { kind: 'bridge' } })
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // So does a prompt from an SDK host, such as the desktop app or VS Code.
+  grownBy(w, 15_000)
+  await measure()
+  expect(hasColumn(await paneAt(88))).toBe(true)
+  await prompt($, { origin: { kind: 'sdk' } })
   await w.clock.advance(0)
   expect(hasColumn(await paneAt(88))).toBe(false)
 
@@ -297,6 +307,95 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   await measure()
   expect((await paneAt(88))[0]).toMatch(/^130k used · /)
   expect(hasColumn(await paneAt(88))).toBe(false)
+})
+
+/** Level 1 at 88 columns on the terminal, as lines. */
+async function levelOneAt88($: Engine): Promise<string[]> {
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 88 } } as never)
+  const lines = flatten(await ui.drawn(), { columns: 88 })
+  await ui.unmount()
+
+  return lines
+}
+
+/** Whether level 1 draws the column `added`. */
+async function columnShown($: Engine): Promise<boolean> {
+  return (await levelOneAt88($)).some(line => line.endsWith('% of used  added'))
+}
+
+/** The engine's measurement after a model response, and the refresh it asks for. */
+async function measured($: Engine, w: World) {
+  await $.session.measure({ context: w.usage.context, rateLimits: [], changed: ['context'] })
+  await w.clock.advance(0)
+}
+
+test('J7 terminal: a prompt that a hook drops keeps the base of the column added', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await prompt($)
+  await w.clock.advance(0)
+  w.usage = usage(80_000, 54_000)
+  w.messages = BURST
+  await measured($, w)
+  expect(await columnShown($)).toBe(true)
+
+  // A hook beneath drops the prompt: it never entered the session, so the
+  // base stays and the column still counts from the prompt before.
+  w.dropsPrompts = true
+  expect((await prompt($)).drop).toBe('Dropped by a hook.')
+  await w.clock.advance(0)
+  expect(await columnShown($)).toBe(true)
+
+  // The next prompt that enters takes the base.
+  w.dropsPrompts = false
+  await prompt($)
+  await w.clock.advance(0)
+  expect(await columnShown($)).toBe(false)
+})
+
+test('J7 terminal: a measurement from before the last compaction is no base', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await prompt($)
+  await w.clock.advance(0)
+  w.usage = usage(80_000, 54_000)
+  w.messages = BURST
+  await measured($, w)
+  await w.clock.advance(1000)
+
+  // A prompt after the compaction and before its measurement ran: the
+  // snapshot in state is still the one from before the compaction.
+  w.messages = SUMMARY
+  await $.session.compact({ trigger: 'manual', messages: TRANSCRIPT })
+  await prompt($)
+  await w.clock.advance(0)
+  grownBy(w, 20_000)
+  await measured($, w)
+  expect((await levelOneAt88($))[0]).toMatch(/^100k used · /)
+  expect(await columnShown($)).toBe(false)
+
+  // A measurement after the compaction is a base, even in the same
+  // millisecond as the compaction.
+  await prompt($)
+  await w.clock.advance(0)
+  grownBy(w, 30_000)
+  await measured($, w)
+  expect(await columnShown($)).toBe(true)
+
+  // A measurement that fails after a compaction leaves the snapshot from
+  // before it in state: a prompt then takes no base from it.
+  await w.clock.advance(1000)
+  w.usageFailures = 1
+  await $.session.compact({ trigger: 'manual', messages: TRANSCRIPT })
+  await w.clock.advance(0)
+  expect(w.usageFailures).toBe(0)
+  await prompt($)
+  await w.clock.advance(0)
+  grownBy(w, 40_000)
+  await measured($, w)
+  expect(await columnShown($)).toBe(false)
 })
 
 test('J7 desktop: the bar is one Client; a click opens the pane; the widget and the pane follow the theme', async ($, on) => {

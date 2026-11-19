@@ -50,7 +50,7 @@ import {
   stepAnswer,
   stepOf,
 } from './scroll'
-import { NOT_LOADED, matchList } from './segments'
+import { matchList } from './segments'
 import { baseOf } from './snapshot'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
 import { bandModelFor } from './view'
@@ -64,7 +64,7 @@ const snapshotAtom = atom({ plugin: 'context-breakdown', key: 'snapshot' } as co
   shape: 'snapshot-3',
 })
 const viewAtom = atom({ plugin: 'context-breakdown', key: 'view' } as const, LEVEL_1, {
-  shape: 'view-6',
+  shape: 'view-7',
 })
 const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, null, {
   shape: 'theme-1',
@@ -98,6 +98,14 @@ let mayHoldFocus = false
 
 /** The timer that ends the keyboard chip a few seconds after the last focus move. */
 const chipHold = createChipHold()
+
+/**
+ * When the last compaction or `/clear` of this load ended, in `$.clock.now()`
+ * milliseconds. The snapshot from before it stays in state until the next
+ * measurement writes, or after one that failed: it is no base for the column
+ * `added` (`baseOf`). A reload resets it.
+ */
+let resetAt: number | null = null
 
 /** The j and k presses whose scroll is under way; empty between presses. */
 const steps = createSteps()
@@ -605,7 +613,7 @@ export const register: Register = on => {
       await quietly(writeRing($, () => null))
     }
     if (segment !== null) {
-      await quietly(openSegment(nav, segment, segment === NOT_LOADED ? noMatchNote(e.args) : undefined))
+      await quietly(openSegment(nav, segment))
     } else if (hasWord) {
       await quietly(writeView($, toLevel1With(noMatchNote(e.args))))
     } else if (!isOpen) {
@@ -759,7 +767,13 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
     if (!isSubagent(e) && e.trigger !== 'precompute' && result.skip === undefined) {
-      // The content the base counted is gone: no column `added` until the next prompt.
+      // The content the base counted is gone: no column `added` until the
+      // next prompt, and none from the snapshot measured before now.
+      try {
+        resetAt = await $.clock.now()
+      } catch {
+        // No clock: only the cleared base guards the column.
+      }
       await quietly(update($, baseAtom, () => null))
       // The plain usage call is free; its token figure is the one that stays
       // stale until the next model response.
@@ -795,6 +809,11 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     const result = await next(e)
     if (e.reason === 'clear') {
+      try {
+        resetAt = await $.clock.now()
+      } catch {
+        // No clock: the snapshot written empty below guards the column.
+      }
       await quietly(writeView($, afterClear))
       mayHoldFocus = false
       chipHold.stop()
@@ -911,28 +930,38 @@ export const register: Register = on => {
   // mod on the typing path.
   //
   // A prompt the person submits also sets the base of level 1's column
-  // `added`: the measurement in state now, which does not hold the prompt
-  // yet. Only the person's own words, typed or from Remote Control: a slash
-  // command (`/ctx` opens the pane and must not empty the column), a task
-  // notification, a peer, a plugin or a prompt the person does not see keep
-  // the base. In the background: the prompt does not wait for the state.
-  on('prompt.submit', ($, e, next) => {
+  // `added`: the measurement in state before the prompt, which does not hold
+  // it yet. Only the person's own words: typed at the terminal, from Remote
+  // Control, or in an SDK host's own turn (the desktop app and VS Code are
+  // probably such hosts). A slash command (`/ctx` opens the pane and must not empty
+  // the column), a task notification, a schedule, a peer, a plugin, a prompt
+  // of no known origin or one the person does not see keep the base. So does
+  // a prompt that a hook drops: it never entered. The read starts before
+  // `next` and is not awaited there: the prompt does not wait for the state.
+  on('prompt.submit', async ($, e, next) => {
     if (mayHoldFocus) {
       mayHoldFocus = false
       chipHold.stop()
       void quietly(update($, focusAtom, () => null))
     }
-    const isPersons = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-    if (isPersons && e.command === undefined && e.isMeta !== true) {
+    const isPersons = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || e.origin.kind === 'sdk'
+    const taken =
+      isPersons && e.command === undefined && e.isMeta !== true
+        ? read($, snapshotAtom).then(snapshot => baseOf(snapshot, resetAt))
+        : null
+    // A prompt that is dropped leaves the read unused: no rejection is left unhandled.
+    void taken?.catch(() => undefined)
+    const result = await next(e)
+    if (taken !== null && result.drop === undefined) {
       void quietly(
         (async () => {
-          const base = baseOf(await read($, snapshotAtom))
+          const base = await taken
           await update($, baseAtom, () => base)
         })(),
       )
     }
 
-    return next(e)
+    return result
   }).catch(($, e, next) => next(e))
 
   // j and k at levels 1 and 2 on the terminal: the ring one row down or up

@@ -430,6 +430,8 @@ export type World = {
   /** The Claude Code theme `$.config.list` reports; null for no theme row. */
   theme: string | null
   configLists: number
+  /** Whether a hook beneath drops each prompt, so none enters the session. */
+  dropsPrompts: boolean
   clock: ReturnType<typeof mock.clock>
 }
 
@@ -453,6 +455,7 @@ export function world(on: On): World {
     filled: [],
     theme: 'dark',
     configLists: 0,
+    dropsPrompts: false,
     clock: mock.clock(on, { now: 1000 }),
   }
   on('config.list', () => {
@@ -476,7 +479,7 @@ export function world(on: On): World {
   on('config.set', (_, e) => ({ value: e.value }))
   // Every plugin's elements: a hook naming none hears only its own.
   on('ui.focus', { plugin: '*' }, () => ({}))
-  on('prompt.submit', (_, e) => ({ text: e.text }))
+  on('prompt.submit', (_, e) => (state.dropsPrompts ? { drop: 'Dropped by a hook.' } : { text: e.text }))
   on('session.usage', (_, e) => {
     state.usageCalls += 1
     if (e?.breakdown !== undefined && state.usageFailures > 0) {

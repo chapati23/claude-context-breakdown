@@ -163,10 +163,12 @@ export function freeTokens(snapshot: ContextBreakdownSnapshot): number {
 /**
  * The base for level 1's column `added`: the tokens per segment of the
  * measurement at the person's prompt. None from an estimate, whose figures
- * were not measured, and none before the first measurement.
+ * were not measured, and none before the first measurement. None from a
+ * measurement taken before `since`, the end of the last compaction or
+ * `/clear`: its content is gone.
  */
-export function baseOf(snapshot: ContextBreakdownSnapshot | null): ContextBreakdownBase | null {
-  if (snapshot === null || snapshot.isEstimate) {
+export function baseOf(snapshot: ContextBreakdownSnapshot | null, since: number | null = null): ContextBreakdownBase | null {
+  if (snapshot === null || snapshot.isEstimate || (since !== null && snapshot.measuredAt < since)) {
     return null
   }
 

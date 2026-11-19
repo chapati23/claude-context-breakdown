@@ -681,16 +681,14 @@ function plural(n: number, word: string): string {
  * The segment's own figure, as level 1 shows it; the items' sum without a
  * measurement. It can be more than the items' sum: a cut list leaves the
  * oldest items out, and a per-tool or per-skill figure is not the whole.
- * For the servers that are not loaded: the MCP tools category's figure, as
- * level 1 shows it; the servers' sum when it has none.
+ * For the servers that are not loaded: the MCP tools category's figure in
+ * the breakdown the rows come from; the servers' sum when it has none.
  */
 export function segmentTotal(list: ContextBreakdownList, snapshot: ContextBreakdownSnapshot | null): number {
   if (!isSegmentList(list.segment)) {
-    // The figure of the MCP tools category, as level 1's row shows it: one
-    // figure for one thing. The servers' sum only when it has no figure.
-    const rows = snapshot === null ? [] : notLoadedRows(snapshot.deferred, snapshot.notLoadedServers, isMcp)
-
-    return rows.find(row => row.servers.length > 0)?.tokens ?? list.tokens
+    // One figure for one thing, as level 1's row shows it. Stored with the
+    // rows, not read from the snapshot, which can be older than they are.
+    return list.categoryTokens ?? list.tokens
   }
   const segment = [...(snapshot?.baseline ?? []), ...(snapshot?.conversation ?? [])].find(one => one.id === list.segment)
 

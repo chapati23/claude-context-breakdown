@@ -147,6 +147,11 @@ export type ContextBreakdownList = {
   tokens: number
   /** The `not-loaded` list only: the tools of all its servers. */
   tools?: number
+  /**
+   * The `not-loaded` list only: the MCP tools category's figure in the
+   * breakdown the rows come from, when the category has one.
+   */
+  categoryTokens?: number
   /** The items and tokens on the pages not shown. */
   hiddenItems: number
   hiddenTokens: number

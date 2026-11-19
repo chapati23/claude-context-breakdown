@@ -118,7 +118,7 @@ export function levelOne(lines: readonly string[], surface: 'terminal' | 'deskto
 
 export type Level3 = {
   crumb: string
-  /** The line of facts: "19k tokens · raw · as loaded". */
+  /** The line of facts: "item 2 of 9 · 19k tokens · raw · as loaded". */
   facts: string
   /** Lines between the facts and the first blank line, such as a warning. */
   notes: string[]
@@ -145,11 +145,13 @@ export function level3(lines: readonly string[]): Level3 {
   }
 }
 
-/** The facts line of a level 3, in parts. */
-export function factsOf(facts: string): { tokens: string; form: string; source: string } | undefined {
-  const match = /^(\S+) tokens · (raw|formatted) · (as loaded|on disk)\b/.exec(facts)
+/** The facts line of a level 3, in parts; `place` is the item's place in its list, "item 2 of 9", when the line has one. */
+export function factsOf(
+  facts: string,
+): { place: string | undefined; tokens: string; form: string; source: string } | undefined {
+  const match = /^(?:(item \d+ of \d+) · )?(\S+) tokens · (raw|formatted) · (as loaded|on disk)\b/.exec(facts)
 
-  return match === null ? undefined : { tokens: match[1]!, form: match[2]!, source: match[3]! }
+  return match === null ? undefined : { place: match[1], tokens: match[2]!, form: match[3]!, source: match[4]! }
 }
 
 /**

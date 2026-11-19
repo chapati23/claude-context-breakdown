@@ -65,6 +65,7 @@ export type PaneActions = {
   toggleSort: () => unknown
   listPage: (delta: number) => unknown
   contentPage: (delta: number) => unknown
+  stepItem: (delta: number) => unknown
   toggleSource: () => unknown
   copy: (path: string, surface: RenderSurface) => unknown
   mention: (path: string) => unknown
@@ -905,6 +906,11 @@ function listBody(
 /** The control under the text of a page that has a next one: k crossing back puts the ring on it. */
 export const NEXT_BELOW = 'next-below'
 
+/** The item's place in its list for the facts line, `item 2 of 9`; none in a view stored without one. */
+function placeFact(view: Extract<ContextBreakdownView, { level: 3 }>): string | null {
+  return view.place === undefined ? null : `item ${view.place.index + 1} of ${view.list.items}`
+}
+
 /**
  * Level 3: the title, the facts line, then `keys` (the controls), then the
  * text. The controls stand above the text so that the ring, which the engine
@@ -914,6 +920,7 @@ function contentBody(
   el: Ui,
   segment: ContextBreakdownListId,
   item: ContextBreakdownContent,
+  at: string | null,
   palette: Palette,
   keys: RenderElement,
   actions: PaneActions,
@@ -922,7 +929,10 @@ function contentBody(
   const { Box, Button, Code, Markdown, Text } = el
   // No server row opens, so this is a segment's item; the servers' names stand in all the same.
   const def = isSegmentList(segment) ? segmentDef(segment) : { short: NOT_LOADED_DEF.label }
+  // The place comes first: n and p step to the next and previous item, so
+  // the person sees where in the list they are.
   const facts = [
+    ...(at === null ? [] : [at]),
     `${formatTokens(item.tokens)} tokens`,
     item.format === 'formatted' ? 'formatted' : 'raw',
     item.source === 'loaded' ? 'as loaded' : 'on disk',
@@ -1008,7 +1018,8 @@ type Control = { key: string; label: string; hotkey: string; isOn: boolean; onPr
  * How a control stands on the screen as it is: `on`; `off`, which a move on
  * the same screen can turn on; or `gone`, which nothing on this screen can
  * turn on (b on the segments, s in a list with one order, p and n in a list
- * with one page, v, c and m for an item they do not fit). A gone control
+ * with one page or for an item of one page with no item to step to, v, c
+ * and m for an item they do not fit). A gone control
  * leaves the line (`hiddenKeys` may still hold its key).
  */
 type Stand = 'on' | 'off' | 'gone'
@@ -1070,8 +1081,9 @@ type KeyLine = { groups: KeyGroup[]; gone: string[] }
  * figure); p and n together in a list with one page; v for an item that
  * cannot switch its source; c and m for an item with no file. One that a
  * move on the same screen can turn on stays, dimmer (p on the first of
- * several pages). p and n leave and come back as a pair. Level 3 keeps p
- * and n in the line. The controls that remain keep their order. A group
+ * several pages). p and n leave and come back as a pair: at level 3 they
+ * leave only for an item of one page that is the only one of its list that
+ * opens. The controls that remain keep their order. A group
  * with nothing in it is left out.
  */
 function keyGroups(
@@ -1113,8 +1125,33 @@ function keyGroups(
   }
   if (view.level === 3) {
     const { item } = view
-    add(move, 'prev', 'Prev page', 'p', on(item.page > 0), () => actions.contentPage(-1))
-    add(move, 'next', 'Next page', 'n', on(item.page + 1 < item.pages), () => actions.contentPage(1))
+    // While the item has a page that way, p and n page it. At its first or
+    // last page they step to the previous or next item of the list that
+    // opens; off at the list's end. An item of one page that is the only one
+    // of its list that opens gives neither key anything to do: both leave
+    // the line. The keys stay `prev` and `next` for both labels, so a
+    // desktop keeps the focus on the pressed control when the label changes.
+    const prev = view.place?.prev ?? null
+    const next = view.place?.next ?? null
+    const steps = item.pages > 1 || prev !== null || next !== null
+    const hasPrevPage = item.page > 0
+    const hasNextPage = item.page + 1 < item.pages
+    add(
+      move,
+      'prev',
+      hasPrevPage ? 'Prev page' : 'Prev item',
+      'p',
+      steps ? on(hasPrevPage || prev !== null) : 'gone',
+      () => (hasPrevPage ? actions.contentPage(-1) : actions.stepItem(-1)),
+    )
+    add(
+      move,
+      'next',
+      hasNextPage ? 'Next page' : 'Next item',
+      'n',
+      steps ? on(hasNextPage || next !== null) : 'gone',
+      () => (hasNextPage ? actions.contentPage(1) : actions.stepItem(1)),
+    )
     // Names the view it switches to; the facts line names the one shown. The
     // register's `ui.press` hook switches, as for j and k: it scrolls the
     // window to the same place, which only a hook's scroll can do.
@@ -1361,7 +1398,7 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, 0, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, view.list.segment, view.item, palette, keys, actions, ring)
+    return contentBody(el, view.list.segment, view.item, placeFact(view), palette, keys, actions, ring)
   }
   let body: RenderElement
   // The rows that open on the page: Enter and the digits name them.

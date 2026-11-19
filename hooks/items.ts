@@ -4,6 +4,7 @@
 import type {
   ContextBreakdownList,
   ContextBreakdownListId,
+  ContextBreakdownPlace,
   ContextBreakdownRow,
   ContextBreakdownSegment,
   ContextBreakdownSegmentId,
@@ -710,6 +711,11 @@ function pathIn(item: Item): ContextBreakdownRow['pathIn'] {
   return item.detail === short ? 'detail' : null
 }
 
+/** Whether the item has text to show at level 3. */
+export function opens(item: Item): boolean {
+  return item.loaded !== null || item.disk !== null
+}
+
 function rowOf(item: Item): ContextBreakdownRow {
   return {
     id: item.id,
@@ -717,15 +723,51 @@ function rowOf(item: Item): ContextBreakdownRow {
     detail: item.detail,
     pathIn: pathIn(item),
     tokens: item.tokens,
-    isOpenable: item.loaded !== null || item.disk !== null,
+    isOpenable: opens(item),
   }
 }
 
 /**
- * One page of a segment's items, ready to store and draw. The servers that
- * are not loaded sort largest first or most tools first; with no token
- * figure for any of them, only by their tools.
+ * Whether the list can sort, and the order it shows: `sort` where it can,
+ * else its only one. The servers that are not loaded sort largest first or
+ * most tools first; with no token figure for any of them, only by their tools.
  */
+function orderOf(segment: ContextBreakdownListId, set: ItemSet, sort: ContextBreakdownSort) {
+  const isServers = segment === NOT_LOADED
+  const sortable = isServers ? set.items.some(item => item.tokens > 0) : canSort(segment)
+  const order: ContextBreakdownSort = sortable ? sort : isServers ? 'tools' : 'size'
+
+  return { sortable, order }
+}
+
+/**
+ * Where the item `id` stands in the list, in the order the list shows: n and
+ * p step to the nearest item that opens, past the rows that do not. Null
+ * when the set does not hold the item.
+ */
+export function placeOf(
+  segment: ContextBreakdownListId,
+  set: ItemSet,
+  sort: ContextBreakdownSort,
+  id: string,
+): ContextBreakdownPlace | null {
+  const sorted = sortItems(set.items, orderOf(segment, set, sort).order)
+  const index = sorted.findIndex(item => item.id === id)
+  if (index < 0) {
+    return null
+  }
+  const prev = sorted.slice(0, index).reverse().find(opens)
+  const next = sorted.slice(index + 1).find(opens)
+
+  return { index, prev: prev?.id ?? null, next: next?.id ?? null }
+}
+
+/** The page of the list that holds the item at `place`. */
+export function pageOf(place: ContextBreakdownPlace): number {
+  return Math.floor(place.index / LIST_PAGE_ROWS)
+}
+
+/** One page of a segment's items, ready to store and draw, in the order `orderOf` gives. */
 export function listOf(
   segment: ContextBreakdownListId,
   set: ItemSet,
@@ -733,8 +775,7 @@ export function listOf(
   page: number,
 ): ContextBreakdownList {
   const isServers = segment === NOT_LOADED
-  const sortable = isServers ? set.items.some(item => item.tokens > 0) : canSort(segment)
-  const order: ContextBreakdownSort = sortable ? sort : isServers ? 'tools' : 'size'
+  const { sortable, order } = orderOf(segment, set, sort)
   const sorted = sortItems(set.items, order)
   const pages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_ROWS))
   const index = Math.min(Math.max(0, Math.floor(page)), pages - 1)

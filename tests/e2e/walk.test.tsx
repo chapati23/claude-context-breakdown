@@ -98,6 +98,8 @@ for (const surface of SURFACES) {
       expect(facts, `facts line of ${rowKey}: ${three.facts}`).toBeDefined()
       // The largest item is first, and level 3 states the size level 2 gave it.
       expect(facts!.tokens).toBe(figuresOf(two.rows[0]!)!.tokens)
+      // Its place counts all items of the list, as level 2's facts do.
+      expect(facts!.place).toBe(`item 1 of ${two.count}`)
       expect(three.crumb).toMatch(/^█+ \S.* › \S/)
       expect(three.controls.join(' ')).toContain('Back')
       expect(three.body.find(line => line.trim() !== '') ?? '').not.toBe('')

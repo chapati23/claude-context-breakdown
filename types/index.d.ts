@@ -192,6 +192,18 @@ export type ContextBreakdownContent = {
 }
 
 /**
+ * Where the open item stands in its list, in the list's order: what the
+ * facts line counts and what n and p step to at the end of the item.
+ */
+export type ContextBreakdownPlace = {
+  /** 0-based, over all items of the list, those that do not open included. */
+  index: number
+  /** The ids of the nearest items before and after it that open, or null at an end. */
+  prev: string | null
+  next: string | null
+}
+
+/**
  * What the pane shows. Only the visible page is kept; a handler rebuilds the
  * rest from the conversation and the breakdown. `seq` counts moves, so a slow
  * move does not overwrite a newer one. `gen` counts rebuilds after a
@@ -215,7 +227,16 @@ export type ContextBreakdownView =
       /** The item b came back from: its row takes the focus ring when it is on the page. */
       from?: string
     }
-  | { seq: number; gen: number; level: 3; list: ContextBreakdownList; item: ContextBreakdownContent }
+  | {
+      seq: number
+      gen: number
+      level: 3
+      /** The page of the list that holds the item, so b puts the ring on its row. */
+      list: ContextBreakdownList
+      item: ContextBreakdownContent
+      /** Absent in a view stored by an earlier version: the next rebuild adds it. */
+      place?: ContextBreakdownPlace
+    }
 
 /**
  * The bar Button that holds the band's keyboard focus ring, so the band can

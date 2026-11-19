@@ -16,8 +16,8 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { richUsage } from '../fixtures'
-import { chat, flatten, hold, hotkey, hotkeysOf, mountPane, session, setFocus } from './helpers'
+import { isOff, richUsage } from '../fixtures'
+import { chat, flatten, hold, hotkey, hotkeysOf, mountPane, ringOf, session, setFocus } from './helpers'
 import type { PaneUi, SessionOptions } from './helpers'
 
 /** Where j and k scroll the window; the desktop has a journey of its own below. */
@@ -121,6 +121,12 @@ for (const surface of SURFACES) {
     // n and p page the item, each to the top of its page.
     expect(await step(ui, win, 'n')).toBe(true)
     expect(await shown(ui)).toBe('501-1,000')
+    expect(await step(ui, win, 'n')).toBe(true)
+    expect(await shown(ui)).toBe('1,001-1,200')
+    // The last page: n would step to the next item, but the list has no
+    // other. Next item stays in the line, off, and its press does nothing.
+    expect((await ui.find({ key: 'next' }))?.props.label).toBe('Next item')
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(true)
     expect(await step(ui, win, 'n')).toBe(true)
     expect(await shown(ui)).toBe('1,001-1,200')
     expect(await step(ui, win, 'p')).toBe(true)
@@ -250,6 +256,20 @@ test('J5 desktop: level 3 draws no j and k, leaves the person’s scrolls to the
   expect(await form(ui)).toBe('raw · as loaded')
   expect(await shown(ui)).toBe('1-500')
   expect(offsets(seen)).toEqual([0, 0, 0, 0, 0])
+
+  // n on the last page steps to the next item of the list: the Bash result
+  // of the chat, from its top. The level stays, so Back keeps the autoFocus
+  // key and the desktop leaves the focus on the pressed control.
+  expect(await hotkey(ui, 'n')).toBe(true)
+  expect(await hotkey(ui, 'n')).toBe(true)
+  expect(await shown(ui)).toBe('1,001-1,200')
+  expect(await ringOf(ui)).toBe('back')
+  seen.length = 0
+  expect(await hotkey(ui, 'n')).toBe(true)
+  expect(flatten(await ui.drawn())[0]).toMatch(/› Bash {2}ls -la/)
+  expect(flatten(await ui.drawn())[1]).toMatch(/^item 2 of 3 · /)
+  expect(await ringOf(ui)).toBe('back')
+  expect(offsets(seen)).toEqual([0])
 
   // v on the Read result: the file on disk, from its top, and again no placement.
   expect(await hotkey(ui, 'b')).toBe(true)

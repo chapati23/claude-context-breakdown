@@ -17,6 +17,8 @@ type Node = { type: string; props?: Record<string, unknown>; hover?: Record<stri
 const isNode = (x: unknown): x is Node => typeof x === 'object' && x !== null && 'type' in x
 const textOf = (x: unknown): string =>
   typeof x === 'string' ? x : isNode(x) ? (x.children ?? []).map(textOf).join('') : ''
+/** Where a surface's band text lives: the desktop's is drawn inside its Client. */
+const inClient = (surface: string) => (surface === 'terminal' ? {} : { in: 'context-bar' })
 const isPlaced = (node: Node) => node.type === 'Box' && node.props?.position === 'absolute'
 
 /**
@@ -59,8 +61,8 @@ test('the band draws the segments and the total after session.start', async ($, 
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...WIDE, surface })
+  {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
     const buttons = await ui.findAll({ type: 'Button' })
 
     expect(buttons.map(button => button.key)).toEqual([
@@ -79,9 +81,10 @@ test('the band draws the segments and the total after session.start', async ($, 
     for (const button of buttons) {
       expect(button.props.hotkey).toBeUndefined()
     }
-    expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text).toBe(' 66k/200k 33%')
+    expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
     await ui.unmount()
   }
+  // The desktop draws the band as one Client, not Buttons: see desktop.test.tsx.
 })
 
 test('the row fits its width, and no chip makes it longer', async ($, on) => {
@@ -121,8 +124,8 @@ test('each segment ends in a seven-eighths edge; free space and reserve are quie
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...WIDE, surface })
+  {
+    const ui = await $.ui.mount({ ...WIDE, surface: 'terminal' })
     const row = await rowOf(ui)
     const segments = row.flow.filter(item => item.node.type === 'Button')
 
@@ -179,14 +182,7 @@ test('hovering a segment reveals a chip beside it in its colour', async ($, on) 
     expect(chip.label.props?.color).toBe('#000000')
     await ui.unmount()
   }
-
-  // The desktop draws each segment as a native button, so a chip counted in
-  // text cells could land on its own segment: none is drawn there.
-  const desktop = await $.ui.mount({ ...WIDE, surface: 'desktop' })
-  const row = await rowOf(desktop)
-  expect(row.chips).toEqual([])
-  expect(row.flow.filter(item => item.node.type === 'Button').length).toBe(6)
-  await desktop.unmount()
+  // The desktop shows the name in the legend's place instead: see desktop.test.tsx.
 })
 
 test('a merged cell’s chip lists its members', async ($, on) => {
@@ -431,7 +427,8 @@ test('the legend names the largest conversation segment after a swatch of its co
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
+  // The desktop's legend is data of the Client: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     for (const bodyColumns of [60, 80, 100]) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
       const row = await rowOf(ui)
@@ -448,12 +445,28 @@ test('the legend names the largest conversation segment after a swatch of its co
     // 12 + 3 + 2 + 16 + 2 + 20 = 55 columns hold the legend; 54 do not.
     for (const [bodyColumns, hasLegend] of [[55, true], [54, false], [24, false]] as const) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
-      expect((await ui.find({ type: 'Text', text: ' Tool results 45%' })) !== undefined).toBe(hasLegend)
-      expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text).toBe(' 66k/200k 33%')
+      expect((await ui.find({ type: 'Text', text: /^ ?Tool results 45%$/ })) !== undefined).toBe(hasLegend)
+      expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
       expect((await ui.findAll({ type: 'Button' })).length).toBeGreaterThan(0)
       await ui.unmount()
     }
   }
+})
+
+test('the widget seat’s glance draws the legend as a swatch picture in the segment colour, then dim words', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, placement: 'widget', bodyColumns: 100 } })
+  const words = await ui.find({ type: 'Text', text: 'Tool results 45%' })
+  expect(words?.props).toMatchObject({ mono: true, dimColor: true })
+  const swatch = (await ui.findAll({ type: 'Svg' }))[1]
+  // The Claude Code theme's palette, as the bar's: not the page's light or dark scheme.
+  expect(String(swatch?.props.source)).toContain(`fill:${DARK.segments['tool-results']}`)
+  expect(String(swatch?.props.source)).not.toContain(`fill:${LIGHT.segments['tool-results']}`)
+  expect(String(swatch?.props.source)).not.toContain('prefers-color-scheme')
+  await ui.unmount()
 })
 
 test('a light theme draws the light palette, and a theme change follows', async ($, on) => {
@@ -521,13 +534,27 @@ test('pressing a segment opens the pane', async ($, on) => {
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ ...BAND, surface })
-    await ui.press({ key: 'seg-tool-results' })
-    await ui.unmount()
-  }
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'seg-tool-results' })
+  await ui.unmount()
 
-  expect(w.opened).toEqual(['context-breakdown', 'context-breakdown'])
+  // The desktop opens it by a click posted from the Client: see desktop.test.tsx.
+  expect(w.opened).toEqual(['context-breakdown'])
+})
+
+test('the mobile app, which has no Client, draws the bar as a picture and the total as a Button to level 1', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...WIDE, surface: 'mobile' })
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThan(0)
+  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('66k/200k 33%')
+  await ui.press({ key: 'context-total' })
+  await ui.unmount()
+
+  expect(w.opened).toEqual(['context-breakdown'])
 })
 
 test('a subagent tool call does not measure; a main one does, once per burst', async ($, on) => {
@@ -591,7 +618,7 @@ test('subagent turns and compactions change nothing', async ($, on) => {
   await w.clock.advance(0)
   expect(w.usageCalls).toBe(calls + 1)
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' 66k/200k 33%')
+  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('66k/200k 33%')
   await ui.unmount()
 })
 
@@ -609,7 +636,7 @@ test('a failed measurement after a compaction keeps the estimate for the next on
   await w.clock.advance(0)
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' ~28k/200k 14%')
+  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('~28k/200k 14%')
   await ui.unmount()
 })
 
@@ -625,13 +652,15 @@ test('a /clear drops the old fill and measures the new conversation', async ($, 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect(await ui.find({ type: 'Text', text: /\/200k/ })).toBeUndefined()
+    // The desktop's band is not drawn at all.
+    expect(await ui.find({ type: 'Client' })).toBeUndefined()
     await ui.unmount()
   }
 
   await w.clock.advance(0)
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...BAND, surface })
-    expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' 27k/200k 13%')
+    expect((await ui.find({ type: 'Text', text: /\/200k/, ...inClient(surface) }))?.text.trim()).toBe('27k/200k 13%')
     await ui.unmount()
   }
 })
@@ -650,10 +679,21 @@ test('after a compaction the band estimates and marks the total with ~', async (
     const ui = await $.ui.mount({ ...BAND, surface })
 
     // 26k baseline plus 2,000 characters at one character a token.
-    expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' ~28k/200k 14%')
-    // The texture keeps no background: the terminal's shows through it.
-    const summary = (await ui.find({ key: 'seg-compaction-summary' }))?.children as Node[]
-    expect(summary.map(run => run.props)).toEqual([{ color: DARK.segments['compaction-summary'] }])
+    expect((await ui.find({ type: 'Text', text: /\/200k/, ...inClient(surface) }))?.text.trim()).toBe('~28k/200k 14%')
+    if (surface === 'terminal') {
+      // The texture keeps no background: the terminal's shows through it.
+      const summary = (await ui.find({ key: 'seg-compaction-summary' }))?.children as Node[]
+      expect(summary.map(run => run.props)).toEqual([{ color: DARK.segments['compaction-summary'] }])
+    } else {
+      // The same texture, in the Client's data: the colour, no background.
+      const texture = (await ui.findAll({ type: 'Text', in: 'context-bar' })).filter(
+        run => run.props.color === DARK.segments['compaction-summary'],
+      )
+      expect(texture.length).toBeGreaterThan(0)
+      for (const run of texture) {
+        expect(run.props.backgroundColor).toBeUndefined()
+      }
+    }
     await ui.unmount()
   }
 
@@ -663,7 +703,7 @@ test('after a compaction the band estimates and marks the total with ~', async (
   await w.clock.advance(0)
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text).toBe(' 27k/200k 13%')
+  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('27k/200k 13%')
   await ui.unmount()
 })
 

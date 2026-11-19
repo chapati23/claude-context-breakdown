@@ -132,6 +132,20 @@ test('only a scroll this plugin asked for is moved', () => {
   expect(stepAnswer(ours, 'context-breakdown', steps)).toBeNull()
 })
 
+test('a scroll of ours to a row other than the top takes no step: the reveal of a row leaves the token for the step', () => {
+  const steps = createSteps()
+  const step = steps.push(1)
+  // The reveal of the row the ring moved to: the engine resolved it to row 9.
+  const reveal = { offset: 9, by: 4, bodyRows: 10, contentRows: 40, origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
+  expect(stepAnswer(reveal, 'context-breakdown', steps)).toBeNull()
+  expect(step.seen).toBe(false)
+  expect(steps.size()).toBe(1)
+  // The step itself, resolved to the top, still moves one row from where the window stands.
+  const ours = { ...toStart(9), origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
+  expect(stepAnswer(ours, 'context-breakdown', steps)).toBe(10)
+  expect(step.seen).toBe(true)
+})
+
 const oursAt = (standing: number, contentRows = 40, bodyRows = 10) => ({
   ...toStart(standing, contentRows, bodyRows),
   origin: { kind: 'plugin' as const, name: 'context-breakdown' },
@@ -232,4 +246,21 @@ test('a crossing opens the next page at its top and the previous page at its bot
   expect(crossDelta(null, 1, 3)).toBe(0)
   expect(crossScroll(1)).toBe(TOP_SCROLL)
   expect(crossScroll(-1)).toBe(END_SCROLL)
+})
+
+test('a step starts where the event says the window stands, also after the window moved without a scroll event', () => {
+  const steps = createSteps()
+  steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  // A Tab, a refresh or a resize put the window back at 5 and raised no
+  // `ui.scroll`: the next step goes from 5, not from the last target.
+  const next = steps.push(1)
+  expect(stepAnswer(oursAt(5), 'context-breakdown', steps)).toBe(6)
+  // The crossing is read from the same row: 29 of 30 is not the bottom.
+  steps.push(1)
+  expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
+  const last = steps.push(1)
+  expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
+  expect(last.cross).toBeNull()
+  expect(next.cross).toBeNull()
 })

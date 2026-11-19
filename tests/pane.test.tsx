@@ -36,9 +36,11 @@ test('before a measurement the pane says so and keeps its controls', async ($, o
     expect((await ui.find({ key: 'refresh' }))?.props.hotkey).toBe('r')
     await ui.unmount()
 
-    // Without the keyboard the controls stay to click, with no key offered.
+    // Without the keyboard the controls stay to click. The terminal offers no
+    // key; a desktop keeps the hotkey, which it draws as a key cap and which
+    // presses only while the pane holds the keys.
     const unfocused = await $.ui.mount({ ...PANE, surface })
-    expect((await unfocused.find({ key: 'close' }))?.props.hotkey).toBeUndefined()
+    expect((await unfocused.find({ key: 'close' }))?.props.hotkey).toBe(surface === 'terminal' ? undefined : 'x')
     expect((await unfocused.find({ key: 'close' }))?.props.label).toBe('Close')
     await unfocused.unmount()
   }
@@ -66,8 +68,11 @@ test('the pane lists every segment by group, merged ones too', async ($, on) => 
       'refresh',
     ])
     // Shares are of what is used (66k), not of the window.
-    expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/Tool results +█+ +30k +45%$/)
-    expect((await ui.find({ key: 'row-task-reports' }))?.text).toMatch(/Task reports +▏ +100 +0\.2%$/)
+    if (surface === 'terminal') {
+      // A desktop's row Button holds the name alone: see desktop.test.tsx.
+      expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/Tool results +█+ +30k +45%$/)
+      expect((await ui.find({ key: 'row-task-reports' }))?.text).toMatch(/Task reports +▏ +100 +0\.2%$/)
+    }
     expect(await ui.find({ type: 'Text', text: /Baseline +26k +39%$/ })).toBeDefined()
     // 26k and 40k of 66k: 39.4% and 60.6%, rounded to the nearest they add up.
     expect(await ui.find({ type: 'Text', text: /Conversation +40k +61%$/ })).toBeDefined()
@@ -111,10 +116,15 @@ test('at 24 columns every name reads whole, in its short form where needed', asy
         expect(text.text).not.toMatch(/…/)
       }
     }
-    expect((await ui.find({ key: 'row-system' }))?.text).toMatch(/System +20k$/)
-    expect((await ui.find({ key: 'row-skills-agents' }))?.text).toMatch(/Skills\/agents +2k$/)
-    // The full name still names the control.
-    expect((await ui.find({ key: 'row-system' }))?.props.label).toBe('System prompt and built-in tools')
+    if (surface === 'terminal') {
+      expect((await ui.find({ key: 'row-system' }))?.text).toMatch(/System +20k$/)
+      expect((await ui.find({ key: 'row-skills-agents' }))?.text).toMatch(/Skills\/agents +2k$/)
+    }
+    // On the terminal the full name names the control. A desktop's Button is
+    // labelled with the short name it shows, and the figures stand beside it.
+    const system = await ui.find({ key: 'row-system' })
+    expect(system?.props.label).toBe(surface === 'terminal' ? 'System prompt and built-in tools' : 'System')
+    expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe(surface === 'terminal' ? 'Skills list and custom agents' : 'Skills/agents')
     expect(await ui.find({ type: 'Text', text: /Conversation +40k$/ })).toBeDefined()
     // The key hint is wider than 24 cells: it wraps rather than losing its end.
     expect((await ui.find({ type: 'Text', text: keysHint(surface) }))?.props.wrap).toBe('wrap')
@@ -162,7 +172,12 @@ test('unreadable messages show one Conversation segment', async ($, on) => {
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
 
-    expect((await ui.find({ key: 'row-conversation' }))?.text).toMatch(/Conversation +█+ +40k +61%$/)
+    const row = await ui.find({ key: 'row-conversation' })
+    if (surface === 'terminal') {
+      expect(row?.text).toMatch(/Conversation +█+ +40k +61%$/)
+    } else {
+      expect(row?.props.label).toBe('Conversation')
+    }
     expect(await ui.find({ key: 'row-tool-results' })).toBeUndefined()
     await ui.unmount()
   }
@@ -192,20 +207,26 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     expect(await ui.find({ type: 'Text', text: '283k used · 684k free before compaction' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ +1M window +% of used$/ })).toBeDefined()
-    expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/^Tool results +████████████ +114k +40%$/)
-    expect((await ui.find({ key: 'row-auto-memory' }))?.text).toMatch(/^Auto-memory +▏ +976 +0\.3%$/)
-    // Under one cell of 12 the summary draws an eighth, as Global instructions' 7.9k does.
-    expect((await ui.find({ key: 'row-compaction-summary' }))?.text).toMatch(/^Compaction summary +▉ +7\.8k +2\.8%$/)
-    expect((await ui.find({ key: 'row-global-instructions' }))?.text).toMatch(/ ▉ +7\.9k +2\.8%$/)
-    // A whole-number share keeps its decimal, so the column lines up.
-    expect((await ui.find({ key: 'row-prompts' }))?.text).toMatch(/ 2\.9k +1\.0%$/)
+    if (surface === 'terminal') {
+      // A desktop's row Button holds the name alone: see desktop.test.tsx.
+      expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/^Tool results +████████████ +114k +40%$/)
+      expect((await ui.find({ key: 'row-auto-memory' }))?.text).toMatch(/^Auto-memory +▏ +976 +0\.3%$/)
+      // Under one cell of 12 the summary draws an eighth, as Global instructions' 7.9k does.
+      expect((await ui.find({ key: 'row-compaction-summary' }))?.text).toMatch(/^Compaction summary +▉ +7\.8k +2\.8%$/)
+      expect((await ui.find({ key: 'row-global-instructions' }))?.text).toMatch(/ ▉ +7\.9k +2\.8%$/)
+      // A whole-number share keeps its decimal, so the column lines up.
+      expect((await ui.find({ key: 'row-prompts' }))?.text).toMatch(/ 2\.9k +1\.0%$/)
+    }
     // 48k and 235k of 283k: 16.9% and 83.1%, which add up once rounded to the nearest.
     expect(await ui.find({ type: 'Text', text: /^ +Baseline +48k +17%$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ +Conversation +235k +83%$/ })).toBeDefined()
 
     // The largest segment's name alone is bold; the group headings are dim.
     const bold = (await ui.findAll({ type: 'Text' })).filter(text => text.props.weight === 'bold')
-    expect(bold.map(text => text.text.trim())).toEqual(['283k used · 684k free before compaction', 'Tool results'])
+    // A desktop's name is a Button label, which takes no weight: only the heading is bold there.
+    expect(bold.map(text => text.text.trim())).toEqual(
+      surface === 'terminal' ? ['283k used · 684k free before compaction', 'Tool results'] : ['283k used · 684k free before compaction'],
+    )
     expect((await ui.find({ type: 'Text', text: /^ +Baseline/ }))?.props.dimColor).toBe(true)
     // One estimate note.
     expect(await ui.findAll({ type: 'Text', text: /estimate/ })).toHaveLength(1)
@@ -216,7 +237,8 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
 test('the rows fit 24, 45, 64, 88 and 140 columns, and the table stops at its cap', async ($, on) => {
   await realWorld($, on)
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     for (const bodyColumns of [24, 45, 64, 88, 140]) {
       const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns } })
       const rows = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('row-'))
@@ -246,7 +268,8 @@ test('Free space, Reserve and Not loaded line up with the segment rows', async (
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     for (const bodyColumns of [24, 45, 80]) {
       const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns } })
       // Without the keyboard the row draws its own mark, so its text starts where the row does.
@@ -317,7 +340,8 @@ test('Not loaded lists the MCP servers under MCP tools, aligned, cut to the tabl
   await w.clock.advance(0)
   await first.unmount()
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     for (const bodyColumns of [45, 68, 100]) {
       const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns } })
       const segment = (await ui.find({ key: 'row-tool-results' }))!.text
@@ -397,7 +421,7 @@ test('after a compaction the heading marks its figures with ~, and one note says
   }
 })
 
-test('without the keyboard the key line says how to get it, and the marks are dim', async ($, on) => {
+test('without the keyboard the key line says how to get it; the terminal dims the marks, a desktop keeps its key caps', async ($, on) => {
   await realWorld($, on)
 
   for (const surface of SURFACES) {
@@ -407,22 +431,30 @@ test('without the keyboard the key line says how to get it, and the marks are di
     expect(hint.text).toBe(surface === 'terminal' ? KEYS_HINT : CLICK_HINT)
     expect(hint.props.dimColor).toBe(true)
     expect(hint.props.wrap).toBe('wrap')
-    expect(await ui.find({ type: 'Text', text: /tab: Move|1-9/ })).toBeUndefined()
+    // The terminal drops the key words; a desktop keeps them, so Esc adds only the hint's row there.
+    expect((await ui.find({ type: 'Text', text: /tab: Move|1-9/ })) === undefined).toBe(surface === 'terminal')
     const row = (await ui.find({ key: 'row-system' }))!
-    expect(row.props.hotkey).toBeUndefined()
-    expect(row.text.startsWith('1: ')).toBe(true)
-    const mark = (await ui.findAll({ type: 'Text', text: '1: ' }))[0]
-    expect(mark?.props.dimColor).toBe(true)
-    // The controls stay to click; they offer no key.
-    expect((await ui.find({ key: 'close' }))?.props.hotkey).toBeUndefined()
+    // The terminal's Button draws a dim mark in its text and has no hotkey. A
+    // desktop's Button keeps its hotkey, drawn as a key cap, and the mod draws
+    // no mark of its own.
+    expect(row.props.hotkey).toBe(surface === 'terminal' ? undefined : '1')
+    expect(row.text.startsWith('1: ')).toBe(surface === 'terminal')
+    const marks = await ui.findAll({ type: 'Text', text: '1: ' })
+    expect(marks.length > 0).toBe(surface === 'terminal')
+    expect(marks.every(mark => mark.props.dimColor === true)).toBe(true)
+    // The controls stay to click; on the terminal they offer no key.
+    expect((await ui.find({ key: 'close' }))?.props.hotkey).toBe(surface === 'terminal' ? undefined : 'x')
 
     // The pane takes the keyboard: the keys show.
     await ui.redraw({ ...PANE.props, isFocused: true })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: 'tab: Move' })).toBeDefined()
+    // Off the terminal the arrows scroll the pane: Tab alone moves the ring.
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
     expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
     expect((await ui.find({ key: 'row-system' }))?.text.startsWith('1: ')).toBe(false)
+    // Both surfaces leave the digit to the Button.
+    expect(await ui.findAll({ type: 'Text', text: '1: ' })).toEqual([])
     expect((await ui.find({ key: 'close' }))?.props.hotkey).toBe('x')
     await ui.unmount()
   }
@@ -434,9 +466,13 @@ test('the key words for each state', () => {
   expect(keyWords(false, 88, false)).toEqual([])
   expect(keysHint('terminal')).toBe('For keys: click the pane, or run /ctx')
   expect(keysHint('desktop')).toBe('Click the pane for keys')
-  expect(keyWords(true, 88, true)).toEqual(['tab: Move', '⏎ or 1-9: Open'])
-  expect(keyWords(true, 24, true)).toEqual(['tab: Move', '⏎: Open'])
+  // The arrows and Tab move the ring along the rows; j and k are controls of their own.
+  expect(keyWords(true, 88, true)).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
+  expect(keyWords(true, 24, true)).toEqual(['↑↓ tab: Move', '⏎: Open'])
   expect(keyWords(false, 88, true)).toEqual([])
+  // Off the terminal the mod leaves the arrows to the app: Tab alone moves the ring.
+  expect(keyWords(true, 88, true, 'desktop')).toEqual(['tab: Move', '⏎ or 1-9: Open'])
+  expect(keyWords(true, 88, true, 'terminal')).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
 })
 
 test('rows after the ninth: Tab reaches them from the first row, which takes the ring', async ($, on) => {
@@ -478,15 +514,23 @@ test('b puts the ring back on the row it came from, on its page; a new list ring
     expect(await ringed(ui)).toEqual(['item-r:real0'])
     await ui.press({ key: 'item-r:real3' })
     // Level 3: the first control takes the ring, and it stands above the text.
-    expect(await ringed(ui)).toEqual(['scroll-down'])
+    // Off the terminal that is Back: level 3 there draws no Down and Up.
+    expect(await ringed(ui)).toEqual([surface === 'terminal' ? 'scroll-down' : 'back'])
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['item-r:real3'])
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['row-tool-results'])
-    // Any other move starts on the first row again.
+    // Any other move starts on the first row again. Off the terminal a sort
+    // keeps the level, so no row asks for the ring: a desktop would move the
+    // focus off the Sort control to it.
     await ui.press({ key: 'row-claude-output' })
-    await ui.press({ key: 'sort' })
     expect((await ringed(ui))[0]?.startsWith('item-')).toBe(true)
+    await ui.press({ key: 'sort' })
+    if (surface === 'terminal') {
+      expect((await ringed(ui))[0]?.startsWith('item-')).toBe(true)
+    } else {
+      expect(await ringed(ui)).toEqual([])
+    }
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['row-claude-output'])
     await ui.press({ key: 'row-system' })
@@ -498,7 +542,8 @@ test('b puts the ring back on the row it came from, on its page; a new list ring
 test('level 2: a breadcrumb with totals, bars to the largest item, shares of the segment', async ($, on) => {
   await realWorld($, on)
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     await ui.press({ key: 'row-tool-results' })
     const crumb = (await ui.find({ type: 'Text', text: /^Context › / }))!
@@ -664,22 +709,14 @@ test('the row under the ring is one highlight: its figures at full strength, its
   expect(partCell(idleMemory).props.color).toBe(color)
   expect(partCell(idleMemory).props.backgroundColor).toBeUndefined()
   await idle.unmount()
-
-  // A desktop draws its own button and swaps nothing: the lit row's figures
-  // are at full strength, but its part-filled cell stays as at rest.
-  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
-  const desktopMemory = partsOf(await desktop.find({ key: 'row-auto-memory' }))
-  expect(figures(desktopMemory).props.dimColor).toBe(false)
-  expect(partCell(desktopMemory).props.color).toBe(color)
-  expect(partCell(desktopMemory).props.backgroundColor).toBeUndefined()
-  expect(partCell(desktopMemory).hover).toBeUndefined()
-  await desktop.unmount()
+  // A desktop swaps nothing and keeps its figures outside the Button: see desktop.test.tsx.
 })
 
 test('level 2 at 24 columns: no swatch on the rows, and the facts line fits', async ($, on) => {
   await realWorld($, on)
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 24 } })
     await ui.press({ key: 'row-tool-results' })
     const items = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('item-'))
@@ -723,7 +760,8 @@ test('level 2 shares are of the segment figure the breadcrumb shows, also for a 
   await $.session.start(START)
   await w.clock.advance(0)
 
-  for (const surface of SURFACES) {
+  // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     await ui.press({ key: 'row-tool-results' })
     expect(await ui.find({ type: 'Text', text: /older items are not listed/ })).toBeDefined()

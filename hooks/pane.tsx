@@ -74,6 +74,8 @@ type Rows = {
    * way round for the swap would stay that way there.
    */
   swaps: boolean
+  /** Whether a desktop row draws its hotkey as a key cap now (`showsKeys`). */
+  caps: boolean
 }
 
 /**
@@ -94,6 +96,58 @@ function lookOf(rows: Rows, key: string): RowLook {
 // Every part of a table row is a Text drawn `mono`: the columns line up only
 // cell for cell, and a surface other than the terminal draws text in a face
 // that is not monospaced unless asked. The figures are also `tabular`.
+
+/**
+ * The hotkey of a desktop row: its digit, "1" to "9", for the row at `index`
+ * among the rows that open (null for a row that does not open). None in a
+ * narrow pane (`cells` 0) or for the tenth row and later. The desktop and VS
+ * Code give the row its hotkey in both focus states (`showsKeys`): they draw
+ * it as a key cap inside the native button, and a hotkey presses only while
+ * the pane holds the keys.
+ */
+export function desktopHotkeyOf(cells: number, index: number | null): string | undefined {
+  return cells > 0 && index !== null && index < 9 ? String(index + 1) : undefined
+}
+
+/**
+ * A row on a desktop: only the name is the Button, in a Box as wide as the
+ * name's column plus the mark's cells, and the parts with a colour of their
+ * own (the swatch, the length bar, the figures) stand outside it. A desktop
+ * draws a Button's children as plain text, dropping colour and the code
+ * font, so inside it the bar would turn black and the columns would drift.
+ * The Button's text is the name. The native button draws the row's hotkey
+ * as a key cap before the label, in the mark's cells; a row without a
+ * hotkey has blank cells there, so every name starts in the same column.
+ * The row keeps its place with and without the keys.
+ */
+function desktopRow(
+  rows: Rows,
+  button: { key: string; autoFocus?: true; onPress: () => void },
+  parts: { index: number | null; lead: unknown; name: string; rest: unknown[] },
+) {
+  const { Box, Button, Text } = rows.el
+  const label = parts.name.trimEnd()
+  const cells = rows.table.mark
+  const digit = rows.caps ? desktopHotkeyOf(cells, parts.index) : undefined
+
+  return (
+    <Box flexDirection="row">
+      {parts.lead as RenderElement}
+      <Box width={cells + cellWidth(parts.name)} flexShrink={0}>
+        {digit === undefined && cells > 0 ? <Text mono>{' '.repeat(cells)}</Text> : ''}
+        <Button
+          key={button.key}
+          label={label}
+          plain
+          {...(digit === undefined ? {} : { hotkey: digit })}
+          {...(button.autoFocus === undefined ? {} : { autoFocus: true as const })}
+          onPress={button.onPress}
+        />
+      </Box>
+      <Text mono>{parts.rest as RenderElement[]}</Text>
+    </Box>
+  )
+}
 
 /** Blank cells that hold a column's place. */
 function gap(rows: Rows, cells: number) {
@@ -236,13 +290,16 @@ function plainRow(
   const { table } = rows
   // Free space and Reserve show the bar's own glyph where a row's colour
   // goes: in the swatch's place, or at the start of the length bar's column.
+  // On the desktop the mark's cells follow the swatch, as in a row, where the
+  // native button draws the key cap after the swatch.
   const lead = glyph === null ? ' '.repeat(table.lead) : leadPart(rows, glyph.color, glyph.text)
   const bar = glyph === null ? null : { full: '', rest: glyph.text, pad: ' '.repeat(Math.max(0, table.bar - cellWidth(glyph.text))) }
 
   return (
     <Text mono dimColor>
-      {' '.repeat(table.mark)}
+      {rows.swaps ? ' '.repeat(table.mark) : ''}
       {lead}
+      {rows.swaps ? '' : ' '.repeat(table.mark)}
       {nameText(table, name)}
       {glyph === null || bar === null ? (table.bar > 0 ? ` ${' '.repeat(table.bar)}` : '') : barPart(rows, glyph.color, bar)}
       <Text mono tabular>
@@ -292,10 +349,27 @@ function groupRows(
       const color = colorOf(rows.palette, def.id)
       const key = `row-${segment.id}`
       const look = lookOf(rows, key)
-      const { hotkey, mark } = markOf(rows, first + index, look)
       const name = nameText(table, def.label, def.short)
       const isLargest = stats.largest?.id === segment.id
       const bar = lengthBarParts(segment.tokens, stats.largest?.tokens ?? 0, table.bar, segment.id)
+
+      if (!rows.swaps) {
+        return desktopRow(
+          rows,
+          {
+            key,
+            ...(rows.ring === key ? { autoFocus: true as const } : {}),
+            onPress: () => void actions.openSegment(segment.id),
+          },
+          {
+            index: first + index,
+            lead: leadPart(rows, color),
+            name,
+            rest: [barPart(rows, color, bar), figuresPart(rows, segment.tokens, stats.used)],
+          },
+        )
+      }
+      const { hotkey, mark } = markOf(rows, first + index, look)
 
       return (
         <Button
@@ -343,6 +417,7 @@ function segmentsBody(
   ring: string | null,
   lit: string | null,
   swaps: boolean,
+  caps: boolean,
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
@@ -360,7 +435,7 @@ function segmentsBody(
     ...deferred.map(category => withoutDeferred(category.name)),
   ]
   const table = tableLayout(columns, Math.max(...names.map(cellWidth)))
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   const used = usedTokens(snapshot)
   const stats = { used, largest: largestOf(shown) }
   const mark = snapshot.isEstimate ? '~' : ''
@@ -467,6 +542,7 @@ function listBody(
   ring: string | null,
   lit: string | null,
   swaps: boolean,
+  caps: boolean,
 ) {
   const { Box, Button, Text } = el
   const def = segmentDef(list.segment)
@@ -476,7 +552,7 @@ function listBody(
   const widest = Math.max(1, ...list.rows.map(row => cellWidth(row.detail === '' ? row.title : `${row.title}  ${row.detail}`)))
   // No swatch: every row has the segment's colour, which the breadcrumb shows once.
   const table = tableLayout(columns, widest, false)
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
@@ -521,6 +597,29 @@ function listBody(
           ]
           if (index === null) {
             return <Text mono>{inner}</Text>
+          }
+
+          if (!rows.swaps) {
+            return desktopRow(
+              rows,
+              {
+                key,
+                ...(ring === key ? { autoFocus: true as const } : {}),
+                onPress: () => void actions.openItem(row.id),
+              },
+              {
+                index,
+                lead: '',
+                name: names.title,
+                rest: [
+                  <Text mono dimColor>
+                    {names.detail}
+                  </Text>,
+                  barPart(rows, color, lengthBarParts(row.tokens, largest, table.bar)),
+                  figuresPart(rows, row.tokens, total),
+                ],
+              },
+            )
           }
 
           return (
@@ -659,14 +758,33 @@ function downKey(view: ContextBreakdownView): string {
   return view.level === 3 ? SCROLL_DOWN : LIST_DOWN
 }
 
-function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean): Control[] {
+/**
+ * Whether the keys line draws Down and Up (j and k). Only the terminal draws
+ * them, and only with the keyboard: a click moves one row, which the wheel
+ * does better. Elsewhere Tab moves the ring along the rows and the app's own
+ * scrolling moves the text.
+ */
+function hasSteps(isFocused: boolean, surface: RenderSurface): boolean {
+  return surface === 'terminal' && isFocused
+}
+
+/**
+ * Whether the pane offers its keys now: the key words and the hotkeys. The
+ * desktop and VS Code draw a hotkey as a key cap and keep the keys in both
+ * states. The terminal, and the mobile app, which has no keyboard, offer them
+ * only while the pane holds the keys.
+ */
+function showsKeys(isFocused: boolean, surface: RenderSurface): boolean {
+  return isFocused || surface === 'desktop' || surface === 'vscode'
+}
+
+function controls(view: ContextBreakdownView, actions: PaneActions, isFocused: boolean, surface: RenderSurface): Control[] {
   const out: Control[] = []
   const add = (key: string, label: string, hotkey: string, isOn: boolean, onPress: Control['onPress']) =>
     out.push({ key, label, hotkey, isOn, onPress: isOn ? onPress : () => undefined })
-  // j and k only with the keyboard: a click moves one row, which the wheel
-  // does better. The register's `ui.press` hook does the scroll (scroll.ts
-  // says why), so the Buttons' own presses do nothing.
-  if (isFocused) {
+  // The register's `ui.press` hooks do the move (ring.ts, scroll.ts), so the
+  // Buttons' own presses do nothing.
+  if (hasSteps(isFocused, surface)) {
     add(downKey(view), 'Down', 'j', true, () => undefined)
     add(view.level === 3 ? SCROLL_UP : LIST_UP, 'Up', 'k', true, () => undefined)
   }
@@ -709,18 +827,24 @@ export function keysHint(surface: RenderSurface): string {
   return surface === 'terminal' ? KEYS_HINT : CLICK_HINT
 }
 
+/** The words that say how the ring moves along the rows: the arrows and Tab (j and k are controls of their own). */
+export const MOVE_WORDS = '↑↓ tab: Move'
+/** Off the terminal only Tab moves the ring: the arrows scroll the pane there. */
+export const TAB_WORDS = 'tab: Move'
+
 /**
- * The words before the controls, with the keyboard: Tab walks the rows (the
- * arrows scroll a pane) and Enter or a digit opens one. Without it, none:
- * the hint stands on its own line, and the controls keep only their labels,
- * so a click still works and no key is offered that would go to the prompt.
+ * The words before the controls, with the keyboard: the arrows and Tab walk
+ * the rows (off the terminal, Tab alone) and Enter or a digit opens one.
+ * Without it, none: the hint stands on its own line, and the controls keep
+ * only their labels, so a click still works and no key is offered that
+ * would go to the prompt.
  */
-export function keyWords(hasRows: boolean, columns: number, isFocused: boolean): string[] {
+export function keyWords(hasRows: boolean, columns: number, isFocused: boolean, surface: RenderSurface = 'terminal'): string[] {
   if (!isFocused || !hasRows) {
     return []
   }
 
-  return ['tab: Move', showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
+  return [surface === 'terminal' ? MOVE_WORDS : TAB_WORDS, showsHotkeys(columns) ? '⏎ or 1-9: Open' : '⏎: Open']
 }
 
 /**
@@ -729,8 +853,13 @@ export function keyWords(hasRows: boolean, columns: number, isFocused: boolean):
  * first control, or the control under the text when k crossed back into the
  * page. Null when the tree has no such element.
  */
-export function ringKey(view: ContextBreakdownView, snapshot: ContextBreakdownSnapshot | null, isFocused: boolean): string | null {
-  const firstControl = isFocused ? downKey(view) : 'back'
+export function ringKey(
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  isFocused: boolean,
+  surface: RenderSurface = 'terminal',
+): string | null {
+  const firstControl = hasSteps(isFocused, surface) ? downKey(view) : 'back'
   if (view.level === 3) {
     return view.item.atEnd && view.item.page + 1 < view.item.pages ? NEXT_BELOW : firstControl
   }
@@ -762,7 +891,10 @@ function keysLine(
   const { Box, Button, Text } = el
 
   // The hint gets a row of its own: beside the label-only controls it would
-  // read as one phrase ("click the pane  Close").
+  // read as one phrase ("click the pane  Close"). The desktop and VS Code
+  // keep the key words and the controls' hotkeys (drawn as key caps) in both
+  // states, so Esc changes their line by the hint's row only (`showsKeys`).
+  // A hotkey presses only while the pane holds the keys.
   return (
     <Box flexDirection="column" marginTop={1}>
       {!isFocused && (
@@ -771,22 +903,29 @@ function keysLine(
         </Text>
       )}
       <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {keyWords(hasRows, columns, isFocused).map(words => (
+        {keyWords(hasRows, columns, showsKeys(isFocused, surface), surface).map(words => (
           <Text dimColor>{words}</Text>
         ))}
-        {controls(view, actions, isFocused).map(control => {
+        {controls(view, actions, isFocused, surface).map(control => {
           const props = {
             key: control.key,
             label: control.label,
             plain: true as const,
-            ...(isFocused ? { hotkey: control.hotkey } : {}),
+            ...(showsKeys(isFocused, surface) ? { hotkey: control.hotkey } : {}),
             ...(control.key === 'close' ? { role: 'dismiss' as const } : {}),
             ...(ring === control.key ? { autoFocus: true as const } : {}),
             onPress: (press: { surface: RenderSurface }) => void control.onPress(press.surface),
           }
 
-          // A control that does not apply draws its label in the theme's
-          // faint colour, a step below the others' dim.
+          // A desktop draws a native button that shows only its label and
+          // drops a child: a live control is drawn as it is, and one that
+          // does not apply is drawn dim.
+          if (surface !== 'terminal') {
+            return control.isOn ? <Button {...props} /> : <Button {...props} dimColor />
+          }
+
+          // On the terminal a control that does not apply draws its label in
+          // the theme's faint colour, a step below the others' dim.
           return control.isOn ? (
             <Button {...props} dimColor />
           ) : (
@@ -822,7 +961,7 @@ export function paneTree(
   ringNow: string | null = null,
 ): RenderElement {
   const { Box, Text } = el
-  const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused)
+  const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
   // Where the ring is: the last focus event's element, or, before the first
   // one for this tree, the element that asks for the ring. A pane without
   // the keyboard shows no ring.
@@ -835,12 +974,12 @@ export function paneTree(
   let body: RenderElement
   let hasRows = false
   if (view.level === 2) {
-    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
+    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
     hasRows = view.list.rows.some(row => row.isOpenable)
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
     hasRows = true
     if (view.note !== undefined) {
       body = (

@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
+import { cellWidth } from '../hooks/text'
 import { BAND, CHAT, FOCUSED_PANE, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
@@ -41,10 +42,20 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
     expect(await itemKeys(ui)).toEqual(['item-r:tu2', 'item-r:tu1'])
     expect((await ui.find({ key: 'item-r:tu2' }))?.props.hotkey).toBe('1')
     expect((await ui.find({ key: 'item-r:tu1' }))?.props.hotkey).toBe('2')
-    expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(/Read +~\/project\/notes\.txt/)
+    // The terminal's row Button holds the whole row; a desktop's holds the name
+    // alone (desktop.test.tsx draws the figures and detail beside it).
+    expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(
+      surface === 'terminal' ? /Read +~\/project\/notes\.txt/ : /^Read$/,
+    )
     expect(await ui.find({ type: 'Text', text: /^2 items · largest first$/ })).toBeDefined()
     expect((await ui.find({ key: 'back' }))?.props.hotkey).toBe('b')
     expect((await ui.find({ key: 'sort' }))?.props.hotkey).toBe('s')
+    // Without the keyboard the terminal drops the hotkeys; a desktop keeps
+    // them, drawn as key caps, and a hotkey presses only with the keyboard.
+    await ui.redraw({ ...PANE.props })
+    const kept = surface === 'terminal' ? [undefined, undefined, undefined] : ['1', '2', 'b']
+    expect(await Promise.all(['item-r:tu2', 'item-r:tu1', 'back'].map(async key => (await ui.find({ key }))?.props.hotkey))).toEqual(kept)
+    await ui.redraw({ ...FOCUSED_PANE.props })
 
     await ui.press({ key: 'item-r:tu1' })
     const code = await ui.find({ type: 'Code' })
@@ -69,7 +80,7 @@ test('a baseline segment lists its items; its sort key is there but does nothing
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'row-mcp' })
-    expect(isOff(await ui.find({ key: 'sort' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'sort' }), surface)).toBe(true)
     await ui.press({ key: 'sort' })
     expect(await ui.find({ type: 'Text', text: /largest first|newest first/ })).toBeUndefined()
     // Tool schemas have no text: rows, not buttons.
@@ -92,11 +103,11 @@ test('the sort toggle and the pages', async ($, on) => {
     expect(keys[0]).toBe('item-r:b1')
     expect(await ui.find({ type: 'Text', text: /^25 more items, .*, on other pages$/ })).toBeDefined()
     // p on the first page is still a control, so the key stays in the pane; it does nothing.
-    expect(isOff(await ui.find({ key: 'prev' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(true)
     expect((await ui.find({ key: 'prev' }))?.props.hotkey).toBe('p')
     await ui.press({ key: 'prev' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b1')
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(false)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(false)
 
     await ui.press({ key: 'sort' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b45')
@@ -109,7 +120,7 @@ test('the sort toggle and the pages', async ($, on) => {
     await ui.press({ key: 'next' })
     keys = await itemKeys(ui)
     expect(keys).toHaveLength(5)
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(true)
     await ui.press({ key: 'next' })
     expect(await itemKeys(ui)).toHaveLength(5)
     expect(await ui.find({ type: 'Text', text: /^40 more items/ })).toBeDefined()
@@ -146,7 +157,7 @@ test('a long item pages with n and p, and the facts line says which lines it sho
     await ui.press({ key: 'format' })
     expect(await ui.find({ type: 'Text', text: /· formatted · as loaded · lines [\d,]+-1,230 of 1,230$/ })).toBeDefined()
     await ui.press({ key: 'format' })
-    while (!isOff(await ui.find({ key: 'prev' }))) {
+    while (!isOff(await ui.find({ key: 'prev' }), surface)) {
       await ui.press({ key: 'prev' })
     }
     expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(1)
@@ -202,7 +213,7 @@ test('an instruction file shows its as-loaded text, and the file when the remind
     await ui.press({ key: global! })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('Be brief.')
     expect(await ui.find({ type: 'Text', text: /shown from disk/ })).toBeDefined()
-    expect(isOff(await ui.find({ key: 'view' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'view' }), surface)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -233,7 +244,7 @@ test('c copies the path and m mentions it; for an item without a path they do no
     await ui.press({ key: 'item-r:tu2' })
     // Still controls with their keys, so v, c and m stay in the pane.
     for (const key of ['copy', 'mention', 'view']) {
-      expect(isOff(await ui.find({ key }))).toBe(true)
+      expect(isOff(await ui.find({ key }), surface)).toBe(true)
       expect((await ui.find({ key }))?.props.hotkey).toBeDefined()
       await ui.press({ key })
     }
@@ -323,7 +334,8 @@ test('a bar segment opens its items; a merged cell opens level 1', async ($, on)
 
   // Wide enough that the legend leaves the bar room for Claude output's cell.
   const wide = { ...BAND, props: { ...BAND.props, bodyColumns: 100 } }
-  for (const surface of SURFACES) {
+  // On the desktop the bar is one picture; its total opens level 1 (band.test.tsx).
+  for (const surface of ['terminal'] as const) {
     const band = await $.ui.mount({ ...wide, surface })
     await band.press({ key: 'seg-claude-output' })
     await band.unmount()
@@ -490,12 +502,16 @@ test('level 3: the controls stand between the facts line and the text, and the f
     await ui.press({ key: 'row-tool-results' })
     await ui.press({ key: 'item-r:big' })
     const order = drawnOrder(await ui.drawn())
-    expect(order.indexOf('facts')).toBeLessThan(order.indexOf('scroll-down'))
+    // The first control: Down on the terminal; elsewhere Back, as level 3
+    // there draws no Down and Up (the app scrolls the text).
+    const first = surface === 'terminal' ? 'scroll-down' : 'back'
+    expect(order.indexOf('facts')).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf('facts')).toBeLessThan(order.indexOf(first))
     expect(order.indexOf('refresh')).toBeLessThan(order.indexOf('Code'))
     // A page with a next one ends with a control to it, under the text.
     expect(order.at(-1)).toBe('next-below')
     const ringed = (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true)
-    expect(ringed.map(button => button.key)).toEqual(['scroll-down'])
+    expect(ringed.map(button => button.key)).toEqual([first])
     await ui.press({ key: 'next-below' })
     expect(await ui.find({ type: 'Text', text: /lines 501-1,000 of 1,230$/ })).toBeDefined()
 
@@ -511,6 +527,53 @@ test('level 3: the controls stand between the facts line and the text, and the f
   }
 })
 
+/** The parts of the drawn key line, as the engine draws them: the words, and each plain control as `hotkey: label`. */
+function keyParts(node: unknown): string[] | null {
+  if (node === null || typeof node !== 'object') {
+    return null
+  }
+  const { type, props = {}, children = [] } = node as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const isLine = type === 'Box' && props.flexWrap === 'wrap' && children.some(child => (child as { type?: string })?.type === 'Button')
+  if (isLine) {
+    return children.flatMap(child => {
+      const part = child as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+      if (part.type === 'Text') {
+        return [(part.children ?? []).filter(text => typeof text === 'string').join('')]
+      }
+      if (part.type === 'Button') {
+        const label = String(part.props?.label ?? '')
+
+        return [part.props?.hotkey === undefined ? label : `${String(part.props.hotkey)}: ${label}`]
+      }
+
+      return []
+    })
+  }
+  for (const child of children) {
+    const found = keyParts(child)
+    if (found !== null) {
+      return found
+    }
+  }
+
+  return null
+}
+
+/** The drawn key line laid out in rows of `columns` cells: a gap of 2 between parts, wrapped between them. */
+function keyRows(node: unknown, columns: number): string[][] {
+  const rows: string[][] = []
+  for (const part of keyParts(node) ?? []) {
+    const row = rows.at(-1)
+    if (row !== undefined && cellWidth([...row, part].join('  ')) <= columns) {
+      row.push(part)
+    } else {
+      rows.push([part])
+    }
+  }
+
+  return rows
+}
+
 test('every letter key of a level is a control there, in one order, readable at 45 columns', async ($, on) => {
   await chatWorld($, on)
   const keyLine = async (ui: { findAll: (q: { type: string }) => Promise<{ key: string | undefined }[]> }) =>
@@ -520,18 +583,33 @@ test('every letter key of a level is a control there, in one order, readable at 
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 45 } })
+    // Only the terminal draws Down and Up (j and k): elsewhere Tab moves the
+    // ring along the rows and the app scrolls the text.
+    const steps = (down: string, up: string) => (surface === 'terminal' ? [down, up] : [])
     // b at level 1 does nothing, but keeps the key in the pane.
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'close', 'refresh'])
-    expect(isOff(await ui.find({ key: 'back' }))).toBe(true)
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'close', 'refresh'])
+    // The words name the keys that move the ring: the arrows and Tab on the
+    // terminal, Tab alone elsewhere. j and k say Down and Up.
+    const words = (await ui.findAll({ type: 'Text', text: /: (Move|Open)$/ })).map(text => text.text)
+    expect(words).toEqual([surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move', '⏎ or 1-9: Open'])
+    // The key line as drawn wraps between its parts (a gap of 2): every row,
+    // words and controls, fits the pane's 45 columns, in cells.
+    const rows1 = keyRows(await ui.drawn(), 45)
+    expect(rows1.flat().length).toBe(2 + (await keyLine(ui)).length)
+    expect(rows1.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
+    if (surface === 'terminal') {
+      expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
+      expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
+    }
+    expect(isOff(await ui.find({ key: 'back' }), surface)).toBe(true)
     await ui.press({ key: 'back' })
     expect(await ui.find({ key: 'row-system' })).toBeDefined()
 
     await ui.press({ key: 'row-tool-results' })
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
     await ui.press({ key: 'item-r:tu2' })
     expect(await keyLine(ui)).toEqual([
-      'scroll-down',
-      'scroll-up',
+      ...steps('scroll-down', 'scroll-up'),
       'back',
       'prev',
       'next',
@@ -543,9 +621,9 @@ test('every letter key of a level is a control there, in one order, readable at 
       'refresh',
     ])
     // Each control fits a 45-column pane whole; the line wraps between them.
-    for (const button of await ui.findAll({ type: 'Button' })) {
-      expect(button.text.length + 3).toBeLessThan(45)
-    }
+    const rows3 = keyRows(await ui.drawn(), 45)
+    expect(rows3.flat().length).toBe((await keyLine(ui)).length)
+    expect(rows3.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()

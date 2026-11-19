@@ -166,8 +166,13 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
     if (view.list.items > 0 && set.items.length === 0 && set.note === NO_ITEMS) {
       return { seq: view.seq, gen, level: 1, note: ITEMS_GONE_NOTE }
     }
+    // The row that took the ring before the rebuild keeps it (`from`, which
+    // `ringKey` reads): a new item first would take it otherwise, and a
+    // desktop moves the focus to it while the person is elsewhere.
+    const ids = view.list.rows.filter(row => row.isOpenable).map(row => row.id)
+    const from = view.from !== undefined && ids.includes(view.from) ? view.from : ids[0]
 
-    return { ...view, gen, list }
+    return { ...view, gen, list, ...(from === undefined ? {} : { from }) }
   }
   const item = set.items.find(one => one.id === view.item.id)
   if (item === undefined) {
@@ -354,8 +359,21 @@ export function openSegment(io: NavIo, segment: ContextBreakdownSegmentId): Prom
   })
 }
 
-/** The list again, with another sort or page. */
-function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: ContextBreakdownSort; page: number }) {
+/**
+ * Whether a list still keeps the focus where the person put it, after the
+ * view went from `before` to `after`: `kept`, the answer so far, holds only
+ * while the same segment's list stays open. A new level or another segment
+ * ends it. Read off the terminal only (register.tsx, `staysOnControl`).
+ */
+export function keepsFocus(before: ContextBreakdownView, after: ContextBreakdownView, kept: boolean): boolean {
+  return kept && before.level === 2 && after.level === 2 && before.list.segment === after.list.segment
+}
+
+/** Which row of a new page takes the focus ring: its first or its last that opens. */
+export type RingAt = 'first' | 'last'
+
+/** The list again, with another sort or page; `at` puts the ring on the new page's first or last row. */
+function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: ContextBreakdownSort; page: number }, at?: RingAt) {
   return retried(async () => {
     const base = await io.view()
     const list = listOfView(base)
@@ -364,8 +382,11 @@ function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: Conte
     }
     const { sort, page } = change(list)
     const set = buildItems(list.segment, await gather(io))
+    const next = listOf(list.segment, set, sort, page)
+    const ids = next.rows.filter(row => row.isOpenable).map(row => row.id)
+    const from = at === undefined ? undefined : at === 'first' ? ids[0] : ids[ids.length - 1]
 
-    return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: listOf(list.segment, set, sort, page) })
+    return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: next, ...(from === undefined ? {} : { from }) })
   })
 }
 
@@ -373,8 +394,9 @@ export function toggleSort(io: NavIo): Promise<void> {
   return relist(io, list => ({ sort: list.sort === 'size' ? 'newest' : 'size', page: 0 }))
 }
 
-export function listPage(io: NavIo, delta: number): Promise<void> {
-  return relist(io, list => ({ sort: list.sort, page: list.page + delta }))
+/** Another page of the list; `at`: j or k crossed into it, so its first or last row takes the ring. */
+export function listPage(io: NavIo, delta: number, at?: RingAt): Promise<void> {
+  return relist(io, list => ({ sort: list.sort, page: list.page + delta }), at)
 }
 
 /** Finds the item again in a fresh build; level 1, with a note, when it is gone. */

@@ -33,6 +33,12 @@ export type ContextBreakdownSegmentId =
 export type ContextBreakdownSegment = {
   id: ContextBreakdownSegmentId
   tokens: number
+  /**
+   * A split conversation segment's characters, by which it takes its share
+   * of the measured tokens. Absent for a baseline segment and for
+   * `conversation`.
+   */
+  chars?: number
 }
 
 /** One breakdown category of kind `deferred`: listed, not in the window. */
@@ -80,8 +86,9 @@ export type ContextBreakdownSnapshot = {
 }
 
 /**
- * The tokens per segment at the person's last prompt: what level 1's column
- * `added` counts from. Taken from a measurement, never from an estimate.
+ * The tokens per segment at the person's last prompt, and the characters of
+ * each split conversation segment: what level 1's column `added` counts
+ * from. Taken from a measurement, never from an estimate.
  */
 export type ContextBreakdownBase = {
   segments: ContextBreakdownSegment[]

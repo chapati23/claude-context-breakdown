@@ -541,6 +541,24 @@ test('with no token figure for the servers, the list orders by tools, draws no b
   await ui.unmount()
 })
 
+test('with no MCP tools category, the level 1 row shows the servers’ sum, the figure their list shows', async ($, on) => {
+  const w = world(on)
+  const servers = withServers([
+    ['tickets', 4, 1000],
+    ['notes', 2, 500],
+  ])
+  const categories = servers.context.breakdown.categories.filter(category => category.name !== 'MCP tools (deferred)')
+  w.usage = { ...servers, context: { ...servers.context, breakdown: { ...servers.context.breakdown, categories } } }
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  expect((await ui.find({ key: 'row-not-loaded' }))?.text).toMatch(/MCP tools · 2 servers, 6 tools +5k *$/)
+  await ui.press({ key: 'row-not-loaded' })
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  5k once loaded')
+  await ui.unmount()
+})
+
 test('after a compaction the heading marks its figures with ~, and one note says why', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
@@ -742,12 +760,10 @@ test('level 2: a breadcrumb with totals, bars to the largest item, shares of the
     const header = (await ui.find({ type: 'Text', text: /^12 items · largest first +% of segment$/ }))!
     const first = (await ui.find({ key: 'item-r:real0' }))!.text
     expect(cellWidth(header.text)).toBe(cellWidth(first) + 3)
-    // Under the title, the segment's definition as a sentence, in lines no wider than the table.
+    // Under the title, the segment's definition as a sentence, in lines as wide
+    // as a table may be in the pane, whatever the rows.
     const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text)
-    const at = texts.indexOf('The output of tool calls, such as file reads and command')
-    expect(at).toBeGreaterThan(-1)
-    expect(texts[at + 1]).toBe('output.')
-    expect(cellWidth(texts[at]!)).toBeLessThanOrEqual(cellWidth(header.text))
+    expect(texts).toContain('The output of tool calls, such as file reads and command output.')
     expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Newest first')
     expect((await ui.find({ key: 'item-r:real0' }))?.text).toMatch(/^Read  ~\/project\/src\/module-1\.ts +████████████ +31k +27%$/)
     expect((await ui.find({ key: 'item-r:real11' }))?.text).toMatch(/^ +Bash  npm run step-12 +▎ +600 +0\.5%$/)
@@ -757,6 +773,31 @@ test('level 2: a breadcrumb with totals, bars to the largest item, shares of the
       expect(item.text).not.toMatch(/^ *██ /)
       expect(buttonCells(item)).toBeLessThanOrEqual(TABLE_MAX_COLUMNS)
     }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('a level 2 list with no rows wraps its definition and its note at the pane’s width, up to the table’s widest', async ($, on) => {
+  const w = world(on)
+  // Unread messages: level 1 has the one Conversation segment, and its list has no rows.
+  w.messages = null
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const bodyColumns of [45, 88]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns } })
+    await ui.press({ key: 'row-conversation' })
+    const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text)
+    const cells = Math.min(bodyColumns - 1, TABLE_MAX_COLUMNS)
+    const first = texts.findIndex(text => text.startsWith('All content after the session'))
+    const note = texts.findIndex(text => text.startsWith('The messages could not be read when'))
+    expect(first).toBeGreaterThan(-1)
+    expect(note).toBeGreaterThan(first)
+    const lines = [...texts.slice(first, note - 1), ...texts.slice(note)]
+    expect(lines.every(line => cellWidth(line) <= cells)).toBe(true)
+    // The first line takes the room: not a column as narrow as a table with no names.
+    expect(cellWidth(texts[first]!)).toBeGreaterThan(cells - 12)
     await ui.press({ key: 'back' })
     await ui.unmount()
   }

@@ -234,6 +234,54 @@ test('n and p at the end of an item step to the next and previous item of the li
   }
 })
 
+test('p onto a long item opens it at its first page', async ($, on) => {
+  const long = Array.from({ length: 1230 }, (_, i) => `row ${i + 1}`).join('\n')
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'big', name: 'Bash', input: { command: 'seq' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'big', content: long }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'small', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'small', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    // Largest first: the short item comes second, so p steps back onto the long one.
+    await ui.press({ key: 'item-r:small' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · / })).toBeDefined()
+    await ui.press({ key: 'prev' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · lines 1-500 of 1,230$/ })).toBeDefined()
+    expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(1)
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('n onto another item opens it in its own default view, as loaded, not in the view shown', async ($, on) => {
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: 'a.txt\nb.txt\nc.txt\nd.txt' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'two', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'two', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:one' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · raw · as loaded/ })).toBeDefined()
+    // f switches this item to formatted; the next item opens raw, its own default.
+    await ui.press({ key: 'format' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · formatted · as loaded/ })).toBeDefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · .* · raw · as loaded/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('an item of one page that is the only one of its list that opens: p and n leave the line', async ($, on) => {
   await chatWorld($, on, [
     { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'date' } }] },

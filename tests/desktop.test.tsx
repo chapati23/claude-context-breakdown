@@ -939,13 +939,13 @@ test('a desktop control that does not apply is drawn dimmer than a live one, wit
   await ui.press({ key: 'back' })
   await ui.unmount()
 
-  // The terminal draws as before: every control dim, an off one in the faint colour.
+  // The terminal draws every control dim, its key letter too, and an off one's label in the faint colour.
   const terminal = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
   await terminal.press({ key: 'row-tool-results' })
   await terminal.press({ key: 'item-r:tu2' })
   expect((await terminal.find({ key: 'back' }))?.props.dimColor).toBe(true)
   const off = await terminal.find({ key: 'prev' })
-  expect(off?.props.dimColor).toBeUndefined()
+  expect(off?.props.dimColor).toBe(true)
   expect((off?.children ?? []).filter(isNode).map(child => child.props?.color)).toEqual(['subtle'])
   await terminal.unmount()
 })

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownSegment, ContextBreakdownSnapshot } from '../types'
+import { emptyChars } from '../hooks/classify'
 import type { MessageLike } from '../hooks/classify'
 import {
   addedSince,
@@ -9,6 +10,7 @@ import {
   isStale,
   MAX_API_MESSAGES,
   nextSnapshot,
+  splitConversation,
   sumTokens,
   usedTokens,
   windowOf,
@@ -299,6 +301,21 @@ describe('the column added', () => {
     ])
     // Prompts shrank and Claude output stayed: neither is in it. Task reports were not in the base: from zero.
     expect(addedSince(baseOf(before), after)).toEqual({ 'tool-results': 14_000, 'task-reports': 300 })
+  })
+
+  test('a split conversation segment counts only when its own characters grew', () => {
+    const chars = { ...emptyChars(), 'compaction-summary': 40_000, 'tool-results': 320_000, 'claude-output': 40_000 }
+    const base = snap(splitConversation(100_000, chars))
+    // 60k more tool-result characters, measured at fewer characters a token:
+    // the shares of the other segments grow too, but their content did not.
+    const after = snap(splitConversation(130_000, { ...chars, 'tool-results': 380_000 }))
+    expect(after.conversation.find(segment => segment.id === 'compaction-summary')!.tokens).toBeGreaterThan(10_000)
+    const added = addedSince(baseOf(base), after)!
+    expect(Object.keys(added)).toEqual(['tool-results'])
+    expect(added['tool-results']).toBe(after.conversation.find(segment => segment.id === 'tool-results')!.tokens - 80_000)
+    // The base keeps the characters of each split segment, and a baseline segment has none.
+    expect(baseOf(base)!.segments.find(segment => segment.id === 'tool-results')?.chars).toBe(320_000)
+    expect(baseOf(base)!.segments.find(segment => segment.id === 'system')?.chars).toBeUndefined()
   })
 
   test('no column without a base, from an estimate, or when nothing grew', () => {

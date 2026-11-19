@@ -381,6 +381,18 @@ describe('Not loaded by server', () => {
     ])
   })
 
+  test('without a category figure the MCP tools row shows the servers’ sum, as their list does', () => {
+    const servers = [server('tickets', 4, 4000), server('notes', 2, 1000)]
+
+    expect(notLoadedRows([{ name: 'MCP tools (deferred)', tokens: 0 }], servers, isMcp)).toEqual([
+      { name: 'MCP tools (deferred)', tokens: 5000, servers },
+    ])
+    expect(notLoadedRows([{ name: 'System tools (deferred)', tokens: 32_000 }], servers, isMcp)).toEqual([
+      { name: 'System tools (deferred)', tokens: 32_000, servers: [] },
+      { name: 'MCP tools', tokens: 5000, servers },
+    ])
+  })
+
   test('the MCP tools row counts servers and tools, and drops the tools, then the counts, where they do not fit', () => {
     const servers = [server('tickets', 690, 400_000), ...Array.from({ length: 29 }, (_, i) => server(`s${i}`, i === 0 ? 6 : 0, 100))]
     const row = (columns: number) => serversRowText(tableLayout(columns, 32), 'MCP tools', servers).trimEnd()

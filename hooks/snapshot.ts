@@ -65,7 +65,7 @@ export function splitConversation(
     SPLIT_IDS.map(id => chars[id]),
   )
 
-  return SPLIT_IDS.map((id, index) => ({ id, tokens: parts[index] ?? 0 }))
+  return SPLIT_IDS.map((id, index) => ({ id, tokens: parts[index] ?? 0, chars: chars[id] }))
 }
 
 /** Estimates conversation tokens from characters with a known ratio. */
@@ -75,7 +75,7 @@ export function estimateConversation(
 ): ContextBreakdownSegment[] {
   const ratio = charsPerToken > 0 ? charsPerToken : DEFAULT_CHARS_PER_TOKEN
 
-  return SPLIT_IDS.map(id => ({ id, tokens: Math.round(chars[id] / ratio) }))
+  return SPLIT_IDS.map(id => ({ id, tokens: Math.round(chars[id] / ratio), chars: chars[id] }))
 }
 
 /**
@@ -170,7 +170,11 @@ export function baseOf(snapshot: ContextBreakdownSnapshot | null): ContextBreakd
     return null
   }
 
-  return { segments: [...snapshot.baseline, ...snapshot.conversation].map(({ id, tokens }) => ({ id, tokens })) }
+  return {
+    segments: [...snapshot.baseline, ...snapshot.conversation].map(({ id, tokens, chars }) =>
+      chars === undefined ? { id, tokens } : { id, tokens, chars },
+    ),
+  }
 }
 
 /** The tokens each segment gained since the base; a segment that did not grow is not in it. */
@@ -184,6 +188,10 @@ export type Added = Partial<Record<ContextBreakdownSegmentId, number>>
  * which the base no longer holds). Null too when one side has the
  * conversation as one segment and the other has it split: their segments
  * do not compare.
+ *
+ * The split conversation segments share the measured tokens by characters,
+ * so a segment's tokens move when another segment grows. Such a segment
+ * counts only when its own characters grew too.
  */
 export function addedSince(base: ContextBreakdownBase | null, snapshot: ContextBreakdownSnapshot): Added | null {
   if (base === null || snapshot.isEstimate || usedTokens(snapshot) < sumTokens(base.segments)) {
@@ -194,12 +202,14 @@ export function addedSince(base: ContextBreakdownBase | null, snapshot: ContextB
   if (isWhole(base.segments) !== isWhole(now)) {
     return null
   }
-  const before = new Map(base.segments.map(segment => [segment.id, segment.tokens]))
+  const before = new Map(base.segments.map(segment => [segment.id, segment]))
   const added: Added = {}
   let grew = false
   for (const segment of now) {
-    const gain = segment.tokens - (before.get(segment.id) ?? 0)
-    if (gain > 0) {
+    const old = before.get(segment.id)
+    const gain = segment.tokens - (old?.tokens ?? 0)
+    const hasGrown = segment.chars === undefined || segment.chars > (old?.chars ?? 0)
+    if (gain > 0 && hasGrown) {
       added[segment.id] = gain
       grew = true
     }

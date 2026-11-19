@@ -48,6 +48,7 @@ import {
   serversCrumb,
   serversRowText,
   showsHotkeys,
+  TABLE_MAX_COLUMNS,
   tableLayout,
   windowText,
   withAdded,
@@ -779,8 +780,12 @@ function listBody(
   // The facts and the column name share a row where they fit on one.
   const joined = column === null ? null : factsRow(table, facts, column)
   const servers = def === null ? serverNames(table, list.rows) : null
-  // On the terminal the text below the table keeps to the table's width.
-  const noteCells = swaps ? rowCells(table) : null
+  // On the terminal the definition wraps at the widest a table may be in this
+  // pane, whatever the rows: short names must not squeeze it into a column.
+  const textCells = swaps ? Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)) : null
+  // The text below the table keeps to the table's width. A list with no rows
+  // has no table: its notes wrap as the definition does.
+  const noteCells = swaps ? (list.rows.length > 0 ? rowCells(table) : textCells) : null
   const hidden =
     list.hiddenItems === 0
       ? null
@@ -799,8 +804,8 @@ function listBody(
   return (
     <Box flexDirection="column">
       {crumbLine(el, list, snapshot, total, columns, palette)}
-      {/* What the list holds, in the table's width on the terminal, as the text below the table. */}
-      {noteBelow(el, sentence(def === null ? NOT_LOADED_DEF.definition : def.definition), noteCells)}
+      {/* What the list holds. */}
+      {noteBelow(el, sentence(def === null ? NOT_LOADED_DEF.definition : def.definition), textCells)}
       {joined === null ? (
         <Text dimColor>{facts}</Text>
       ) : (
@@ -808,11 +813,14 @@ function listBody(
           {joined}
         </Text>
       )}
-      {list.note !== null && (
-        <Text dimColor wrap="wrap">
-          {list.note}
-        </Text>
-      )}
+      {list.note !== null &&
+        (list.rows.length > 0 ? (
+          <Text dimColor wrap="wrap">
+            {list.note}
+          </Text>
+        ) : (
+          noteBelow(el, list.note, noteCells)
+        ))}
       {joined === null && column !== null && (
         <Text mono dimColor>
           {' '.repeat(table.mark)}
@@ -829,8 +837,9 @@ function listBody(
           const names = servers?.[at] ?? itemNames(table, row.title, row.detail, row.pathIn)
           const inner = [
             mark,
-            // A row that does not open is dim all through, as a line that is
-            // not a control, while other rows on the page open (`marksClosed`).
+            // A row that does not open has a dim title, as a line that is not
+            // a control, while other rows on the page open (`marksClosed`).
+            // Its bar keeps the segment's colour.
             index === null && marksClosed ? (
               <Text mono dimColor>
                 {names.title}
@@ -1318,11 +1327,12 @@ function keysLine(
     }
 
     // On the terminal a control that does not apply draws its label in
-    // the theme's faint colour, a step below the others' dim.
+    // the theme's faint colour, a step below the others' dim. It is dim as
+    // well, so its key letter is no brighter than a live control's.
     return control.isOn ? (
       <Button {...props} dimColor />
     ) : (
-      <Button {...props}>
+      <Button {...props} dimColor>
         <Text color="subtle">{control.label}</Text>
       </Button>
     )

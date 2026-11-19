@@ -195,6 +195,8 @@ export type NotLoadedRow = {
  * The rows of Not loaded: each category above zero, and the MCP tools one
  * with every server. The servers keep MCP tools in the block even with no
  * figure of its own; with no such category at all they get a row named so.
+ * Without a category figure the row shows the servers' sum, the figure their
+ * list shows (`segmentTotal`), where it is above zero.
  */
 export function notLoadedRows(
   deferred: readonly ContextBreakdownDeferred[],
@@ -202,16 +204,22 @@ export function notLoadedRows(
   isMcp: (name: string) => boolean,
 ): NotLoadedRow[] {
   let placed = servers.length === 0
+  const sum = servers.reduce((total, server) => total + server.tokens, 0)
+  const serversFigure = sum > 0 ? sum : null
   const rows: NotLoadedRow[] = []
   for (const category of deferred) {
     const takes = !placed && isMcp(category.name)
     if (category.tokens > 0 || takes) {
-      rows.push({ name: category.name, tokens: category.tokens > 0 ? category.tokens : null, servers: takes ? [...servers] : [] })
+      rows.push({
+        name: category.name,
+        tokens: category.tokens > 0 ? category.tokens : takes ? serversFigure : null,
+        servers: takes ? [...servers] : [],
+      })
       placed ||= takes
     }
   }
   if (!placed) {
-    rows.push({ name: 'MCP tools', tokens: null, servers: [...servers] })
+    rows.push({ name: 'MCP tools', tokens: serversFigure, servers: [...servers] })
   }
 
   return rows

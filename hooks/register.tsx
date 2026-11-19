@@ -61,7 +61,7 @@ import type { Link } from './scroll'
 // are written here. A tag declines a value an earlier version stored (it
 // outlives a reload); change it whenever the value's fields change.
 const snapshotAtom = atom({ plugin: 'context-breakdown', key: 'snapshot' } as const, null, {
-  shape: 'snapshot-2',
+  shape: 'snapshot-3',
 })
 const viewAtom = atom({ plugin: 'context-breakdown', key: 'view' } as const, LEVEL_1, {
   shape: 'view-6',
@@ -80,7 +80,7 @@ const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, nul
 })
 // The measurement at the person's last prompt (see `base` in types).
 const baseAtom = atom({ plugin: 'context-breakdown', key: 'base' } as const, null, {
-  shape: 'base-1',
+  shape: 'base-2',
 })
 
 /**

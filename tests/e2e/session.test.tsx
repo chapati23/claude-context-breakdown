@@ -257,6 +257,14 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   await w.clock.advance(0)
   expect(hasColumn(await paneAt(88))).toBe(false)
 
+  // A prompt the person sends through Remote Control starts again too.
+  grownBy(w, 10_000)
+  await measure()
+  expect(hasColumn(await paneAt(88))).toBe(true)
+  await prompt($, { origin: { kind: 'bridge' } })
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
   // A compaction removes the base: a later measurement that is larger than
   // the base and has a larger Tool results draws no column.
   w.messages = SUMMARY

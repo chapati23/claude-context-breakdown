@@ -130,7 +130,7 @@ type Drawn = { props: Record<string, unknown>; children: readonly unknown[] }
 
 /**
  * Whether a control of the key line is drawn as not applying now. On the
- * terminal: no dim label of its own, but a child Text in the theme's faint
+ * terminal: dim, as a live control, and a child Text in the theme's faint
  * colour. Elsewhere the native button drops a child: a dim label, and no child.
  */
 export function isOff(button: Drawn | undefined, surface: string = 'terminal'): boolean {
@@ -140,7 +140,7 @@ export function isOff(button: Drawn | undefined, surface: string = 'terminal'): 
   if (surface !== 'terminal') {
     return button.props.dimColor === true && button.children.length === 0
   }
-  if (button.props.dimColor === true) {
+  if (button.props.dimColor !== true) {
     return false
   }
 

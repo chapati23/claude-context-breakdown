@@ -1,11 +1,12 @@
 // Journey 3, a file read to the end: /ctx tool opens the Tool results, a Read
 // result opens as loaded, the file changes in the world, the pane notices it,
 // shows the file on disk, switches between formatted and raw, copies the path,
-// mentions it in the prompt, and goes back and closes.
+// mentions it in the prompt, steps to the item before it, and goes back and
+// closes.
 
 import { expect, test } from 'claude-code/testing'
 
-import { NOTES } from '../fixtures'
+import { NOTES, isOff } from '../fixtures'
 import { chat, flatten, mountPane, ringOf, session, tap } from './helpers'
 import { factsOf, keysWith, level2, level3 } from './journeys'
 
@@ -30,8 +31,12 @@ for (const surface of SURFACES) {
     // The Read result as the conversation carried it: with its own line numbers.
     const loaded = level3(await tap(ui, 'item-r:tu1', opts))
     expect(loaded.crumb).toBe('██ Tool results › Read  ~/project/notes.txt')
-    expect(factsOf(loaded.facts)).toMatchObject({ form: 'raw', source: 'as loaded' })
+    expect(factsOf(loaded.facts)).toMatchObject({ place: 'item 2 of 2', form: 'raw', source: 'as loaded' })
     expect(loaded.notes).toEqual([])
+    // The last item of its list, of one page: n has nowhere to go; p steps back.
+    expect((await ui.find({ key: 'next' }))?.props.label).toBe('Next item')
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(true)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(false)
     expect(loaded.body).toEqual(['     1\talpha', '     2\tbeta'])
     // Opening reads the file once, to compare it with what was loaded.
     expect(new Set(w.reads)).toEqual(new Set([NOTES]))
@@ -58,7 +63,7 @@ for (const surface of SURFACES) {
     const formatted = level3(await tap(ui, 'format', opts))
     expect(factsOf(formatted.facts)).toMatchObject({ form: 'formatted', source: 'on disk' })
     expect(formatted.body).toEqual(['```txt', 'alpha', 'BETA', 'gamma', '```'])
-    expect(formatted.controls.join(' ')).toContain('Raw text')
+    expect(formatted.controls.join(' ')).toContain('Raw')
     const raw = level3(await tap(ui, 'format', opts))
     expect(factsOf(raw.facts)).toMatchObject({ form: 'raw', source: 'on disk' })
     expect(raw.body).toEqual(['alpha', 'BETA', 'gamma'])
@@ -76,9 +81,14 @@ for (const surface of SURFACES) {
     expect(level3(await tap(ui, 'mention', opts)).notes).toContain('Put the path in the prompt.')
     expect(w.filled).toEqual([`@${NOTES} `])
 
-    // Back to the items with the ring on the Read result, back to the segments, close.
+    // p steps to the item before it in the list: the Bash result, from its top, as loaded.
+    const bash = level3(await tap(ui, 'prev', opts))
+    expect(bash.crumb).toMatch(/^██ Tool results › Bash {2}/)
+    expect(factsOf(bash.facts)).toMatchObject({ place: 'item 1 of 2', source: 'as loaded' })
+
+    // Back to the items with the ring on the Bash result, back to the segments, close.
     expect(level2(await tap(ui, 'back', opts)).name).toBe('Tool results')
-    expect(await ringOf(ui)).toBe('item-r:tu1')
+    expect(await ringOf(ui)).toBe('item-r:tu2')
     expect(await keysWith(ui, 'row-')).toEqual([])
     const one = await tap(ui, 'back', opts)
     expect(one[0]).toMatch(/^\d+k used · /)

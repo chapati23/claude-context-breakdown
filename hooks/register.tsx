@@ -25,6 +25,7 @@ import {
   keepsFocus,
   rebuildView,
   refreshItem,
+  stepItem,
   toLevel1,
   toLevel1With,
   toggleFormat,
@@ -32,7 +33,7 @@ import {
   toggleSource,
 } from './navigate'
 import type { NavIo } from './navigate'
-import { paneTree, ringKey } from './pane'
+import { hiddenKey, paneTree, pastHidden, ringKey } from './pane'
 import { paletteFor } from './palette'
 import { createRefresher } from './refresh'
 import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from './ring'
@@ -49,7 +50,8 @@ import {
   stepAnswer,
   stepOf,
 } from './scroll'
-import { matchSegment } from './segments'
+import { matchList } from './segments'
+import { baseOf } from './snapshot'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
 import { bandModelFor } from './view'
 import type { LayoutPart, SegmentPart } from './layout'
@@ -59,10 +61,10 @@ import type { Link } from './scroll'
 // are written here. A tag declines a value an earlier version stored (it
 // outlives a reload); change it whenever the value's fields change.
 const snapshotAtom = atom({ plugin: 'context-breakdown', key: 'snapshot' } as const, null, {
-  shape: 'snapshot-2',
+  shape: 'snapshot-3',
 })
 const viewAtom = atom({ plugin: 'context-breakdown', key: 'view' } as const, LEVEL_1, {
-  shape: 'view-5',
+  shape: 'view-7',
 })
 const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, null, {
   shape: 'theme-1',
@@ -75,6 +77,10 @@ const OFF_ROWS = ''
 // The key of the pane's element under the focus ring (see `ring` in types).
 const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, null, {
   shape: 'ring-1',
+})
+// The measurement at the person's last prompt (see `base` in types).
+const baseAtom = atom({ plugin: 'context-breakdown', key: 'base' } as const, null, {
+  shape: 'base-2',
 })
 
 /**
@@ -92,6 +98,14 @@ let mayHoldFocus = false
 
 /** The timer that ends the keyboard chip a few seconds after the last focus move. */
 const chipHold = createChipHold()
+
+/**
+ * When the last compaction or `/clear` of this load ended, in `$.clock.now()`
+ * milliseconds. The snapshot from before it stays in state until the next
+ * measurement writes, or after one that failed: it is no base for the column
+ * `added` (`baseOf`). A reload resets it.
+ */
+let resetAt: number | null = null
 
 /** The j and k presses whose scroll is under way; empty between presses. */
 const steps = createSteps()
@@ -537,6 +551,8 @@ export const register: Register = on => {
     void quietly(update($, focusAtom, () => null))
     ring.forget()
     void quietly(writeRing($, () => null))
+    // A new session has no prompt yet: level 1's column `added` has no base.
+    void quietly(update($, baseAtom, () => null))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
     void quietly(
@@ -562,7 +578,9 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items.
+  // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items,
+  // and `/ctx not` the servers whose tools are not loaded (with none, the
+  // segments and the note for a word that matches nothing).
   // `/ctx` alone on an open pane only gives it the keyboard: it is the one
   // key path to a pane that lost it (ctrl+x tab reaches the bar only). Its
   // trees then name no ring of their own (`keepsPlace`), and on the terminal
@@ -576,7 +594,7 @@ export const register: Register = on => {
       write: fn => writeView($, fn),
       readFile: path => $.fs.read(path),
     }
-    const segment = matchSegment(e.args)
+    const segment = matchList(e.args)
     const hasWord = e.args.trim() !== ''
     let isOpen = false
     if (!hasWord) {
@@ -749,6 +767,14 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
     if (!isSubagent(e) && e.trigger !== 'precompute' && result.skip === undefined) {
+      // The content the base counted is gone: no column `added` until the
+      // next prompt, and none from the snapshot measured before now.
+      try {
+        resetAt = await $.clock.now()
+      } catch {
+        // No clock: only the cleared base guards the column.
+      }
+      await quietly(update($, baseAtom, () => null))
       // The plain usage call is free; its token figure is the one that stays
       // stale until the next model response.
       let staleTokens: number | null = null
@@ -783,10 +809,16 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     const result = await next(e)
     if (e.reason === 'clear') {
+      try {
+        resetAt = await $.clock.now()
+      } catch {
+        // No clock: the snapshot written empty below guards the column.
+      }
       await quietly(writeView($, afterClear))
       mayHoldFocus = false
       chipHold.stop()
       await quietly(update($, focusAtom, () => null))
+      await quietly(update($, baseAtom, () => null))
       await refresher.cleared({
         after: (ms, fn) => $.clock.after(ms, fn),
         now: () => $.clock.now(),
@@ -853,7 +885,14 @@ export const register: Register = on => {
   // A ring that moves in a pane means the band no longer holds the keyboard.
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
-    const result = await next(e)
+    // No ring shows on a hidden Button that only takes a letter (pane.tsx,
+    // `hiddenKeys`): a Tab or Shift+Tab onto one lands the ring on the next
+    // element it can show on instead (`pastHidden`), so every press shows it.
+    // The reads wait only for such a move.
+    const isHidden = e.requestId === PANE_ID && e.plugin === PLUGIN && e.element?.startsWith(hiddenKey('')) === true
+    const past = isHidden ? pastHidden(e.element, await read($, ringAtom), await read($, viewAtom), await read($, snapshotAtom)) : null
+    const landing = past === null ? e : { ...e, element: past }
+    const result = await next(landing)
     // Our pane's ring moved: onto `element`, whose row is drawn in one
     // highlight, or onto one of the engine's stops (the close mark), which
     // has no element. That is noted as no row, or the row the ring left
@@ -868,7 +907,7 @@ export const register: Register = on => {
       (drawnOn.size === 0 || drawnOn.has('terminal')) &&
       notesRing(e.origin, PLUGIN, ring.busy())
     ) {
-      const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
+      const key = landing.plugin === PLUGIN && landing.element !== undefined ? landing.element : OFF_ROWS
       // The person's move stands: a target of ours that still waits is older.
       if (e.origin.kind === 'person') {
         ring.drop()
@@ -889,14 +928,40 @@ export const register: Register = on => {
   // it back without a focus event): drop the chip at once rather than when
   // its timer ends. Not on each keystroke (prompt.edit): that would put this
   // mod on the typing path.
-  on('prompt.submit', ($, e, next) => {
+  //
+  // A prompt the person submits also sets the base of level 1's column
+  // `added`: the measurement in state before the prompt, which does not hold
+  // it yet. Only the person's own words: typed at the terminal, from Remote
+  // Control, or in an SDK host's own turn (the desktop app and VS Code are
+  // probably such hosts). A slash command (`/ctx` opens the pane and must not empty
+  // the column), a task notification, a schedule, a peer, a plugin, a prompt
+  // of no known origin or one the person does not see keep the base. So does
+  // a prompt that a hook drops: it never entered. The read starts before
+  // `next` and is not awaited there: the prompt does not wait for the state.
+  on('prompt.submit', async ($, e, next) => {
     if (mayHoldFocus) {
       mayHoldFocus = false
       chipHold.stop()
       void quietly(update($, focusAtom, () => null))
     }
+    const isPersons = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || e.origin.kind === 'sdk'
+    const taken =
+      isPersons && e.command === undefined && e.isMeta !== true
+        ? read($, snapshotAtom).then(snapshot => baseOf(snapshot, resetAt))
+        : null
+    // A prompt that is dropped leaves the read unused: no rejection is left unhandled.
+    void taken?.catch(() => undefined)
+    const result = await next(e)
+    if (taken !== null && result.drop === undefined) {
+      void quietly(
+        (async () => {
+          const base = await taken
+          await update($, baseAtom, () => base)
+        })(),
+      )
+    }
 
-    return next(e)
+    return result
   }).catch(($, e, next) => next(e))
 
   // j and k at levels 1 and 2 on the terminal: the ring one row down or up
@@ -1075,6 +1140,8 @@ export const register: Register = on => {
     const view = await read($, viewAtom)
     shownView = view
     shownSnapshot = snapshot
+    // Only level 1 draws the column `added`: other levels do not redraw on a prompt.
+    const base = view.level === 1 ? await read($, baseAtom) : null
     // The ring's key, read from the state, so a move draws the row lit. Only
     // the terminal draws a lit row; elsewhere the key is not read, so its
     // writes draw nothing.
@@ -1141,6 +1208,9 @@ export const register: Register = on => {
         return thenTop(() => listPage(nav, delta))
       },
       contentPage: delta => thenTop(() => contentPage(nav, delta)),
+      // Keeps the level: off the terminal the focus stays on the pressed
+      // control, as for Next page (`thenTopOf`).
+      stepItem: delta => thenTop(() => stepItem(nav, delta)),
       toggleSource: () => thenTop(() => toggleSource(nav)),
       copy: (path, surface) =>
         quietly(
@@ -1162,7 +1232,7 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow)
+    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow, base)
 
     return tree
   })

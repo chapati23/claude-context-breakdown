@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { keysHint } from '../hooks/pane'
+import { ringWrites } from './e2e/helpers'
 import { CHAT, FOCUSED_PANE, NOTES, PANE, SURFACES, isOff, manyResults, richUsage, world } from './fixtures'
 
 // The kit does not carry a plugin's own `$.ui.scroll` (it rejects the call
@@ -91,8 +92,8 @@ test('on the terminal j and k are hotkeys at every level while the pane has the 
 
         return
       }
-      expect((await ui.find({ key: down }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
-      expect((await ui.find({ key: up }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
+      expect((await ui.find({ key: down }))?.props).toMatchObject({ hotkey: 'j', label: '↓' })
+      expect((await ui.find({ key: up }))?.props).toMatchObject({ hotkey: 'k', label: '↑' })
       const other = down === 'scroll-down' ? ['list-down', 'list-up'] : ['scroll-down', 'scroll-up']
       for (const key of other) {
         expect(await ui.find({ key })).toBeUndefined()
@@ -354,7 +355,8 @@ test('an item of one page: j and k step inside it and never change it', async ($
     await ui.press({ key: 'scroll-up' })
     expect(seen.map(one => one.offset)).toEqual([1, 20, 0])
     expect((await ui.find({ type: 'Code' }))?.props.source).toBe(source)
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(true)
+    // No next page: n would step to the next item, which j never does.
+    expect((await ui.find({ key: 'next' }))?.props.label).toBe('Next item')
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -866,4 +868,47 @@ test('f keeps the line the window shows: the other view opens on the page that h
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
+})
+
+test('on the terminal Tab passes over the hidden Buttons that take a letter: from Close on to the first element, from anywhere else back to Close', async ($, on) => {
+  const writes = ringWrites(on)
+  await scrollWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  const rows = await rowsOf(ui)
+  // Level 1 draws no Back, and takes b with a hidden Button.
+  expect((await ui.find({ key: 'taken-b' }))?.props.hotkey).toBe('b')
+
+  // Tab from Close onto the hidden b: no ring would show there, so it goes on to the first row.
+  await ringOn($, 'close')
+  await ringOn($, 'taken-b')
+  expect(writes.at(-1)).toBe(rows[0])
+  expect(await litRow(ui)).toBe(rows[0])
+  // Shift+Tab from the close mark (an engine stop) onto it: back to Close.
+  await ringOff($)
+  await ringOn($, 'taken-b')
+  expect(writes.at(-1)).toBe('close')
+  expect(await litRow(ui)).toBeUndefined()
+  // Shift+Tab from the first row, where a pane has no close mark before it: Close too.
+  await ringOn($, rows[0]!)
+  await ringOn($, 'taken-b')
+  expect(writes.at(-1)).toBe('close')
+
+  // Level 3 of an item with no file, of one page, and the only item of its
+  // list that opens: p, n, v, c and m are hidden. From Close the ring goes
+  // on to j's control, the first element: the text has one page.
+  await ui.press({ key: 'row-prompts' })
+  const [prompt] = await rowsOf(ui)
+  await ui.press({ key: prompt! })
+  const hidden = (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('taken-'))
+  expect(hidden).toEqual(['taken-p', 'taken-n', 'taken-v', 'taken-c', 'taken-m'])
+  await ringOn($, 'close')
+  await ringOn($, 'taken-v')
+  expect(writes.at(-1)).toBe('scroll-down')
+  await ringOff($)
+  await ringOn($, 'taken-m')
+  expect(writes.at(-1)).toBe('close')
+  // Any other element stays where the person put the ring.
+  await ringOn($, 'format')
+  expect(writes.at(-1)).toBe('format')
+  await ui.unmount()
 })

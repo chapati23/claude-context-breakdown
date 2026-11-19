@@ -269,12 +269,12 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
    */
   const keysWritten = () => ring.filter(key => key !== 'null')
 
-  // Level 1: the ring starts on the first row; the key words name Tab alone.
+  // Level 1: the ring starts on the first row; the key words name Enter and the digits only.
   const rows = await rowsOf(ui)
   expect(rows.length).toBeGreaterThan(5)
   expect(await ringOf(ui)).toBe(rows[0])
   await noSteps('level 1')
-  expect(flatten(await ui.drawn()).some(line => line.includes('tab: Move') && !line.includes('↑↓'))).toBe(true)
+  expect(flatten(await ui.drawn()).some(line => line.startsWith('⏎ 1-9') && !line.includes('Move'))).toBe(true)
   ring.length = 0
   expect(await hotkey(ui, 'j')).toBe(false)
   expect(await pressDown()).toContain('no Button')

@@ -497,7 +497,7 @@ test('a desktop pane row is the name in a Button, then a mono bar and figures be
   expect(nameBox.props?.width).toBeGreaterThanOrEqual(HOTKEY_CELLS + cellWidth('Tool results'))
 
   // The key line lists the hotkeys while the pane has the keyboard.
-  expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '⏎ 1-9: Open' })).toBeDefined()
   const focusedRow = withoutHandles(row)
   await ui.unmount()
 
@@ -557,9 +557,10 @@ test('desktop item rows: the Button holds the title; the detail, bar and figures
 
   // A row with no detail (a Bash call's command is its detail) still names itself by its title.
   expect((await ui.find({ key: 'item-r:real2' }))?.props.label).toBe('Bash')
-  // The tenth item has no hotkey: blank cells in the cap's place, inside the name's Box.
-  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBeUndefined()
-  expect(textOf(rowBoxOf(await ui.drawn(), 'item-r:real9')!)).toMatch(/^ {3}/)
+  // The tenth item has 0; the eleventh has no hotkey: blank cells in the cap's place, inside the name's Box.
+  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBe('0')
+  expect((await ui.find({ key: 'item-r:real10' }))?.props.hotkey).toBeUndefined()
+  expect(textOf(rowBoxOf(await ui.drawn(), 'item-r:real10')!)).toMatch(/^ {3}/)
 
   await ui.press({ key: 'item-r:real0' })
   expect(await ui.find({ type: 'Code' })).toBeDefined()
@@ -655,19 +656,19 @@ test('desktop rows keep their parts and columns when Esc takes the keys and a cl
   expect(new Set(segments.map(row => JSON.stringify(row))).size).toBe(1)
   expect(segments[0]!.before).toBe(0)
 
-  // Level 2: a row with a key cap and the tenth row, which has none, keep
-  // their name's Box as wide: the tenth fills the cap's cells with blanks.
+  // Level 2: a row with a key cap and the eleventh row, which has none, keep
+  // their name's Box as wide: the eleventh fills the cap's cells with blanks.
   await ui.press({ key: 'row-tool-results' })
-  const items = await states(['item-r:real0', 'item-r:real8', 'item-r:real9'])
+  const items = await states(['item-r:real0', 'item-r:real9', 'item-r:real10'])
   expect(items.map(row => row.before)).toEqual([0, 0, 0])
   expect(new Set(items.map(row => row.name)).size).toBe(1)
-  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBeUndefined()
-  expect((await ui.find({ key: 'item-r:real8' }))?.props.hotkey).toBe('9')
+  expect((await ui.find({ key: 'item-r:real10' }))?.props.hotkey).toBeUndefined()
+  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBe('0')
   const tree = await ui.drawn()
   const inner = (key: string) => ((rowBoxOf(tree, key)!.children ?? []).filter(isNode).find(holdsButton)!.children ?? []).filter(isNode)
-  expect(inner('item-r:real8').map(part => part.type)).toEqual(['Button'])
-  expect(inner('item-r:real9').map(part => part.type)).toEqual(['Text', 'Button'])
-  expect(textOf(inner('item-r:real9')[0])).toBe(' '.repeat(HOTKEY_CELLS))
+  expect(inner('item-r:real9').map(part => part.type)).toEqual(['Button'])
+  expect(inner('item-r:real10').map(part => part.type)).toEqual(['Text', 'Button'])
+  expect(textOf(inner('item-r:real10')[0])).toBe(' '.repeat(HOTKEY_CELLS))
   // The bar starts where the title and its dim detail end: one column for every row.
   const barStart = (key: string) => {
     const parts = (rowBoxOf(tree, key)!.children ?? []).filter(isNode)
@@ -676,7 +677,7 @@ test('desktop rows keep their parts and columns when Esc takes the keys and a cl
 
     return columnsOf(rowBoxOf(tree, key)!).rest + detail
   }
-  expect(new Set(['item-r:real0', 'item-r:real8', 'item-r:real9'].map(barStart)).size).toBe(1)
+  expect(new Set(['item-r:real0', 'item-r:real9', 'item-r:real10'].map(barStart)).size).toBe(1)
   await ui.press({ key: 'back' })
   await ui.unmount()
 })
@@ -694,10 +695,10 @@ test('a desktop row in a narrow pane keeps its swatch in one place in both state
   await ui.unmount()
 })
 
-test('desktopHotkeyOf: the first nine rows that open get 1-9, in a pane wide enough for hotkeys', () => {
-  expect([0, 3, 8].map(index => desktopHotkeyOf(HOTKEY_CELLS, index))).toEqual(['1', '4', '9'])
-  // The tenth row, and a row that does not open, get none.
-  expect(desktopHotkeyOf(HOTKEY_CELLS, 9)).toBeUndefined()
+test('desktopHotkeyOf: the first nine rows that open get 1-9 and the tenth 0, in a pane wide enough for hotkeys', () => {
+  expect([0, 3, 8, 9].map(index => desktopHotkeyOf(HOTKEY_CELLS, index))).toEqual(['1', '4', '9', '0'])
+  // The eleventh row, and a row that does not open, get none.
+  expect(desktopHotkeyOf(HOTKEY_CELLS, 10)).toBeUndefined()
   expect(desktopHotkeyOf(HOTKEY_CELLS, null)).toBeUndefined()
   // Too narrow for hotkeys: none.
   expect(desktopHotkeyOf(0, 0)).toBeUndefined()
@@ -735,14 +736,18 @@ test('the desktop key line keeps one set of controls in one order when Esc takes
     return keys
   }
   // No Down and Up at any level: Tab moves the ring along the rows, and the
-  // app scrolls the text. The key words name Tab alone.
-  expect(await check()).toEqual(['back', 'close', 'refresh'])
-  expect(await words()).toEqual(['tab: Move', '⏎ or 1-9: Open'])
+  // app scrolls the text. The key words name Enter and the digits. A control
+  // that cannot apply here leaves the line; off the terminal nothing takes
+  // its key. Close is last.
+  expect(await check()).toEqual(['refresh', 'close'])
+  expect(await words()).toEqual(['⏎ 1-9 0: Open'])
   await ui.press({ key: 'row-tool-results' })
-  expect(await check()).toEqual(['back', 'sort', 'prev', 'next', 'close', 'refresh'])
-  expect(await words()).toEqual(['tab: Move', '⏎ or 1-9: Open'])
+  // One page: p and n leave together.
+  expect(await check()).toEqual(['back', 'sort', 'refresh', 'close'])
+  expect(await words()).toEqual(['⏎ 1-9: Open'])
+  // A Bash result has no file: v, c and m leave; p and n stay at level 3.
   await ui.press({ key: 'item-r:tu2' })
-  expect(await check()).toEqual(['back', 'prev', 'next', 'format', 'view', 'copy', 'mention', 'close', 'refresh'])
+  expect(await check()).toEqual(['back', 'prev', 'next', 'format', 'refresh', 'close'])
   await ui.unmount()
 })
 
@@ -801,14 +806,11 @@ test('desktop plain lines line up with the rows, and the table stops at its cap'
     ] as const) {
       expect({ where, label, glyph: span(line(new RegExp(`(^|\\s)${label} `)), glyph).start }).toEqual({ where, label, glyph: color })
     }
-    expect({ where, at: span(line(/^ *Not loaded$/), 'Not loaded').start }).toEqual({ where, at: name })
-    // An MCP server line stands under MCP tools, indented past its name.
-    const server = line(/^ +tickets /)
-    expect({ where, indented: span(server, 'tickets').start > name, end: span(server, '4k').end }).toEqual({
-      where,
-      indented: true,
-      end: tokens,
-    })
+    expect({ where, at: span(line(/^ *Not loaded( · outside the window)?$/), 'Not loaded').start }).toEqual({ where, at: name })
+    // With a server, MCP tools is a row that opens: a Button with its name and counts, no line per server.
+    const label = String((await ui.find({ key: 'row-not-loaded' }))?.props.label)
+    expect({ where, label: /^MCP tools( · 1 server(, 1 tool)?)?$/.test(label) }).toEqual({ where, label: true })
+    expect({ where, server: line(/tickets/) }).toEqual({ where, server: '' })
     // The row never reaches the pane's edge, and stops at the cap.
     expect({ where, fits: cellWidth(row.trimEnd()) < columns }).toEqual({ where, fits: true })
     expect({ where, capped: cellWidth(row.trimEnd()) <= TABLE_MAX_COLUMNS }).toEqual({ where, capped: true })
@@ -892,11 +894,41 @@ test('off the terminal a page or sort change of a list names no row for the focu
   }
 })
 
+test('a step to another item keeps the autoFocus key of level 3, so off the terminal the focus stays on the pressed control', async ($, on) => {
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  w.files = { [NOTES]: 'alpha\nbeta\n' }
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of ['desktop', 'vscode', 'mobile', 'terminal'] as const) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    const ringed = async () => (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)
+    // The terminal's first control is j's; elsewhere it is Back.
+    const first = surface === 'terminal' ? 'scroll-down' : 'back'
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:tu2' })
+    expect(await ringed(), surface).toEqual([first])
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · / }), surface).toBeDefined()
+    expect(await ringed(), surface).toEqual([first])
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('a desktop control that does not apply is drawn dimmer than a live one, with no child', async ($, on) => {
-  await measured($, on)
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  await $.session.start(START)
+  await w.clock.advance(0)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
   await ui.press({ key: 'row-tool-results' })
-  // A list of one page: Back is live, Previous page is off.
+  await ui.press({ key: 'item-r:tu2' })
+  // The first of two items, of one page: Back is live, Prev item is off (no item before it).
   const back = await ui.find({ key: 'back' })
   const prev = await ui.find({ key: 'prev' })
   // The native button shows its label only and drops a child: `dimColor` on
@@ -904,14 +936,16 @@ test('a desktop control that does not apply is drawn dimmer than a live one, wit
   expect({ dim: back?.props.dimColor === true, children: back?.children }).toEqual({ dim: false, children: [] })
   expect({ dim: prev?.props.dimColor === true, children: prev?.children }).toEqual({ dim: true, children: [] })
   await ui.press({ key: 'back' })
+  await ui.press({ key: 'back' })
   await ui.unmount()
 
-  // The terminal draws as before: every control dim, an off one in the faint colour.
+  // The terminal draws every control dim, its key letter too, and an off one's label in the faint colour.
   const terminal = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
   await terminal.press({ key: 'row-tool-results' })
+  await terminal.press({ key: 'item-r:tu2' })
   expect((await terminal.find({ key: 'back' }))?.props.dimColor).toBe(true)
   const off = await terminal.find({ key: 'prev' })
-  expect(off?.props.dimColor).toBeUndefined()
+  expect(off?.props.dimColor).toBe(true)
   expect((off?.children ?? []).filter(isNode).map(child => child.props?.color)).toEqual(['subtle'])
   await terminal.unmount()
 })
@@ -1000,13 +1034,14 @@ test('the mobile app draws key words and key caps only while the pane holds the 
         if (level === 3) {
           await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.startsWith('item-'))!.key! })
         }
-        const want = level === 3 ? ['x', 'n'] : ['1', 'x']
+        const want = level === 3 ? ['x', 'b'] : ['1', 'x']
         if (offers) {
           expect(await caps(), `${state}, level ${level}`).toEqual(expect.arrayContaining(want))
         } else {
           expect(await caps(), `${state}, level ${level}`).toEqual([])
         }
-        expect((await words()).length, `${state}, level ${level}`).toBe(offers && level !== 3 ? 2 : 0)
+        // One word group: Enter and the digits.
+        expect((await words()).length, `${state}, level ${level}`).toBe(offers && level !== 3 ? 1 : 0)
       }
       await ui.press({ key: 'back' })
       await ui.press({ key: 'back' })

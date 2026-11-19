@@ -33,6 +33,12 @@ export type ContextBreakdownSegmentId =
 export type ContextBreakdownSegment = {
   id: ContextBreakdownSegmentId
   tokens: number
+  /**
+   * A split conversation segment's characters, by which it takes its share
+   * of the measured tokens. Absent for a baseline segment and for
+   * `conversation`.
+   */
+  chars?: number
 }
 
 /** One breakdown category of kind `deferred`: listed, not in the window. */
@@ -79,8 +85,26 @@ export type ContextBreakdownSnapshot = {
   measuredAt: number
 }
 
-/** How level 2 orders its items: largest first, or newest first. */
-export type ContextBreakdownSort = 'size' | 'newest'
+/**
+ * The tokens per segment at the person's last prompt, and the characters of
+ * each split conversation segment: what level 1's column `added` counts
+ * from. Taken from a measurement, never from an estimate.
+ */
+export type ContextBreakdownBase = {
+  segments: ContextBreakdownSegment[]
+}
+
+/**
+ * What a level 2 list shows: the items of one segment, or `not-loaded`, the
+ * MCP servers whose tools are not loaded.
+ */
+export type ContextBreakdownListId = ContextBreakdownSegmentId | 'not-loaded'
+
+/**
+ * How level 2 orders its items: largest first, newest first, or (the
+ * `not-loaded` list) most tools first.
+ */
+export type ContextBreakdownSort = 'size' | 'newest' | 'tools'
 
 /** Which text level 3 shows: as the model received it, or the file now. */
 export type ContextBreakdownSource = 'loaded' | 'disk'
@@ -105,11 +129,14 @@ export type ContextBreakdownRow = {
   isOpenable: boolean
 }
 
-/** Level 2: one page of the items of one segment. */
+/** Level 2: one page of the items of one segment, or of the servers not loaded. */
 export type ContextBreakdownList = {
-  segment: ContextBreakdownSegmentId
+  segment: ContextBreakdownListId
   sort: ContextBreakdownSort
-  /** False for baseline segments, which have no time order. */
+  /**
+   * False for baseline segments, which have no time order, and for the
+   * servers when Claude Code gives no token figure for them.
+   */
   canSort: boolean
   /** 0-based. */
   page: number
@@ -118,6 +145,13 @@ export type ContextBreakdownList = {
   /** All items of the segment and their tokens. */
   items: number
   tokens: number
+  /** The `not-loaded` list only: the tools of all its servers. */
+  tools?: number
+  /**
+   * The `not-loaded` list only: the MCP tools category's figure in the
+   * breakdown the rows come from, when the category has one.
+   */
+  categoryTokens?: number
   /** The items and tokens on the pages not shown. */
   hiddenItems: number
   hiddenTokens: number
@@ -170,6 +204,18 @@ export type ContextBreakdownContent = {
 }
 
 /**
+ * Where the open item stands in its list, in the list's order: what the
+ * facts line counts and what n and p step to at the end of the item.
+ */
+export type ContextBreakdownPlace = {
+  /** 0-based, over all items of the list, those that do not open included. */
+  index: number
+  /** The ids of the nearest items before and after it that open, or null at an end. */
+  prev: string | null
+  next: string | null
+}
+
+/**
  * What the pane shows. Only the visible page is kept; a handler rebuilds the
  * rest from the conversation and the breakdown. `seq` counts moves, so a slow
  * move does not overwrite a newer one. `gen` counts rebuilds after a
@@ -182,8 +228,8 @@ export type ContextBreakdownView =
       level: 1
       /** Why the pane fell back here, e.g. an open item left the context. */
       note?: string
-      /** The segment b came back from: its row takes the focus ring. */
-      from?: ContextBreakdownSegmentId
+      /** The list b came back from: its row takes the focus ring. */
+      from?: ContextBreakdownListId
     }
   | {
       seq: number
@@ -193,7 +239,16 @@ export type ContextBreakdownView =
       /** The item b came back from: its row takes the focus ring when it is on the page. */
       from?: string
     }
-  | { seq: number; gen: number; level: 3; list: ContextBreakdownList; item: ContextBreakdownContent }
+  | {
+      seq: number
+      gen: number
+      level: 3
+      /** The page of the list that holds the item, so b puts the ring on its row. */
+      list: ContextBreakdownList
+      item: ContextBreakdownContent
+      /** Absent in a view stored by an earlier version: the next rebuild adds it. */
+      place?: ContextBreakdownPlace
+    }
 
 /**
  * The bar Button that holds the band's keyboard focus ring, so the band can
@@ -224,6 +279,11 @@ declare module 'claude-code' {
        * stay the same.
        */
       ring: Shaped<string | null>
+      /**
+       * The measurement at the person's last prompt, or null: none since the
+       * session started, a compaction or `/clear`.
+       */
+      base: Shaped<ContextBreakdownBase | null>
     }
   }
 }

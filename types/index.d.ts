@@ -80,6 +80,14 @@ export type ContextBreakdownSnapshot = {
 }
 
 /**
+ * The tokens per segment at the person's last prompt: what level 1's column
+ * `added` counts from. Taken from a measurement, never from an estimate.
+ */
+export type ContextBreakdownBase = {
+  segments: ContextBreakdownSegment[]
+}
+
+/**
  * What a level 2 list shows: the items of one segment, or `not-loaded`, the
  * MCP servers whose tools are not loaded.
  */
@@ -238,6 +246,11 @@ declare module 'claude-code' {
        * stay the same.
        */
       ring: Shaped<string | null>
+      /**
+       * The measurement at the person's last prompt, or null: none since the
+       * session started, a compaction or `/clear`.
+       */
+      base: Shaped<ContextBreakdownBase | null>
     }
   }
 }

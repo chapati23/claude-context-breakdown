@@ -5,6 +5,7 @@
 import type { RenderElement, RenderSurface } from 'claude-code'
 
 import type {
+  ContextBreakdownBase,
   ContextBreakdownContent,
   ContextBreakdownList,
   ContextBreakdownListId,
@@ -22,9 +23,11 @@ import type { Palette } from './palette'
 import { levelOneLists } from './ring'
 import { LIST_DOWN, LIST_UP, SCROLL_DOWN, SCROLL_UP } from './scroll'
 import { NOT_LOADED, NOT_LOADED_DEF, isSegmentList, segmentDef, sentence } from './segments'
-import { freeTokens, sumTokens, usedTokens } from './snapshot'
+import { addedSince, freeTokens, sumTokens, usedTokens } from './snapshot'
+import type { Added } from './snapshot'
 import { PANE_TITLE } from './state'
 import {
+  ADDED_NAME,
   SWATCH,
   columnHeader,
   countOf,
@@ -46,6 +49,7 @@ import {
   serversRowText,
   showsHotkeys,
   tableLayout,
+  withAdded,
 } from './table'
 import type { LengthBarParts, NotLoadedRow, Table } from './table'
 import { cellWidth, codeRuns, wrapCells } from './text'
@@ -277,8 +281,12 @@ function leadPart(rows: Rows, color: string, glyph = SWATCH) {
   ]
 }
 
-/** A row's figures: dim at rest, at full strength under the ring or the pointer (`look`). */
-function figuresPart(rows: Rows, tokens: number, of: number | null, look?: RowLook) {
+/**
+ * A row's figures: dim at rest, at full strength under the ring or the
+ * pointer (`look`). `added`: the tokens the row gained since the person's
+ * last prompt, for level 1's column `added`.
+ */
+function figuresPart(rows: Rows, tokens: number, of: number | null, look?: RowLook, added?: number) {
   const { Text } = rows.el
 
   return (
@@ -288,7 +296,7 @@ function figuresPart(rows: Rows, tokens: number, of: number | null, look?: RowLo
       dimColor={look?.lit !== true}
       {...(look === undefined ? {} : { hover: { scope: look.scope, dimColor: false } })}
     >
-      {figuresText(rows.table, tokens, of)}
+      {figuresText(rows.table, tokens, of, added)}
     </Text>
   )
 }
@@ -350,7 +358,7 @@ function groupRows(
   rows: Rows,
   segments: readonly ContextBreakdownSegment[],
   first: number,
-  stats: { used: number; largest: ContextBreakdownSegment | null },
+  stats: { used: number; largest: ContextBreakdownSegment | null; added: Added },
   actions: PaneActions,
 ) {
   const { Button, Text } = rows.el
@@ -379,7 +387,7 @@ function groupRows(
             index: first + index,
             lead: leadPart(rows, color),
             name,
-            rest: [barPart(rows, color, bar), figuresPart(rows, segment.tokens, stats.used)],
+            rest: [barPart(rows, color, bar), figuresPart(rows, segment.tokens, stats.used, undefined, stats.added[segment.id])],
           },
         )
       }
@@ -405,7 +413,7 @@ function groupRows(
             <Text mono>{name}</Text>
           )}
           {barPart(rows, color, bar, look)}
-          {figuresPart(rows, segment.tokens, stats.used, look)}
+          {figuresPart(rows, segment.tokens, stats.used, look, stats.added[segment.id])}
         </Button>
       )
     })
@@ -415,9 +423,10 @@ function groupRows(
  * Group headings are dim: their subtotals must not outweigh the largest row.
  * A heading says what its group is, "Baseline · before your first prompt",
  * where that fits the name and bar columns (`headingText`); a heading has no
- * bar of its own.
+ * bar of its own. `added`: what its rows gained since the person's last
+ * prompt, together, for the column `added`.
  */
-function groupHeading(rows: Rows, title: string, long: string, tokens: number, used: number) {
+function groupHeading(rows: Rows, title: string, long: string, tokens: number, used: number, added?: number) {
   const { Text } = rows.el
   const { table } = rows
 
@@ -426,7 +435,7 @@ function groupHeading(rows: Rows, title: string, long: string, tokens: number, u
       {' '.repeat(table.mark + table.lead)}
       {headingText(table, title, long)}
       <Text mono tabular>
-        {figuresText(table, tokens, used)}
+        {figuresText(table, tokens, used, added)}
       </Text>
     </Text>
   )
@@ -438,6 +447,8 @@ export const CONVERSATION_HEADING = 'Conversation · since the session started'
 export const NOT_LOADED_HEADING = 'Not loaded · outside the window'
 /** Reserve's name where the name column has room for it: it says what the reserve is for. */
 export const RESERVE_NAME = 'Reserve for compaction'
+/** The note below level 1's table while it shows the column `added`: it says what the column counts. */
+export const ADDED_NOTE = `${ADDED_NAME}: tokens since your last prompt.`
 
 /** The deferred category names say "(deferred)"; the heading says "Not loaded". */
 export function withoutDeferred(name: string): string {
@@ -535,6 +546,7 @@ function segmentsBody(
   lit: string | null,
   swaps: boolean,
   caps: boolean,
+  base: ContextBreakdownBase | null,
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
@@ -551,10 +563,16 @@ function segmentsBody(
     'Reserve',
     ...deferred.map(category => withoutDeferred(category.name)),
   ]
-  const table = tableLayout(columns, Math.max(...names.map(cellWidth)))
+  // The column `added` joins the table only when a segment grew since the
+  // person's last prompt and the table has room for it (`withAdded`).
+  const added = addedSince(base, snapshot)
+  const layout = tableLayout(columns, Math.max(...names.map(cellWidth)))
+  const table = added === null ? layout : withAdded(layout, columns)
   const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   const used = usedTokens(snapshot)
-  const stats = { used, largest: largestOf(shown) }
+  const stats = { used, largest: largestOf(shown), added: added ?? {} }
+  const groupAdded = (segments: readonly ContextBreakdownSegment[]) =>
+    segments.reduce((sum, segment) => sum + (stats.added[segment.id] ?? 0), 0)
   const mark = snapshot.isEstimate ? '~' : ''
   // On the terminal the text below the table keeps to the table's width.
   const noteCells = swaps ? rowCells(table) : null
@@ -567,11 +585,11 @@ function segmentsBody(
         {columnHeader(table, `${formatTokens(snapshot.window)} window`, `${mark}% of used`)}
       </Text>
       <Box flexDirection="column" marginTop={1}>
-        {groupHeading(rows, 'Baseline', BASELINE_HEADING, sumTokens(snapshot.baseline), used)}
+        {groupHeading(rows, 'Baseline', BASELINE_HEADING, sumTokens(snapshot.baseline), used, groupAdded(snapshot.baseline))}
         {groupRows(rows, snapshot.baseline, 0, stats, actions)}
       </Box>
       <Box flexDirection="column" marginTop={1}>
-        {groupHeading(rows, 'Conversation', CONVERSATION_HEADING, sumTokens(snapshot.conversation), used)}
+        {groupHeading(rows, 'Conversation', CONVERSATION_HEADING, sumTokens(snapshot.conversation), used, groupAdded(snapshot.conversation))}
         {groupRows(rows, snapshot.conversation, baselineRows, stats, actions)}
       </Box>
       <Box flexDirection="column" marginTop={1}>
@@ -598,6 +616,11 @@ function segmentsBody(
                 ? plainRow(rows, withoutDeferred(category.name), 0, null, null, false)
                 : plainRow(rows, withoutDeferred(category.name), category.tokens, null, null),
           )}
+        </Box>
+      )}
+      {table.added === true && (
+        <Box flexDirection="column" marginTop={1}>
+          {noteBelow(el, ADDED_NOTE, noteCells)}
         </Box>
       )}
       {swaps && (
@@ -1239,6 +1262,8 @@ function keysLine(
  * element asks for the ring here. The engine still gives the pane a ring
  * and brings it into view; the `/ctx` hook then puts the window back.
  * `ringNow`: the key of the element the last focus event gave the ring.
+ * `base`: the measurement at the person's last prompt, for level 1's column
+ * `added`.
  */
 export function paneTree(
   el: Ui,
@@ -1251,6 +1276,7 @@ export function paneTree(
   surface: RenderSurface,
   keepsPlace = false,
   ringNow: string | null = null,
+  base: ContextBreakdownBase | null = null,
 ): RenderElement {
   const { Box, Text } = el
   const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
@@ -1272,7 +1298,7 @@ export function paneTree(
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface), base)
     openRows = levelOneLists(snapshot).length
     if (view.note !== undefined) {
       body = (

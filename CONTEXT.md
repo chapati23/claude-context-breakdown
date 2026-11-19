@@ -66,6 +66,14 @@ _Avoid_: Tooltip, popover, hover title
 The text right of the bar's total that names the largest conversation segment and its share of what is used.
 _Avoid_: Key, caption
 
+**Added**:
+The tokens a segment gained since the person's last prompt, shown in the pane's column `added`.
+_Avoid_: Delta, diff, change
+
+**Base**:
+The measurement at the person's last prompt, from which Added counts.
+_Avoid_: Baseline (a group of segments), reference, snapshot
+
 **Pane**:
 The detail view that lists segments, then the items of one segment, then the content of one item.
 _Avoid_: Panel, sidebar, inspector

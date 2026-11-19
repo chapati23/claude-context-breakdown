@@ -174,6 +174,123 @@ test('J7 terminal: start, measure, tool calls, compaction, /clear, light theme, 
   expect(widget.lines).toEqual((await bandAt($, 'terminal', 100)).lines)
 })
 
+/** A prompt as the engine raises it: the person's Enter, unless `over` says otherwise. */
+function prompt($: Engine, over: Record<string, unknown> = {}) {
+  return $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' }, ...over } as never)
+}
+
+/** A conversation `extra` characters of tool result longer than BURST, measured at about a token a character. */
+function grownBy(w: World, extra: number) {
+  w.usage = usage(80_000 + extra, 54_000 + extra)
+  w.messages = [...BURST, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't3', content: 'g'.repeat(extra) }] }]
+}
+
+test('J7 terminal: the column added counts from the last prompt, and a compaction or /clear removes its base', async ($, on) => {
+  const w = world(on)
+  const paneAt = async (columns: number, surface: Surface = 'terminal') => {
+    const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: columns } } as never)
+    const lines = flatten(await ui.drawn(), { surface, columns })
+    await ui.unmount()
+
+    return lines
+  }
+  /** The growth a line states at its end ("+14k"), or undefined. */
+  const addedIn = (line: string | undefined) => {
+    const figure = line === undefined ? undefined : /\+(\S+)$/.exec(line)?.[1]
+
+    return figure === undefined ? undefined : tokensIn(figure)
+  }
+  const hasColumn = (lines: string[]) => lines.some(line => line.endsWith('% of used  added'))
+  const NOTE = 'added: tokens since your last prompt.'
+  const measure = async () => {
+    await $.session.measure({ context: w.usage.context, rateLimits: [], changed: ['context'] })
+    await w.clock.advance(0)
+  }
+
+  await $.session.start(START)
+  await w.clock.advance(0)
+  // No prompt yet: no base, no column.
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // The person's prompt takes the 66k measurement as the base. Nothing grew yet: no column.
+  await prompt($)
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // The burst adds a 14k tool result. The column shows what each row gained.
+  w.usage = usage(80_000, 54_000)
+  w.messages = BURST
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  await w.clock.advance(3000)
+  const grown = await paneAt(88)
+  expect(hasColumn(grown)).toBe(true)
+  expect(Math.abs(addedIn(grown.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  // The group heading sums its rows; the baseline did not grow, so its heading has no figure.
+  expect(Math.abs(addedIn(grown.find(line => line.includes('Conversation')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  expect(addedIn(grown.find(line => line.includes('Baseline')))).toBeUndefined()
+  expect(addedIn(grown.find(line => line.includes('Free space')))).toBeUndefined()
+  expect(grown).toContain(NOTE)
+  expect(grown.indexOf(NOTE)).toBeLessThan(grown.indexOf('All numbers are estimates.'))
+  // A pane too narrow for 7 more cells keeps its table and draws no column and no note.
+  const narrow = await paneAt(64)
+  expect(hasColumn(narrow)).toBe(false)
+  expect(narrow).not.toContain(NOTE)
+  expect(narrow.some(line => /\+\S+$/.test(line))).toBe(false)
+  // The desktop draws the figure beside the row's native button.
+  const desktop = await paneAt(88, 'desktop')
+  expect(Math.abs(addedIn(desktop.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+
+  // Prompts that are not the person's own words keep the base: a task
+  // notification, a peer, a plugin, a slash command such as /ctx, a prompt
+  // the person does not see. A new base would hide the column, as nothing
+  // grew since.
+  await prompt($, { origin: { kind: 'task-notification' } })
+  await prompt($, { origin: { kind: 'peer' } })
+  await prompt($, { origin: { kind: 'plugin', name: 'other' } })
+  await prompt($, { text: '/ctx', command: { name: 'ctx', args: '' } })
+  await prompt($, { isMeta: true })
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(true)
+
+  // The person's next prompt starts again from the 80k measurement.
+  await prompt($)
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // A compaction removes the base: a later measurement that is larger than
+  // the base and has a larger Tool results draws no column.
+  w.messages = SUMMARY
+  await $.session.compact({ trigger: 'manual', messages: TRANSCRIPT })
+  await w.clock.advance(0)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+  grownBy(w, 20_000)
+  await measure()
+  expect((await paneAt(88))[0]).toMatch(/^100k used · /)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // /clear removes the base too. First a base, and growth that shows.
+  await prompt($)
+  await w.clock.advance(0)
+  grownBy(w, 30_000)
+  await measure()
+  expect(Math.abs(addedIn((await paneAt(88)).find(line => line.includes('Tool results')))! - 10_000)).toBeLessThanOrEqual(1_000)
+  grownBy(w, 40_000)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await w.clock.advance(0)
+  expect((await paneAt(88))[0]).toMatch(/^120k used · /)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+
+  // A new session starts with no base.
+  await prompt($)
+  await w.clock.advance(0)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  grownBy(w, 50_000)
+  await measure()
+  expect((await paneAt(88))[0]).toMatch(/^130k used · /)
+  expect(hasColumn(await paneAt(88))).toBe(false)
+})
+
 test('J7 desktop: the bar is one Client; a click opens the pane; the widget and the pane follow the theme', async ($, on) => {
   const w = world(on)
   await $.session.start(START)

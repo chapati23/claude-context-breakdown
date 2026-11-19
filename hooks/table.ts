@@ -45,7 +45,14 @@ export type Table = {
   /** The length bar after the name and its space; 0 when it is dropped. */
   bar: number
   share: boolean
+  /** Level 1's column `added` after the share, ADDED_CELLS wide; set only by `withAdded`. */
+  added?: true
 }
+
+/** Cells of the column `added`: two spaces and the widest figure, "+4.6k". */
+export const ADDED_CELLS = 7
+/** The column's name in the header line, and the word the note below the table defines. */
+export const ADDED_NAME = 'added'
 
 function figureCells(share: boolean): number {
   return 1 + AMOUNT_CELLS + (share ? 1 + SHARE_CELLS : 0)
@@ -82,9 +89,28 @@ export function tableLayout(columns: number, widestName: number, swatch = true):
   return { mark, lead, name: Math.min(widest, name), bar: 0, share }
 }
 
+/**
+ * The table with the column `added` where it has room: ADDED_CELLS more
+ * inside TABLE_MAX_COLUMNS and the pane's spare cell, after a share column.
+ * The other columns keep their cells: the column never narrows the names or
+ * the bar, so in a narrow pane it does not show.
+ */
+export function withAdded(table: Table, columns: number): Table {
+  const room = Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)
+
+  return table.share && rowCells(table) + ADDED_CELLS <= room ? { ...table, added: true } : table
+}
+
 /** Cells of a whole row, mark included. */
 export function rowCells(table: Table): number {
-  return table.mark + table.lead + table.name + (table.bar > 0 ? 1 + table.bar : 0) + figureCells(table.share)
+  return (
+    table.mark +
+    table.lead +
+    table.name +
+    (table.bar > 0 ? 1 + table.bar : 0) +
+    figureCells(table.share) +
+    (table.added === true ? ADDED_CELLS : 0)
+  )
 }
 
 /** The cells between the mark and the figures: swatch, name and bar. */
@@ -134,14 +160,21 @@ export function lengthBar(tokens: number, largest: number, cells: number, id = '
 /**
  * A row's figures: " 9.5k  4.6%", the share of `of`; a blank share column
  * when `of` is null (Free space, Reserve, Not loaded), so the tokens line up.
+ * With the column `added`, the tokens the row gained since the person's last
+ * prompt follow ("  +14k"), or blanks: on the terminal the blanks keep the
+ * highlight band of a lit row as wide as the table.
  */
-export function figuresText(table: Table, tokens: number, of: number | null): string {
+export function figuresText(table: Table, tokens: number, of: number | null, added?: number): string {
   const amount = ` ${formatTokens(tokens).padStart(AMOUNT_CELLS)}`
   if (!table.share) {
     return amount
   }
+  const share = `${amount} ${(of === null ? '' : formatShare(tokens, of)).padStart(SHARE_CELLS)}`
+  if (table.added !== true) {
+    return share
+  }
 
-  return `${amount} ${(of === null ? '' : formatShare(tokens, of)).padStart(SHARE_CELLS)}`
+  return `${share}${(added !== undefined && added > 0 ? `+${formatTokens(added)}` : '').padStart(ADDED_CELLS)}`
 }
 
 /** "1 server", "1,230 tools": a count, grouped, and its word. */
@@ -273,15 +306,17 @@ export function nameText(table: Table, name: string, short?: string): string {
 
 /**
  * The dim line over the figures that says once what the share column is:
- * `left` in the name's place, `right` ending at the share column's end.
+ * `left` in the name's place, `right` ending at the share column's end, and
+ * ADDED_NAME over the column `added` when the table has it.
  */
 export function columnHeader(table: Table, left: string, right: string): string {
   const head = fit(left, nameAndBarCells(table))
   if (!table.share) {
     return head.trimEnd()
   }
+  const added = table.added === true ? ADDED_NAME.padStart(ADDED_CELLS) : ''
 
-  return `${head}${right.padStart(figureCells(true))}`.trimEnd()
+  return `${head}${right.padStart(figureCells(true))}${added}`.trimEnd()
 }
 
 /**

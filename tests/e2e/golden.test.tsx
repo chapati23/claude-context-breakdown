@@ -102,7 +102,7 @@ function goldenModule(drawings: Record<string, string[]>): string {
 }
 
 test('the terminal pane at levels 1, 2 and 3 reads as its goldens', async ($, on) => {
-  await session($, on, goldenSession())
+  const w = await session($, on, goldenSession())
   const drawings: Record<string, string[]> = {}
 
   for (const level of LEVELS) {
@@ -121,6 +121,36 @@ test('the terminal pane at levels 1, 2 and 3 reads as its goldens', async ($, on
       }
     }
   }
+
+  // Level 1 with the column added: the person's prompt, then a turn that
+  // adds a 14,000-character Bash result and a 1,900-character reply.
+  await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })
+  await w.clock.advance(0)
+  const extra = 16_000
+  const context = w.usage.context
+  const breakdown = context.breakdown!
+  w.usage = {
+    ...w.usage,
+    context: {
+      ...context,
+      tokens: context.tokens! + extra,
+      breakdown: {
+        ...breakdown,
+        categories: breakdown.categories.map(one => (one.name === 'Messages' ? { ...one, tokens: one.tokens + extra } : one)),
+      },
+    },
+  }
+  w.messages = [
+    ...(w.messages ?? []),
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'tu2', name: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'o'.repeat(14_000) }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'c'.repeat(1900) }] },
+  ]
+  await $.session.measure({ context: w.usage.context, rateLimits: [], changed: ['context'] })
+  await w.clock.advance(0)
+  const added = await mountPane($, 'terminal', { columns: 88, isFocused: true })
+  drawings['level1-added/88/focused'] = flatten(await added.drawn(), { marks: true, columns: 88 })
+  await added.unmount()
 
   const keys = new Set([...Object.keys(drawings), ...Object.keys(GOLDEN)])
   const changed = [...keys].filter(key => JSON.stringify(drawings[key]) !== JSON.stringify(GOLDEN[key]))

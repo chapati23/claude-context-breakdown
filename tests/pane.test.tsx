@@ -2,8 +2,8 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import type { ContextBreakdownList, ContextBreakdownSnapshot } from '../types'
-import { CLICK_HINT, KEYS_HINT, describedText, keysHint, openWords, ringKey } from '../hooks/pane'
+import type { ContextBreakdownList, ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
+import { CLICK_HINT, KEYS_HINT, describedText, keysHint, openWords, pastHidden, ringKey } from '../hooks/pane'
 import { flatten } from './e2e/helpers'
 import { DARK } from '../hooks/palette'
 import { TABLE_MAX_COLUMNS } from '../hooks/table'
@@ -376,26 +376,37 @@ test('Not loaded is one MCP tools row that counts the servers, opens their list,
 
 test('the list of servers: one row per server, largest first, s for most tools first, and b back onto its row', async ($, on) => {
   const w = world(on)
-  w.usage = withServers([...TEN_SERVERS, ['many', 50, 100]])
+  const servers = withServers([...TEN_SERVERS, ['many', 50, 100]])
+  // The servers' tools add up to 138k; the category's own figure is 160k.
+  // The list shows the category's figure, as level 1's row does.
+  const categories = servers.context.breakdown!.categories.map(category =>
+    category.name === 'MCP tools (deferred)' ? { ...category, tokens: 160_000 } : category,
+  )
+  w.usage = { ...servers, context: { ...servers.context, breakdown: { ...servers.context.breakdown!, categories } } }
   await $.session.start(START)
   await w.clock.advance(0)
 
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  expect((await ui.find({ key: 'row-not-loaded' }))?.text).toMatch(/ 160k *$/)
   await ui.press({ key: 'row-not-loaded' })
-  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  138k once loaded')
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  160k once loaded')
   expect(await ui.find({ type: 'Text', text: 'Tool schemas that Claude Code loads on demand. Not in the window.' })).toBeDefined()
-  // The facts and the column name share a row; the shares are of the list's total.
-  expect(await ui.find({ type: 'Text', text: /^11 servers · 183 tools · largest first +% of 138k$/ })).toBeDefined()
-  // Rows do not open: no Button, no ring on a row, and the names dim.
+  // The facts and the column name share a row; the shares are of the category's figure.
+  expect(await ui.find({ type: 'Text', text: /^11 servers · 183 tools · largest first +% of 160k$/ })).toBeDefined()
+  // Rows do not open: no Button, no ring on a row. No row opens, so a dim
+  // title would mark nothing: the names are at full strength.
   expect((await ui.findAll({ type: 'Button' })).filter(button => /^item-/.test(button.key ?? ''))).toEqual([])
+  const tickets = (await ui.findAll({ type: 'Text' })).find(text => text.text.trim().startsWith('tickets') && !/tools/.test(text.text))
+  expect(tickets).toBeDefined()
+  expect(tickets?.props.dimColor).toBeUndefined()
   const BAR = /tools? +[█▉▊▋▌▍▎▏]/
   const rows = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => BAR.test(text))
   expect(rows).toHaveLength(11)
-  expect(rows[0]).toMatch(/^ +tickets +40 tools +█+ +40k +29%$/)
+  expect(rows[0]).toMatch(/^ +tickets +40 tools +█+ +40k +25%$/)
   expect(rows[2]).toMatch(/^ +red team +20 tools /)
   expect(rows[1]).toMatch(/a-server-name.*… +30 tools /)
-  expect(rows.find(row => /^ +many /.test(row))).toMatch(/^ +many +50 tools +[█▌]+ +5k +3\.6%$/)
-  expect(rows[10]).toMatch(/^ +clock +1 tool +▎ +1k +0\.7%$/)
+  expect(rows.find(row => /^ +many /.test(row))).toMatch(/^ +many +50 tools +[█▌]+ +5k +3\.1%$/)
+  expect(rows[10]).toMatch(/^ +clock +1 tool +▎ +1k +0\.6%$/)
   expect(rows.join('\n')).not.toMatch(/\x1b|\t|\x9b|​|‮|1m|loaded-only/)
   // The bar is the neutral grey, no segment's colour.
   const bar = (await ui.findAll({ type: 'Text' })).find(text => /^█+$/.test(text.text))
@@ -428,7 +439,7 @@ test('the list of servers: one row per server, largest first, s for most tools f
   await ui.unmount()
 })
 
-test('/ctx not, and any start of "not loaded", opens the servers; with none, the segments with the note for no match', async ($, on) => {
+test('/ctx not, not-loaded and the starts of "not loaded" open the servers; the words that named a segment before still do', async ($, on) => {
   const w = world(on)
   w.usage = withServers([['tickets', 4, 1000]])
   await $.session.start(START)
@@ -436,17 +447,27 @@ test('/ctx not, and any start of "not loaded", opens the servers; with none, the
   const run = (args: string) =>
     $.command.run({ command: 'ctx', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
 
-  for (const args of ['not', 'n', 'not loaded', 'NOT L', 'not-loaded']) {
+  // "not" is a name of the list: an exact name wins over a start of "Notifications".
+  for (const args of ['not', 'NOT', 'not l', 'not loaded', 'NOT L', 'not-loaded', 'not-']) {
     await run(args)
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-    expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toMatch(/^Context › Not loaded › MCP tools/)
+    expect({ args, crumb: (await ui.find({ type: 'Text', text: /^Context › / }))?.text }).toEqual({
+      args,
+      crumb: expect.stringMatching(/^Context › Not loaded › MCP tools/),
+    })
     await ui.unmount()
   }
-  // A longer start of "Notifications" still names that segment.
-  await run('noti')
-  const notifications = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await notifications.find({ type: 'Text', text: /^Context › / }))?.text).toMatch(/System notifications/)
-  await notifications.unmount()
+  // The segments keep their matches and their order, and the list comes last:
+  // a start that named System notifications before the list existed still does.
+  for (const args of ['n', 'no', 'N', 'noti', 'notif']) {
+    await run(args)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect({ args, crumb: (await ui.find({ type: 'Text', text: /^Context › / }))?.text }).toEqual({
+      args,
+      crumb: expect.stringMatching(/System notifications/),
+    })
+    await ui.unmount()
+  }
 
   w.usage = usage(66_000)
   await run('')
@@ -974,4 +995,40 @@ test('ringKey: the row b came back from when it is shown, else the first; at lev
   // On another page now: the first row of this one.
   expect(ringKey({ seq: 1, gen: 0, level: 2, list, from: 'z' }, snapshot, true)).toBe('item-b')
   expect(ringKey({ seq: 1, gen: 0, level: 2, list: { ...list, rows: [row('a', false)] } }, snapshot, true)).toBe('list-down')
+
+  // pastHidden: a Tab onto a hidden Button from Close goes on to the first
+  // element; from anywhere else, back to Close. Other elements stay.
+  const level2 = { seq: 1, gen: 0, level: 2, list, from: 'c' } as const
+  expect(pastHidden('taken-b', 'close', level1, snapshot)).toBe('row-system')
+  expect(pastHidden('taken-p', 'close', level2, snapshot)).toBe('item-b')
+  expect(pastHidden('taken-p', 'close', { ...level2, list: { ...list, rows: [row('a', false)] } }, snapshot)).toBe('list-down')
+  for (const before of [null, '', 'row-system', 'refresh', 'list-down']) {
+    expect(pastHidden('taken-b', before, level1, snapshot)).toBe('close')
+  }
+  for (const element of [undefined, 'close', 'row-system', 'list-down']) {
+    expect(pastHidden(element, 'close', level1, snapshot)).toBeNull()
+  }
+})
+
+test('pastHidden at level 3: from Close on to the Next page button below the text where it is drawn, else to j', () => {
+  const list = {
+    segment: 'tool-results',
+    sort: 'size',
+    canSort: true,
+    page: 0,
+    pages: 1,
+    rows: [],
+    items: 1,
+    tokens: 1,
+    hiddenItems: 0,
+    hiddenTokens: 0,
+    note: null,
+  } as const satisfies ContextBreakdownList
+  const item = { page: 0, pages: 1 } as unknown as Extract<ContextBreakdownView, { level: 3 }>['item']
+  const level3 = { seq: 1, gen: 0, level: 3, list, item } as const
+  expect(pastHidden('taken-v', 'close', level3, null)).toBe('scroll-down')
+  expect(pastHidden('taken-v', 'close', { ...level3, item: { ...item, pages: 2 } }, null)).toBe('next-below')
+  // The last page has no button below its text.
+  expect(pastHidden('taken-v', 'close', { ...level3, item: { ...item, page: 1, pages: 2 } }, null)).toBe('scroll-down')
+  expect(pastHidden('taken-m', 'next-below', { ...level3, item: { ...item, pages: 2 } }, null)).toBe('close')
 })

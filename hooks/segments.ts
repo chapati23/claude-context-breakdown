@@ -181,30 +181,38 @@ export function sentence(definition: string): string {
  * be read, and then its level 2 holds nothing.
  */
 export function matchSegment(word: string): ContextBreakdownSegmentId | null {
+  return matchNames(word, segmentNames()) as ContextBreakdownSegmentId | null
+}
+
+/** The segments a `/ctx` argument can name, in bar order, each with its names in lower case. */
+function segmentNames(): { id: ContextBreakdownListId; names: string[] }[] {
+  return [...BASELINE, ...CONVERSATION]
+    .filter(def => def.id !== 'conversation')
+    .map(def => ({ id: def.id, names: [def.id, def.short.toLowerCase(), def.label.toLowerCase()] }))
+}
+
+/** The first of `lists` with a name equal to `word`, else the first with a name that starts with it. */
+function matchNames(word: string, lists: readonly { id: ContextBreakdownListId; names: string[] }[]): ContextBreakdownListId | null {
   const wanted = word.trim().replace(/\s+/g, ' ').toLowerCase()
   if (wanted === '') {
     return null
   }
-  const defs = [...BASELINE, ...CONVERSATION].filter(def => def.id !== 'conversation')
-  const names = (def: SegmentDef) => [def.id, def.short.toLowerCase(), def.label.toLowerCase()]
-  const exact = defs.find(def => names(def).includes(wanted))
+  const exact = lists.find(list => list.names.includes(wanted))
   if (exact !== undefined) {
     return exact.id
   }
 
-  return defs.find(def => names(def).some(name => name.startsWith(wanted)))?.id ?? null
+  return lists.find(list => list.names.some(name => name.startsWith(wanted)))?.id ?? null
 }
 
 /**
- * The list a `/ctx` argument names. Any start of "not loaded", or of its id,
- * names the servers that are not loaded. That comes first: "not" also starts
- * "Notifications". Any other word names a segment, as `matchSegment` finds it.
+ * The list a `/ctx` argument names: a segment, as `matchSegment` finds it,
+ * or the servers that are not loaded, by "not loaded", "not-loaded" or
+ * "not". The segments keep their matches and their order, and the servers
+ * come last: so "n", "no" and "noti" still name System notifications, as
+ * before the servers had a list. An exact name still wins over a start, so
+ * "not" names the servers.
  */
 export function matchList(word: string): ContextBreakdownListId | null {
-  const wanted = word.trim().replace(/\s+/g, ' ').toLowerCase()
-  if (wanted !== '' && ['not loaded', NOT_LOADED].some(name => name.startsWith(wanted))) {
-    return NOT_LOADED
-  }
-
-  return matchSegment(word)
+  return matchNames(word, [...segmentNames(), { id: NOT_LOADED, names: ['not loaded', NOT_LOADED, 'not'] }])
 }

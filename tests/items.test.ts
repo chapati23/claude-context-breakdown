@@ -18,7 +18,7 @@ import {
 import type { ItemData } from '../hooks/items'
 import { GONE_NOTE, ITEMS_GONE_NOTE, afterClear, back, contentOf, isChangedOnDisk, mention, noMatchNote, openItem, rebuildView } from '../hooks/navigate'
 import type { NavIo } from '../hooks/navigate'
-import { matchSegment } from '../hooks/segments'
+import { matchList, matchSegment } from '../hooks/segments'
 import { MAX_API_MESSAGES } from '../hooks/snapshot'
 import type { ContextBreakdownView } from '../types'
 import {
@@ -311,6 +311,33 @@ describe('/ctx argument', () => {
     expect(matchSegment('conversation')).toBeNull()
     expect(matchSegment('conv')).toBeNull()
     expect(matchSegment('tool   results')).toBe('tool-results')
+  })
+
+  test('the servers that are not loaded come after the segments: a word that names a segment keeps it, and "not" names the servers', () => {
+    // Every start of every name a segment answers to, as matchSegment reads it.
+    const words = new Set<string>()
+    for (const name of ['system', 'mcp', 'global', 'project', 'auto-memory', 'skills', 'other', 'summary', 'tool results', 'skill bodies', 'tasks', 'system notifications', 'notifications', 'injections', 'prompts', 'your prompts', 'claude']) {
+      for (let end = 1; end <= name.length; end += 1) {
+        words.add(name.slice(0, end))
+      }
+    }
+    for (const word of words) {
+      const segment = matchSegment(word)
+      // "not" is a whole name of the list, and only starts "notifications".
+      if (segment !== null && word !== 'not') {
+        expect({ word, list: matchList(word) }).toEqual({ word, list: segment })
+      }
+    }
+    expect(matchList('n')).toBe('injections')
+    expect(matchList('no')).toBe('injections')
+    expect(matchList('noti')).toBe('injections')
+    // An exact name wins over a start of "notifications".
+    expect(matchList('not')).toBe('not-loaded')
+    expect(matchList('Not Loaded')).toBe('not-loaded')
+    expect(matchList('not l')).toBe('not-loaded')
+    expect(matchList('not-')).toBe('not-loaded')
+    expect(matchList('zzz')).toBeNull()
+    expect(matchList('')).toBeNull()
   })
 })
 

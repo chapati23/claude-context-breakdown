@@ -5,7 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
 import { cellWidth } from '../hooks/text'
 import { flatten } from './e2e/helpers'
-import { BAND, CHAT, FOCUSED_PANE, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
+import { BAND, CHAT, FOCUSED_PANE, NOTES, OPENING, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
 const GLOBAL_MD = '/home/user/.claude/CLAUDE.md'
@@ -83,13 +83,32 @@ test('a baseline segment lists its items; it has one order, so s leaves the line
     await ui.press({ key: 'row-mcp' })
     expect(await ui.find({ key: 'sort' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /largest first|newest first/ })).toBeUndefined()
-    // Its rows that do not open are dim all through, title and detail.
-    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
-    expect(title?.props.dimColor).toBe(true)
-    // Tool schemas have no text: rows, not buttons.
+    // Tool schemas have no text: rows, not buttons. The conversation holds no
+    // reminder, so no row opens, and the titles stay at full strength: a dim
+    // title would mark nothing.
     expect(await itemKeys(ui)).toEqual([])
+    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
+    expect(title).toBeDefined()
+    expect(title?.props.dimColor).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /mcp__notes__search +notes/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /MCP server instructions/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('beside a row that opens, a row that does not open has a dim title', async ($, on) => {
+  await chatWorld($, on, OPENING)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'row-mcp' })
+    // The conversation holds the MCP reminder: its instructions open.
+    const opens = await itemKeys(ui)
+    expect(opens).toHaveLength(1)
+    expect((await ui.find({ key: opens[0]! }))?.props.label).toBe('MCP server instructions')
+    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
+    expect(title?.props.dimColor).toBe(true)
     await ui.press({ key: 'back' })
     await ui.unmount()
   }

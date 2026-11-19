@@ -132,6 +132,20 @@ test('only a scroll this plugin asked for is moved', () => {
   expect(stepAnswer(ours, 'context-breakdown', steps)).toBeNull()
 })
 
+test('a scroll of ours to a row other than the top takes no step: the reveal of a row leaves the token for the step', () => {
+  const steps = createSteps()
+  const step = steps.push(1)
+  // The reveal of the row the ring moved to: the engine resolved it to row 9.
+  const reveal = { offset: 9, by: 4, bodyRows: 10, contentRows: 40, origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
+  expect(stepAnswer(reveal, 'context-breakdown', steps)).toBeNull()
+  expect(step.seen).toBe(false)
+  expect(steps.size()).toBe(1)
+  // The step itself, resolved to the top, still moves one row from where the window stands.
+  const ours = { ...toStart(9), origin: { kind: 'plugin' as const, name: 'context-breakdown' } }
+  expect(stepAnswer(ours, 'context-breakdown', steps)).toBe(10)
+  expect(step.seen).toBe(true)
+})
+
 const oursAt = (standing: number, contentRows = 40, bodyRows = 10) => ({
   ...toStart(standing, contentRows, bodyRows),
   origin: { kind: 'plugin' as const, name: 'context-breakdown' },

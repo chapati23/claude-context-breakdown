@@ -13,7 +13,7 @@ import { HOTKEY_CELLS, TABLE_MAX_COLUMNS } from '../hooks/table'
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
-import { BAND, CHAT, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, richUsage, realSession, usage, world } from './fixtures'
+import { BAND, CHAT, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
 import type { World } from './fixtures'
 import { flatten, mountPane } from './e2e/helpers'
 import { level2 } from './e2e/journeys'
@@ -845,6 +845,45 @@ test('a rebuild that puts a new item first keeps the autoFocus key on the row th
   expect(await ringed()).toEqual(before)
   await ui.press({ key: 'back' })
   await ui.unmount()
+})
+
+test('off the terminal a page or sort change of a list names no row for the focus, until the level changes', async ($, on) => {
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = manyResults(45)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ringed = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string; props: Record<string, unknown> }[]> }) =>
+    (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key ?? '')
+
+  for (const surface of ['desktop', 'vscode', 'mobile', 'terminal'] as const) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    const items = async () => (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('item-'))
+    await ui.press({ key: 'row-tool-results' })
+    // A list just opened: its first row asks for the focus.
+    expect(await ringed(ui), surface).toEqual([(await items())[0]])
+
+    // Next page: a desktop moves the focus to an element whose autoFocus key
+    // is new, so a second Enter on "Next page" would open the first item.
+    // Off the terminal no row asks for it, and the focus stays on the control.
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /page 2 of 3$/ }), surface).toBeDefined()
+    expect(await ringed(ui), surface).toEqual(surface === 'terminal' ? [(await items())[0]] : [])
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /page 3 of 3$/ }), surface).toBeDefined()
+    await ui.press({ key: 'sort' })
+    expect(await ringed(ui), surface).toEqual(surface === 'terminal' ? [(await items())[0]] : [])
+
+    // A new level names its element again: the item's first control, and
+    // after b the row the person came from.
+    const opened = (await items())[1]!
+    await ui.press({ key: opened })
+    expect((await ringed(ui)).length, surface).toBe(1)
+    await ui.press({ key: 'back' })
+    expect(await ringed(ui), surface).toEqual([opened])
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
 })
 
 test('a desktop control that does not apply is drawn dimmer than a live one, with no child', async ($, on) => {

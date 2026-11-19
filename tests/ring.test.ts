@@ -146,6 +146,32 @@ test('five quick steps land on the fifth row and a step back on the fourth; the 
   expect(moves.from()).toBeUndefined()
 })
 
+test('the person’s move drops a target that waits: the call under way ends, and no older target is asked for', async () => {
+  const moves = createRingMoves()
+  const asked: string[] = []
+  const answers: (() => void)[] = []
+  const apply = (key: string) =>
+    new Promise<void>(resolve => {
+      asked.push(key)
+      answers.push(resolve)
+    })
+  moves.set('row-1')
+  void moves.focus('row-1', apply)
+  moves.set('row-2')
+  void moves.focus('row-2', apply)
+  expect(asked).toEqual(['row-1'])
+
+  // Tab, while the first call is under way: the record takes the person's row.
+  moves.drop()
+  moves.set('row-7')
+  answers.shift()!()
+  await wait(0)
+  // Without the drop the queue would now ask for row-2, behind the person's move.
+  expect(asked).toEqual(['row-1'])
+  expect(moves.busy()).toBe(false)
+  expect(moves.from()).toBe('row-7')
+})
+
 test('a refused focus call does not stop the next one', async () => {
   const moves = createRingMoves()
   const asked: string[] = []

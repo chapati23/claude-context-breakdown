@@ -689,6 +689,24 @@ test('j on the last row and k on the first move the window one row; so does j in
   await ui.unmount()
 })
 
+test('an app that draws the same session without the keys does not switch off the terminal’s j, k and arrows', async ($, on) => {
+  const { seen } = await scrollWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  const rows = await rowsOf(ui)
+  // A connected app draws the pane after the terminal, without the keys.
+  const app = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  await ui.press({ key: 'list-down' })
+  expect(await litRow(ui)).toBe(rows[1])
+  seen.length = 0
+  await personScroll($, 1)
+  await settle()
+  expect(seen).toEqual([])
+  expect(await litRow(ui)).toBe(rows[2])
+  await app.unmount()
+  await ui.unmount()
+})
+
 test('after a reload the ring state still names a row: an arrow steps from that row, not from the first', async ($, on) => {
   // A reload empties the mod's record of the ring, and the state keeps the
   // row. Here the second session start's write of no ring lands as that row,

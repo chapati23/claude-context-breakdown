@@ -520,10 +520,17 @@ test('b puts the ring back on the row it came from, on its page; a new list ring
     expect(await ringed(ui)).toEqual(['item-r:real3'])
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['row-tool-results'])
-    // Any other move starts on the first row again.
+    // Any other move starts on the first row again. Off the terminal a sort
+    // keeps the level, so no row asks for the ring: a desktop would move the
+    // focus off the Sort control to it.
     await ui.press({ key: 'row-claude-output' })
-    await ui.press({ key: 'sort' })
     expect((await ringed(ui))[0]?.startsWith('item-')).toBe(true)
+    await ui.press({ key: 'sort' })
+    if (surface === 'terminal') {
+      expect((await ringed(ui))[0]?.startsWith('item-')).toBe(true)
+    } else {
+      expect(await ringed(ui)).toEqual([])
+    }
     await ui.press({ key: 'back' })
     expect(await ringed(ui)).toEqual(['row-claude-output'])
     await ui.press({ key: 'row-system' })

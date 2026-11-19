@@ -127,6 +127,11 @@ export type RingMoves = {
   restore: (mark: RingMark) => void
   /** A new tree: the record names an element of the old one. */
   forget: () => void
+  /**
+   * The person moved the ring (Tab, a click): a target that still waits is
+   * older than that move and is not asked for. The call under way stands.
+   */
+  drop: () => void
   /** Whether a press or a focus call is under way. */
   busy: () => boolean
   /** Runs one press's work after the ones before it. None is dropped. */
@@ -188,6 +193,9 @@ export function createRingMoves(): RingMoves {
     forget: () => {
       local = undefined
       row = undefined
+    },
+    drop: () => {
+      waiting = null
     },
     busy: () => pressing > 0 || running !== null,
     serial: work => {

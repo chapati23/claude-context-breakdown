@@ -22,6 +22,7 @@ import {
   notice,
   openItem,
   openSegment,
+  keepsFocus,
   rebuildView,
   refreshItem,
   toLevel1,
@@ -119,9 +120,13 @@ let keepsPlace = false
 const ring = createRingMoves()
 /**
  * What an arrow's `ui.scroll` and a press of j or k are read against, with no
- * wait: whether the pane held the keys when the render hook last drew it; the
- * view, which every write of it also sets, so a new level counts at once; and
- * the snapshot the render hook last drew from. Hints only.
+ * wait: whether the pane held the keys when the render hook last drew it on
+ * the terminal; the view, which every write of it also sets, so a new level
+ * counts at once; and the snapshot the render hook last drew from. Hints only.
+ *
+ * `paneFocused` is the terminal's alone: an app that shows the same session
+ * draws the pane too, and its drawing without the keys must not switch off
+ * the terminal's j and k.
  */
 let paneFocused = false
 let shownView: ContextBreakdownView = LEVEL_1
@@ -133,11 +138,24 @@ let shownSnapshot: ContextBreakdownSnapshot | null = null
  */
 let shownNoted: string | null = null
 /**
- * The surface the pane was last drawn on, for the hooks whose event names no
- * surface (`ui.focus`, `ui.scroll`, `command.run`). A hook whose event names
- * one reads it from the event.
+ * The surface the pane was last drawn on, for `command.run`, whose event
+ * names no surface. A hook whose event names one reads it from the event.
  */
 let shownSurface: RenderSurface = 'terminal'
+/**
+ * The surfaces that have drawn the pane in this load. A `ui.focus` event names
+ * no surface: the mod keeps its record of the ring unless only surfaces other
+ * than the terminal draw the pane (before the first drawing it may be the
+ * terminal's).
+ */
+const drawnOn = new Set<RenderSurface>()
+/**
+ * Off the terminal, a list that changed its page or its sort names no row for
+ * the ring: a desktop moves the focus to an element whose `autoFocus` key is
+ * new, and the focus must stay on the control the person pressed. Set as the
+ * view is written (`writeView`), cleared on a new level or another list.
+ */
+let staysOnControl = false
 
 /**
  * Writes the view, and notes it for the hooks that cannot wait for a read.
@@ -148,6 +166,7 @@ function writeView($: Engine, change: (view: ContextBreakdownView) => ContextBre
   return update($, viewAtom, view => {
     const next = change(view)
     shownView = next
+    staysOnControl = keepsFocus(view, next, staysOnControl)
 
     return next
   })
@@ -838,10 +857,14 @@ export const register: Register = on => {
     if (
       result.deny === undefined &&
       e.requestId === PANE_ID &&
-      shownSurface === 'terminal' &&
+      (drawnOn.size === 0 || drawnOn.has('terminal')) &&
       notesRing(e.origin, PLUGIN, ring.busy())
     ) {
       const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
+      // The person's move stands: a target of ours that still waits is older.
+      if (e.origin.kind === 'person') {
+        ring.drop()
+      }
       ring.set(key)
       await quietly(writeRing($, () => key))
     }
@@ -913,7 +936,8 @@ export const register: Register = on => {
   // the terminal) passes on untouched, and a j or k after it steps from where
   // it leaves the window.
   on('ui.scroll', { component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'person' } }, ($, e, next) => {
-    const step = shownSurface === 'terminal' ? arrowStep(e, { isFocused: paneFocused, level: shownView.level }) : null
+    // `paneFocused` is the terminal's: off the terminal no arrow steps the ring.
+    const step = arrowStep(e, { isFocused: paneFocused, level: shownView.level })
     const moves =
       step !== null &&
       ringTarget(rowKeys(shownView, shownSnapshot), stepStart(shownView, shownSnapshot, shownNoted), step, pagesOf(shownView)) !== null
@@ -1025,10 +1049,13 @@ export const register: Register = on => {
     if (e.props.placement === 'widget') {
       return glanceTree($.ui.resolve(e), snapshot, e.props.bodyColumns, palette, e.surface)
     }
-    shownOffset = e.props.scroll?.offset ?? 0
     shownSurface = e.surface
+    drawnOn.add(e.surface)
+    if (e.surface === 'terminal') {
+      shownOffset = e.props.scroll?.offset ?? 0
+      paneFocused = e.props.isFocused === true
+    }
     const view = await read($, viewAtom)
-    paneFocused = e.props.isFocused === true
     shownView = view
     shownSnapshot = snapshot
     // The ring's key, read from the state, so a move draws the row lit. Only
@@ -1108,7 +1135,7 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace, ringNow)
+    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow)
 
     return tree
   })

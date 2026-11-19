@@ -15,6 +15,7 @@ import {
   plainName,
   shortenPath,
   textPage,
+  wrapCells,
 } from '../hooks/text'
 import { itemNames, tableLayout } from '../hooks/table'
 import { fit } from '../hooks/view'
@@ -188,5 +189,27 @@ describe('codeRuns', () => {
       expect(run.source).not.toMatch(/^[\udc00-\udfff]|[\ud800-\udbff]$/)
     }
     expect(runs.map(run => run.source).join('')).toBe(`a${'😀'.repeat(10)}`)
+  })
+})
+
+describe('wrapCells', () => {
+  test('breaks at spaces into lines no wider than asked', () => {
+    expect(wrapCells('Sizes are estimated from each item’s characters.', 44)).toEqual(['Sizes are estimated from each item’s', 'characters.'])
+    expect(wrapCells('All numbers are estimates.', 60)).toEqual(['All numbers are estimates.'])
+    for (const width of [5, 12, 30]) {
+      expect(wrapCells('the output of tool calls, such as file reads and command output', width).every(line => cellWidth(line) <= width)).toBe(true)
+    }
+  })
+
+  test('cuts a word wider than a line into pieces, wide characters whole', () => {
+    expect(wrapCells('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij'])
+    expect(wrapCells('日本語', 3)).toEqual(['日', '本', '語'])
+    expect(wrapCells('日', 1)).toEqual(['日'])
+  })
+
+  test('with a most of lines, the last one kept ends in an ellipsis when text is left over', () => {
+    expect(wrapCells('one two three four five', 9, 2)).toEqual(['one two', 'three…'])
+    expect(wrapCells('one two', 9, 2)).toEqual(['one two'])
+    expect(wrapCells('one two three four five six', 9, 2).every(line => cellWidth(line) <= 9)).toBe(true)
   })
 })

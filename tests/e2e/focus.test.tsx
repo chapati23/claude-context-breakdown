@@ -131,7 +131,7 @@ for (const surface of SURFACES) {
         const opts = { marks: true, surface, columns } as const
         // Below 32 columns the rows have no marks and no hotkeys (table.ts).
         const marked = showsHotkeys(columns)
-        const digits = marked ? ['1', '2', '3', '4', '5', '6', '7', '8', '9'] : []
+        const digits = marked ? ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] : []
         const ui = await mountPane($, surface, { columns })
         for (const key of path) {
           await ui.press({ key })
@@ -147,12 +147,12 @@ for (const surface of SURFACES) {
         if (surface === 'terminal') {
           expect({ where, hotkeys: firstHotkeys }).toEqual({ where, hotkeys: [] })
           if (level < 3) {
-            const marks = first.filter(line => /^(⟦)?⟨[1-9]: ⟩/.test(line)).map(line => /[1-9]/.exec(line)?.[0])
+            const marks = first.filter(line => /^(⟦)?⟨[0-9]: ⟩/.test(line)).map(line => /[0-9]/.exec(line)?.[0])
             expect({ where, marks }).toEqual({ where, marks: digits })
           }
         } else if (level < 3) {
           // No dim mark of the mod's own: the digit is the key cap's.
-          expect({ where, dim: first.some(line => /⟨[1-9]: ⟩/.test(line)) }).toEqual({ where, dim: false })
+          expect({ where, dim: first.some(line => /⟨[0-9]: ⟩/.test(line)) }).toEqual({ where, dim: false })
           // No Down and Up and no j or k: Tab moves the ring along the rows.
           expect({ where, steps: await stepsOf(ui) }).toEqual({ where, steps: [] })
           const keys = await rowHotkeys(ui)
@@ -163,7 +163,7 @@ for (const surface of SURFACES) {
           expect({ where, keys: firstHotkeys.slice(0, 3) }).toEqual({ where, keys: ['b', 'p', 'n'] })
         }
 
-        // Tab in: the hint goes, the first nine rows take 1-9, the tenth none
+        // Tab in: the hint goes, the first nine rows take 1-9, the tenth 0, the rest none
         // (at 24 columns no row has a digit).
         await setFocus(ui, true)
         const focused = flatten(await ui.drawn(), opts)
@@ -193,7 +193,7 @@ for (const surface of SURFACES) {
         expect({ where, lines: again }).toEqual({ where, lines: first })
         expect({ where, hotkeys: await allHotkeys(ui) }).toEqual({ where, hotkeys: firstHotkeys })
 
-        // On a desktop a row with a key cap and a row without one (the tenth)
+        // On a desktop a row with a key cap and a row without one (the eleventh)
         // start their names in one column, in both states.
         if (surface === 'desktop' && level < 3 && marked) {
           for (const lines of [first, focused]) {

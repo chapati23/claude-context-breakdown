@@ -144,14 +144,12 @@ export function figuresText(table: Table, tokens: number, of: number | null): st
   return `${amount} ${(of === null ? '' : formatShare(tokens, of)).padStart(SHARE_CELLS)}`
 }
 
-/** The most server rows under MCP tools in Not loaded; one more row sums the rest. */
-export const MAX_SERVER_ROWS = 8
-/** Cells a server row is indented by, under its category's name. */
-export const SERVER_INDENT = 2
-/** The fewest cells a server's name keeps before the count drops its word "tools". */
-const SERVER_NAME_MIN_CELLS = 8
+/** "1 server", "1,230 tools": a count, grouped, and its word. */
+export function countOf(n: number, word: string): string {
+  return `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`
+}
 
-/** One row of Not loaded: a category, and under MCP tools its servers. */
+/** One row of Not loaded: a category, and on the MCP tools one all its servers. */
 export type NotLoadedRow = {
   name: string
   /** Null: no figure to show, the token cell stays empty. */
@@ -161,61 +159,108 @@ export type NotLoadedRow = {
 
 /**
  * The rows of Not loaded: each category above zero, and the MCP tools one
- * with its servers. The servers keep MCP tools in the list even with no
+ * with every server. The servers keep MCP tools in the block even with no
  * figure of its own; with no such category at all they get a row named so.
- * Past MAX_SERVER_ROWS, the rest of the servers sum into one row
- * ("3 more servers"), so none is left out unsaid.
  */
 export function notLoadedRows(
   deferred: readonly ContextBreakdownDeferred[],
   servers: readonly ContextBreakdownServer[],
   isMcp: (name: string) => boolean,
 ): NotLoadedRow[] {
-  const shown: ContextBreakdownServer[] = servers.slice(0, MAX_SERVER_ROWS)
-  const rest = servers.slice(MAX_SERVER_ROWS)
-  if (rest.length > 0) {
-    shown.push({
-      name: `${formatCount(rest.length)} more server${rest.length === 1 ? '' : 's'}`,
-      tools: rest.reduce((sum, server) => sum + server.tools, 0),
-      tokens: rest.reduce((sum, server) => sum + server.tokens, 0),
-    })
-  }
-  let placed = shown.length === 0
+  let placed = servers.length === 0
   const rows: NotLoadedRow[] = []
   for (const category of deferred) {
     const takes = !placed && isMcp(category.name)
     if (category.tokens > 0 || takes) {
-      rows.push({ name: category.name, tokens: category.tokens > 0 ? category.tokens : null, servers: takes ? shown : [] })
+      rows.push({ name: category.name, tokens: category.tokens > 0 ? category.tokens : null, servers: takes ? [...servers] : [] })
       placed ||= takes
     }
   }
   if (!placed) {
-    rows.push({ name: 'MCP tools', tokens: null, servers: shown })
+    rows.push({ name: 'MCP tools', tokens: null, servers: [...servers] })
   }
 
   return rows
 }
 
+/** The cells a row's text may take where it has no length bar: the name and the bar columns. */
+export function textCells(table: Table): number {
+  return nameAndBarCells(table) - table.lead
+}
+
+/** The longest of `forms` that fits `cells`; the last one, cut, when none does. */
+function longestFit(forms: readonly string[], cells: number): string {
+  return fit(forms.find(form => cellWidth(form) <= cells) ?? forms[forms.length - 1] ?? '', cells)
+}
+
 /**
- * The cells between a server row's mark and its figures: the name indented
- * under its category's, the tool count ending where the length bar's column
- * ends, so the counts line up. The row takes the name and bar columns (it
- * has no bar), so it is as wide as every other row. The count says "tools"
- * while the names keep SERVER_NAME_MIN_CELLS; a narrower pane shows the
- * number alone, the same form on every row.
+ * A group heading's text in the name and bar columns: "Baseline · before
+ * your first prompt" when it fits there, else the name alone. A heading has
+ * no bar, so it may use the bar's cells.
  */
-export function serverTexts(table: Table, servers: readonly ContextBreakdownServer[]): string[] {
-  const room = nameAndBarCells(table) - table.lead
-  const long = (n: number) => `${formatCount(n)} tool${n === 1 ? '' : 's'}`
-  const widest = (form: (n: number) => string) => Math.max(0, ...servers.map(server => cellWidth(form(server.tools))))
-  const form = room - SERVER_INDENT - 1 - widest(long) >= SERVER_NAME_MIN_CELLS ? long : formatCount
+export function headingText(table: Table, name: string, long: string): string {
+  return longestFit([long, name], textCells(table))
+}
+
+/**
+ * The MCP tools row of Not loaded, in the name and bar columns: "MCP tools ·
+ * 30 servers, 696 tools", then without the tools, then the name alone.
+ */
+export function serversRowText(table: Table, name: string, servers: readonly ContextBreakdownServer[]): string {
+  const tools = servers.reduce((sum, server) => sum + server.tools, 0)
+  const counted = `${name} · ${countOf(servers.length, 'server')}`
+
+  return longestFit([`${counted}, ${countOf(tools, 'tool')}`, counted, name], textCells(table))
+}
+
+/**
+ * The heading of the Not loaded block, as wide as a row past the mark and the
+ * lead: "Not loaded · outside the window", or "Not loaded" when that does not fit.
+ */
+export function notLoadedHeading(table: Table, name: string, long: string): string {
+  return longestFit([long, name], rowCells(table) - table.mark - table.lead).trimEnd()
+}
+
+/**
+ * Level 2's facts and the column name on one row: the facts on the left, the
+ * name ending where the share column ends, at least two cells apart. Null
+ * when they do not fit in the row's cells, or there is no share column: the
+ * column name then gets a row of its own.
+ */
+export function factsRow(table: Table, facts: string, column: string): string | null {
+  const cells = rowCells(table)
+  if (!table.share || cellWidth(facts) + 2 + cellWidth(column) > cells) {
+    return null
+  }
+
+  return `${facts}${' '.repeat(cells - cellWidth(facts) - cellWidth(column))}${column}`
+}
+
+/** The fewest cells a server's name keeps before the count drops its word "tools". */
+const SERVER_NAME_MIN_CELLS = 8
+
+/**
+ * The rows of the servers that are not loaded, in the name column: the name
+ * on the left, cut where it must, and the tool count (`detail`, "265 tools")
+ * ending at the column's end, so the counts line up. The count says "tools"
+ * while the names keep SERVER_NAME_MIN_CELLS, or all of the widest name
+ * when it is shorter; a narrower pane shows the number alone, the same form
+ * on every row.
+ */
+export function serverNames(table: Table, rows: readonly { title: string; detail: string }[]): { title: string; detail: string }[] {
+  const room = table.name
+  const number = (detail: string) => detail.split(' ')[0] ?? detail
+  const widest = (form: (detail: string) => string) => Math.max(0, ...rows.map(row => cellWidth(form(row.detail))))
+  const long = (detail: string) => detail
+  const names = Math.max(0, ...rows.map(row => cellWidth(row.title)))
+  const form = room - 2 - widest(long) >= Math.min(SERVER_NAME_MIN_CELLS, names) ? long : number
   const countCells = widest(form)
-  const nameCells = Math.max(0, room - SERVER_INDENT - 1 - countCells)
+  const nameCells = Math.max(0, room - 2 - countCells)
 
-  return servers.map(server => {
-    const line = `${' '.repeat(SERVER_INDENT)}${fit(server.name, nameCells)} ${form(server.tools).padStart(countCells)}`
+  return rows.map(row => {
+    const line = fit(`${fit(row.title, nameCells)}  ${form(row.detail).padStart(countCells)}`, room)
 
-    return ' '.repeat(table.lead) + fit(line, room)
+    return { title: line.slice(0, line.length - countCells - 2), detail: line.slice(line.length - countCells - 2) }
   })
 }
 
@@ -313,6 +358,28 @@ export function crumbFor(
   }
 
   return { trail: '', name: fit(short, Math.max(1, room - SWATCH_CELLS)).trimEnd(), figures: '' }
+}
+
+/**
+ * The first line of the list of servers that are not loaded, longest form
+ * that fits, as `crumbFor` shortens: "Context › Not loaded › MCP tools  414k
+ * once loaded", then without the root, then without the block, then the
+ * figure alone; the last form cut. No swatch: the list is in no segment, so
+ * it has no colour. `tokens` null: no figure.
+ */
+export function serversCrumb(root: string, block: string, name: string, tokens: number | null, columns: number): Crumb {
+  const amount = tokens === null ? '' : formatTokens(tokens)
+  const figures = tokens === null ? '' : `${amount} once loaded`
+  const room = Math.floor(columns) - 1
+  const forms: Crumb[] = [
+    { trail: `${root} › ${block} › `, name, figures },
+    { trail: `${block} › `, name, figures },
+    { trail: '', name, figures },
+    { trail: '', name, figures: amount },
+  ]
+  const width = (c: Crumb) => cellWidth(c.trail) + cellWidth(c.name) + (c.figures === '' ? 0 : 2 + cellWidth(c.figures))
+
+  return forms.find(c => width(c) <= room) ?? { trail: '', name: fit(name, Math.max(1, room)).trimEnd(), figures: '' }
 }
 
 /**

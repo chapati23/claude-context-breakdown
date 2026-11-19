@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { CODE_LINE_CHARS } from '../../hooks/text'
 import { GLOBAL_MD, flatten, mountPane, real, ringOf, session, tap } from './helpers'
-import { factsOf, figuresOf, keysWith, labelOf, level2, level3, longest, tokensOf, widest } from './journeys'
+import { factsOf, figuresOf, keysWith, labelOf, level2, level3, levelOne, longest, tokensOf, widest } from './journeys'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const COLUMNS = 88
@@ -38,6 +38,17 @@ for (const surface of SURFACES) {
 
     expect(await keysWith(ui, 'row-')).toEqual(SEGMENTS.map(([key]) => key))
     expect(await ringOf(ui)).toBe('row-system')
+    /**
+     * Level 1 after b: as it was, but for the terminal's line that describes
+     * the ringed row, which now names the row the ring came back to.
+     */
+    const expectBack = (lines: string[], label: string) => {
+      const back = levelOne(lines, surface)
+      expect(back.table).toEqual(levelOne(before, surface).table)
+      if (surface === 'terminal') {
+        expect(back.described.join(' ').startsWith(`${label}: `), `${label} is described`).toBe(true)
+      }
+    }
 
     for (const [rowKey, isOpenable] of SEGMENTS) {
       const label = await labelOf(ui, rowKey)
@@ -55,9 +66,12 @@ for (const surface of SURFACES) {
       expect(two.rows.length).toBe(Math.min(two.count, 20))
       expect(two.header).toMatch(/% of segment$/)
       expect(two.keys).toContain('Back')
-      expect(two.keys).toContain('Previous page')
-      expect(two.keys).toContain('Next page')
-      expect(widest(lines2)).toBeLessThanOrEqual(COLUMNS)
+      expect(two.definition).toMatch(/^[A-Z].*\.$/)
+      // p and n stand in the line, as a pair, only while the list has pages.
+      expect(two.keys.includes('Prev page')).toBe(two.count > 20)
+      expect(two.keys.includes('Next page')).toBe(two.count > 20)
+      // Off the terminal the surface wraps the definition when it paints, so it alone may pass the width here.
+      expect(widest(surface === 'terminal' ? lines2 : lines2.filter(line => line !== two.definition))).toBeLessThanOrEqual(COLUMNS)
       // The items add up to the segment, within the rounding of the figures.
       const sum = two.rows.reduce((total, line) => total + tokensOf(figuresOf(line)!.tokens), 0)
       expect(sum).toBeGreaterThan(tokensOf(two.tokens) * 0.92)
@@ -71,7 +85,7 @@ for (const surface of SURFACES) {
         // Rows of text, not controls: nothing to open, and the key line does not offer it.
         expect(items, `${rowKey} lists no items that open`).toEqual([])
         expect(two.keys).not.toContain('Open')
-        expect(await tap(ui, 'back', opts)).toEqual(before)
+        expectBack(await tap(ui, 'back', opts), label)
         expect(await ringOf(ui)).toBe(rowKey)
         continue
       }
@@ -98,7 +112,7 @@ for (const surface of SURFACES) {
       expect(await tap(ui, 'back', opts)).toEqual(lines2)
       expect(await ringOf(ui)).toBe(items[0])
       // Back again goes to level 1 as it was, with the ring on the row.
-      expect(await tap(ui, 'back', opts)).toEqual(before)
+      expectBack(await tap(ui, 'back', opts), label)
       expect(await ringOf(ui)).toBe(rowKey)
     }
     await ui.unmount()

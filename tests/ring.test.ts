@@ -17,11 +17,15 @@ test('rowKeys: the rows that open, in drawing order; none at level 3', () => {
   const snapshot = {
     baseline: [segment('system', 10), segment('mcp', 0)],
     conversation: [segment('tool-results', 30), segment('prompts', 5)],
+    notLoadedServers: [],
   } as unknown as ContextBreakdownSnapshot
   const level1: ContextBreakdownView = { seq: 0, gen: 0, level: 1 }
   // Baseline first, then the conversation, as the pane draws them; a row of 0 tokens is not drawn.
   expect(rowKeys(level1, snapshot)).toEqual(['row-system', 'row-tool-results', 'row-prompts'])
   expect(rowKeys(level1, null)).toEqual([])
+  // While a server has tools that are not loaded, the MCP tools row of Not loaded comes last.
+  const servers = { ...snapshot, notLoadedServers: [{ name: 'tickets', tools: 2, tokens: 10 }] }
+  expect(rowKeys(level1, servers)).toEqual(['row-system', 'row-tool-results', 'row-prompts', 'row-not-loaded'])
 
   const row = (id: string, isOpenable = true) => ({ id, title: id, detail: '', pathIn: null, tokens: 1, isOpenable })
   const list = { rows: [row('a'), row('b', false), row('c')], page: 1, pages: 3 } as unknown as ContextBreakdownList

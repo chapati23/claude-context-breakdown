@@ -91,8 +91,8 @@ test('on the terminal j and k are hotkeys at every level while the pane has the 
 
         return
       }
-      expect((await ui.find({ key: down }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
-      expect((await ui.find({ key: up }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
+      expect((await ui.find({ key: down }))?.props).toMatchObject({ hotkey: 'j', label: '↓' })
+      expect((await ui.find({ key: up }))?.props).toMatchObject({ hotkey: 'k', label: '↑' })
       const other = down === 'scroll-down' ? ['list-down', 'list-up'] : ['scroll-down', 'scroll-up']
       for (const key of other) {
         expect(await ui.find({ key })).toBeUndefined()

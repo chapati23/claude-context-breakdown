@@ -2,21 +2,24 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownSnapshot } from '../types'
 import {
-  MAX_SERVER_ROWS,
-  SERVER_INDENT,
   TABLE_MAX_COLUMNS,
   columnHeader,
   crumbFor,
+  factsRow,
   figuresText,
+  headingText,
   largestOf,
   lengthBar,
   lengthBarParts,
   lineFacts,
   listFacts,
   nameAndBarCells,
+  notLoadedHeading,
   notLoadedRows,
   rowCells,
-  serverTexts,
+  serverNames,
+  serversCrumb,
+  serversRowText,
   tableLayout,
 } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
@@ -257,16 +260,10 @@ describe('Not loaded by server', () => {
     ])
   })
 
-  test('sums the servers past the eighth into one last row', () => {
-    const servers = Array.from({ length: 11 }, (_, i) => server(`server-${i}`, 2, 1000 * (11 - i)))
-    const rows = notLoadedRows(DEFERRED, servers, isMcp)[0]!.servers
+  test('keeps every server on the MCP tools row: the row counts them all', () => {
+    const servers = Array.from({ length: 30 }, (_, i) => server(`server-${i}`, 2, 1000 * (30 - i)))
 
-    expect(rows).toHaveLength(MAX_SERVER_ROWS + 1)
-    expect(rows.slice(0, MAX_SERVER_ROWS)).toEqual(servers.slice(0, MAX_SERVER_ROWS))
-    expect(rows[MAX_SERVER_ROWS]).toEqual({ name: '3 more servers', tools: 6, tokens: 3000 + 2000 + 1000 })
-    const nine = notLoadedRows(DEFERRED, servers.slice(0, 9), isMcp)[0]!.servers
-    expect(nine[MAX_SERVER_ROWS]).toEqual({ name: '1 more server', tools: 2, tokens: 3000 })
-    expect(notLoadedRows(DEFERRED, servers.slice(0, 8), isMcp)[0]!.servers).toEqual(servers.slice(0, 8))
+    expect(notLoadedRows(DEFERRED, servers, isMcp)[0]!.servers).toEqual(servers)
   })
 
   test('keeps MCP tools with no figure of its own when it has servers', () => {
@@ -282,30 +279,83 @@ describe('Not loaded by server', () => {
     ])
   })
 
-  test('a server row is as wide as the name and bar columns, indented, with the counts in one column', () => {
-    const servers = [
-      server('tickets', 130, 90_000),
-      server('a-server-name-far-too-long-for-any-pane-to-show-whole', 2, 400),
-      server('漢字のサーバー名がとても長いです', 1, 10),
+  test('the MCP tools row counts servers and tools, and drops the tools, then the counts, where they do not fit', () => {
+    const servers = [server('tickets', 690, 400_000), ...Array.from({ length: 29 }, (_, i) => server(`s${i}`, i === 0 ? 6 : 0, 100))]
+    const row = (columns: number) => serversRowText(tableLayout(columns, 32), 'MCP tools', servers).trimEnd()
+    expect(row(88)).toBe('MCP tools · 30 servers, 696 tools')
+    expect(row(45)).toBe('MCP tools · 30 servers')
+    expect(row(24)).toBe('MCP tools')
+    expect(serversRowText(tableLayout(88, 32), 'MCP tools', [server('one', 1, 5)]).trimEnd()).toBe('MCP tools · 1 server, 1 tool')
+    for (const columns of [24, 45, 88]) {
+      const table = tableLayout(columns, 32)
+      expect(cellWidth(serversRowText(table, 'MCP tools', servers))).toBe(nameAndBarCells(table) - table.lead)
+    }
+  })
+})
+
+describe('the longer forms of the names', () => {
+  test('a group heading says what its group holds where the name and bar columns have room', () => {
+    expect(headingText(tableLayout(88, 32), 'Baseline', 'Baseline · before your first prompt').trimEnd()).toBe(
+      'Baseline · before your first prompt',
+    )
+    expect(headingText(tableLayout(45, 32), 'Baseline', 'Baseline · before your first prompt').trimEnd()).toBe('Baseline')
+  })
+
+  test('the Not loaded heading says the block is outside the window where a row has room', () => {
+    expect(notLoadedHeading(tableLayout(45, 32), 'Not loaded', 'Not loaded · outside the window')).toBe('Not loaded · outside the window')
+    expect(notLoadedHeading(tableLayout(24, 32), 'Not loaded', 'Not loaded · outside the window')).toBe('Not loaded')
+  })
+
+  test('the facts and the column name share a row, the name at the share column’s end, or need two rows', () => {
+    const table = tableLayout(88, 50, false)
+    const joined = factsRow(table, '13 items · largest first', '% of segment')!
+    expect(joined.startsWith('13 items · largest first  ')).toBe(true)
+    expect(joined.endsWith('% of segment')).toBe(true)
+    expect(cellWidth(joined)).toBe(rowCells(table))
+    expect(factsRow(tableLayout(45, 50, false), '2,048 items · largest first · page 1 of 103', '% of segment')).toBeNull()
+    // No share column: nothing to name.
+    expect(factsRow(tableLayout(24, 50, false), '13 items', '% of segment')).toBeNull()
+  })
+
+  test('the servers’ title line shortens as the breadcrumb does, with no swatch', () => {
+    const crumb = (columns: number) => serversCrumb('Context', 'Not loaded', 'MCP tools', 414_000, columns)
+    expect(crumb(88)).toEqual({ trail: 'Context › Not loaded › ', name: 'MCP tools', figures: '414k once loaded' })
+    expect(crumb(45)).toEqual({ trail: 'Not loaded › ', name: 'MCP tools', figures: '414k once loaded' })
+    expect(crumb(30)).toEqual({ trail: '', name: 'MCP tools', figures: '414k once loaded' })
+    expect(crumb(16)).toEqual({ trail: '', name: 'MCP tools', figures: '414k' })
+    expect(serversCrumb('Context', 'Not loaded', 'MCP tools', null, 88).figures).toBe('')
+  })
+
+  test('a server row keeps its name left and its tool count in one column at the name column’s end', () => {
+    const rows = [
+      { title: 'tickets', detail: '130 tools' },
+      { title: 'a-server-name-far-too-long-for-any-pane-to-show-whole', detail: '2 tools' },
+      { title: '漢字のサーバー名がとても長いです', detail: '1 tool' },
     ]
     for (const columns of [24, 45, 68, 100]) {
-      const table = tableLayout(columns, 'System prompt and built-in tools'.length)
-      const texts = serverTexts(table, servers)
-      for (const text of texts) {
-        expect(cellWidth(text)).toBe(nameAndBarCells(table))
-        expect(text.slice(table.lead, table.lead + SERVER_INDENT)).toBe('  ')
+      const table = tableLayout(columns, 40, false)
+      const names = serverNames(table, rows)
+      for (const name of names) {
+        expect(cellWidth(name.title + name.detail)).toBe(table.name)
       }
-      const ends = texts.map(text => text.trimEnd().length)
-      expect(new Set(ends.slice(0, 2)).size).toBe(1)
-      expect(texts[1]).toMatch(/…/)
+      expect(names[1]!.title).toMatch(/…/)
     }
     // Room enough: the count names its unit, singular for one.
-    const wide = serverTexts(tableLayout(68, 31), servers)
-    expect(wide[0]).toMatch(/^ {2}tickets +130 tools$/)
-    expect(wide[2]).toMatch(/ 1 tool$/)
+    const wide = serverNames(tableLayout(100, 40, false), rows)
+    expect(wide[0]!.detail).toBe('  130 tools')
+    expect(wide[2]!.detail).toBe('     1 tool')
+    // Short names whole beside the counts: the column fits them, the word stays.
+    const short = serverNames(tableLayout(68, 16, false), [
+      { title: 'tickets', detail: '4 tools' },
+      { title: 'notes', detail: '2 tools' },
+    ])
+    expect(short).toEqual([
+      { title: 'tickets', detail: '  4 tools' },
+      { title: 'notes  ', detail: '  2 tools' },
+    ])
     // A narrow pane keeps the name and shows the number alone, on every row.
-    const narrow = serverTexts(tableLayout(24, 31), servers)
-    expect(narrow[0]).toMatch(/tickets +130$/)
-    expect(narrow[1]).toMatch(/ 2$/)
+    const narrow = serverNames(tableLayout(24, 40, false), rows)
+    expect(narrow[0]!.detail).toBe('  130')
+    expect(narrow[1]!.detail).toBe('    2')
   })
 })

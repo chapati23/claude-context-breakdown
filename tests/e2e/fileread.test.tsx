@@ -58,7 +58,7 @@ for (const surface of SURFACES) {
     const formatted = level3(await tap(ui, 'format', opts))
     expect(factsOf(formatted.facts)).toMatchObject({ form: 'formatted', source: 'on disk' })
     expect(formatted.body).toEqual(['```txt', 'alpha', 'BETA', 'gamma', '```'])
-    expect(formatted.controls.join(' ')).toContain('Raw text')
+    expect(formatted.controls.join(' ')).toContain('Raw')
     const raw = level3(await tap(ui, 'format', opts))
     expect(factsOf(raw.facts)).toMatchObject({ form: 'raw', source: 'on disk' })
     expect(raw.body).toEqual(['alpha', 'BETA', 'gamma'])

@@ -79,8 +79,17 @@ export type ContextBreakdownSnapshot = {
   measuredAt: number
 }
 
-/** How level 2 orders its items: largest first, or newest first. */
-export type ContextBreakdownSort = 'size' | 'newest'
+/**
+ * What a level 2 list shows: the items of one segment, or `not-loaded`, the
+ * MCP servers whose tools are not loaded.
+ */
+export type ContextBreakdownListId = ContextBreakdownSegmentId | 'not-loaded'
+
+/**
+ * How level 2 orders its items: largest first, newest first, or (the
+ * `not-loaded` list) most tools first.
+ */
+export type ContextBreakdownSort = 'size' | 'newest' | 'tools'
 
 /** Which text level 3 shows: as the model received it, or the file now. */
 export type ContextBreakdownSource = 'loaded' | 'disk'
@@ -105,11 +114,14 @@ export type ContextBreakdownRow = {
   isOpenable: boolean
 }
 
-/** Level 2: one page of the items of one segment. */
+/** Level 2: one page of the items of one segment, or of the servers not loaded. */
 export type ContextBreakdownList = {
-  segment: ContextBreakdownSegmentId
+  segment: ContextBreakdownListId
   sort: ContextBreakdownSort
-  /** False for baseline segments, which have no time order. */
+  /**
+   * False for baseline segments, which have no time order, and for the
+   * servers when Claude Code gives no token figure for them.
+   */
   canSort: boolean
   /** 0-based. */
   page: number
@@ -118,6 +130,8 @@ export type ContextBreakdownList = {
   /** All items of the segment and their tokens. */
   items: number
   tokens: number
+  /** The `not-loaded` list only: the tools of all its servers. */
+  tools?: number
   /** The items and tokens on the pages not shown. */
   hiddenItems: number
   hiddenTokens: number
@@ -182,8 +196,8 @@ export type ContextBreakdownView =
       level: 1
       /** Why the pane fell back here, e.g. an open item left the context. */
       note?: string
-      /** The segment b came back from: its row takes the focus ring. */
-      from?: ContextBreakdownSegmentId
+      /** The list b came back from: its row takes the focus ring. */
+      from?: ContextBreakdownListId
     }
   | {
       seq: number

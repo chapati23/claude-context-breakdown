@@ -49,7 +49,7 @@ import {
   stepAnswer,
   stepOf,
 } from './scroll'
-import { matchSegment } from './segments'
+import { NOT_LOADED, matchList } from './segments'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
 import { bandModelFor } from './view'
 import type { LayoutPart, SegmentPart } from './layout'
@@ -62,7 +62,7 @@ const snapshotAtom = atom({ plugin: 'context-breakdown', key: 'snapshot' } as co
   shape: 'snapshot-2',
 })
 const viewAtom = atom({ plugin: 'context-breakdown', key: 'view' } as const, LEVEL_1, {
-  shape: 'view-5',
+  shape: 'view-6',
 })
 const themeAtom = atom({ plugin: 'context-breakdown', key: 'theme' } as const, null, {
   shape: 'theme-1',
@@ -562,7 +562,9 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items.
+  // `/ctx` opens the segments; `/ctx <segment>` opens that segment's items,
+  // and `/ctx not` the servers whose tools are not loaded (with none, the
+  // segments and the note for a word that matches nothing).
   // `/ctx` alone on an open pane only gives it the keyboard: it is the one
   // key path to a pane that lost it (ctrl+x tab reaches the bar only). Its
   // trees then name no ring of their own (`keepsPlace`), and on the terminal
@@ -576,7 +578,7 @@ export const register: Register = on => {
       write: fn => writeView($, fn),
       readFile: path => $.fs.read(path),
     }
-    const segment = matchSegment(e.args)
+    const segment = matchList(e.args)
     const hasWord = e.args.trim() !== ''
     let isOpen = false
     if (!hasWord) {
@@ -595,7 +597,7 @@ export const register: Register = on => {
       await quietly(writeRing($, () => null))
     }
     if (segment !== null) {
-      await quietly(openSegment(nav, segment))
+      await quietly(openSegment(nav, segment, segment === NOT_LOADED ? noMatchNote(e.args) : undefined))
     } else if (hasWord) {
       await quietly(writeView($, toLevel1With(noMatchNote(e.args))))
     } else if (!isOpen) {

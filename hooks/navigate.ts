@@ -8,7 +8,7 @@ import type {
   ContextBreakdownContent,
   ContextBreakdownFormat,
   ContextBreakdownList,
-  ContextBreakdownSegmentId,
+  ContextBreakdownListId,
   ContextBreakdownSnapshot,
   ContextBreakdownSort,
   ContextBreakdownSource,
@@ -19,6 +19,7 @@ import { NO_ITEMS, buildItems, isBaseline, listOf } from './items'
 import type { Item, ItemBreakdown, ItemData, ItemSet } from './items'
 import { defaultFormat, formattedSource, mappedLine, markdownPages, pageAtLine } from './markdown'
 import { compareFile, compareRead } from './reminder'
+import { NOT_LOADED, isSegmentList } from './segments'
 import { displayText, firstWords, newlines, pageLines, textPage } from './text'
 
 export const LEVEL_1: ContextBreakdownView = { seq: 0, gen: 0, level: 1 }
@@ -121,11 +122,12 @@ export function toLevel1With(note: string): (view: ContextBreakdownView) => Cont
 
 /**
  * Level 1 after a /clear: an open list or item of the conversation says it
- * left the context. A baseline segment's items stay in the context, so its
- * list or item goes back with no note.
+ * left the context. A baseline segment's items stay in the context, and the
+ * servers that are not loaded were never in it, so their list or item goes
+ * back with no note.
  */
 export function afterClear(view: ContextBreakdownView): ContextBreakdownView {
-  if (view.level === 1 || isBaseline(view.list.segment)) {
+  if (view.level === 1 || !isSegmentList(view.list.segment) || isBaseline(view.list.segment)) {
     return toLevel1(view)
   }
 
@@ -160,6 +162,11 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
   const set = buildItems(view.list.segment, data)
   const list = listOf(view.list.segment, set, view.list.sort, view.list.page)
   if (view.level === 2) {
+    // No server has tools that are not loaded any more: the list would be
+    // empty, so the segments show instead.
+    if (view.list.segment === NOT_LOADED && set.items.length === 0) {
+      return { seq: view.seq, gen, level: 1 }
+    }
     // Every item it listed left the context (a compaction, a /clear): an
     // empty list would read as "~0 · No items", so say what happened. A list
     // that could not be read keeps its own note.
@@ -349,11 +356,18 @@ export function contentOf(
 
 // Moves that read the conversation, the breakdown or a file.
 
-/** Level 2 for a segment, from its first page, largest first. */
-export function openSegment(io: NavIo, segment: ContextBreakdownSegmentId): Promise<void> {
+/**
+ * Level 2 for a segment, or the servers that are not loaded, from its first
+ * page, largest first. With no server, level 1 shows instead, with `none` as
+ * its note when it is given (`/ctx not` names a list that is empty).
+ */
+export function openSegment(io: NavIo, segment: ContextBreakdownListId, none?: string): Promise<void> {
   return retried(async () => {
     const base = await io.view()
     const set = buildItems(segment, await gather(io))
+    if (segment === NOT_LOADED && set.items.length === 0) {
+      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, ...(none === undefined ? {} : { note: none }) })
+    }
 
     return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: listOf(segment, set, 'size', 0) })
   })
@@ -390,8 +404,9 @@ function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: Conte
   })
 }
 
+/** Largest first and newest first; for the servers that are not loaded, largest first and most tools first. */
 export function toggleSort(io: NavIo): Promise<void> {
-  return relist(io, list => ({ sort: list.sort === 'size' ? 'newest' : 'size', page: 0 }))
+  return relist(io, list => ({ sort: list.sort !== 'size' ? 'size' : list.segment === NOT_LOADED ? 'tools' : 'newest', page: 0 }))
 }
 
 /** Another page of the list; `at`: j or k crossed into it, so its first or last row takes the ring. */

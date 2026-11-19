@@ -20,12 +20,50 @@ import { NOTES } from '../fixtures'
 import { GOLDEN } from './golden'
 import { flatten, mountPane, real, session } from './helpers'
 
-/** The critique's session, plus one short Read so level 3 fits a golden. */
+/**
+ * Thirty MCP servers whose tools are not loaded, as in the mockups: eight
+ * named ones, then smaller ones. `[name, tools, tokens]`, the tokens shared
+ * evenly over the tools.
+ */
+const SERVERS: readonly (readonly [string, number, number])[] = [
+  ['claude_ai_Vercel', 265, 171_000],
+  ['claude_ai_Notion', 78, 80_000],
+  ['grafana', 79, 32_000],
+  ['claude_ai_Slack', 27, 27_000],
+  ['cmux-cua', 39, 23_000],
+  ['github', 42, 16_000],
+  ['claude_ai_Google_Drive', 16, 9800],
+  ['claude-in-chrome', 20, 9400],
+  ...Array.from({ length: 22 }, (_, k) => [`server-${k + 1}`, 6 - (k % 5), 2200 - k * 50] as const),
+]
+
+/**
+ * The critique's session, plus one short Read so level 3 fits a golden, and
+ * the tools of thirty servers that are not loaded, so level 1 shows Not
+ * loaded and the list of servers has two pages.
+ */
 function goldenSession() {
   const opts = real()
+  const breakdown = opts.usage!.context.breakdown!
+  const mcpTools = SERVERS.flatMap(([serverName, tools, tokens]) =>
+    Array.from({ length: tools }, (_, k) => ({
+      name: `mcp__${serverName}__t${k}`,
+      serverName,
+      // Whole tokens that add up to the server's figure.
+      tokens: Math.floor(tokens / tools) + (k < tokens % tools ? 1 : 0),
+      isLoaded: false,
+    })),
+  )
+  const deferred = SERVERS.reduce((sum, [, , tokens]) => sum + tokens, 0)
+  const categories = [
+    ...breakdown.categories,
+    { name: 'MCP tools (deferred)', tokens: deferred, kind: 'deferred' as const, color: 'inactive', isDeferred: true },
+    { name: 'System tools (deferred)', tokens: 32_000, kind: 'deferred' as const, color: 'inactive', isDeferred: true },
+  ]
 
   return {
     ...opts,
+    usage: { ...opts.usage!, context: { ...opts.usage!.context, breakdown: { ...breakdown, categories, mcpTools } } },
     messages: [
       ...(opts.messages ?? []),
       { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: NOTES } }] },
@@ -38,6 +76,7 @@ function goldenSession() {
 const LEVELS = [
   { name: 'level1', path: [] },
   { name: 'level2-tool-results', path: ['row-tool-results'] },
+  { name: 'level2-not-loaded', path: ['row-not-loaded'] },
   { name: 'level3-read', path: ['row-tool-results', 'item-r:tu1'] },
 ] as const
 

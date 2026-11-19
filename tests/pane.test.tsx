@@ -3,7 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { ContextBreakdownList, ContextBreakdownSnapshot } from '../types'
-import { CLICK_HINT, KEYS_HINT, keyWords, keysHint, ringKey } from '../hooks/pane'
+import { CLICK_HINT, KEYS_HINT, describedText, keysHint, openWords, ringKey } from '../hooks/pane'
+import { flatten } from './e2e/helpers'
 import { DARK } from '../hooks/palette'
 import { TABLE_MAX_COLUMNS } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
@@ -63,9 +64,9 @@ test('the pane lists every segment by group, merged ones too', async ($, on) => 
       'row-task-reports',
       'row-prompts',
       'row-claude-output',
-      'back',
-      'close',
+      // No Back: the segments have no level to go back to. Close is last.
       'refresh',
+      'close',
     ])
     // Shares are of what is used (66k), not of the window.
     if (surface === 'terminal') {
@@ -73,13 +74,14 @@ test('the pane lists every segment by group, merged ones too', async ($, on) => 
       expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/Tool results +█+ +30k +45%$/)
       expect((await ui.find({ key: 'row-task-reports' }))?.text).toMatch(/Task reports +▏ +100 +0\.2%$/)
     }
-    expect(await ui.find({ type: 'Text', text: /Baseline +26k +39%$/ })).toBeDefined()
+    // Where the table has room the headings say what each group holds.
+    expect(await ui.find({ type: 'Text', text: /Baseline · before your first prompt +26k +39%$/ })).toBeDefined()
     // 26k and 40k of 66k: 39.4% and 60.6%, rounded to the nearest they add up.
-    expect(await ui.find({ type: 'Text', text: /Conversation +40k +61%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Conversation · since the session started +40k +61%$/ })).toBeDefined()
     // Free space and Reserve have no share of what is used.
     expect(await ui.find({ type: 'Text', text: /Free space +·· +101k$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Reserve +▒▒ +33k$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^ *Not loaded$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Reserve for compaction +▒▒ +33k$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ *Not loaded · outside the window$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /deferred/i })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'All numbers are estimates.' })).toBeDefined()
     await ui.unmount()
@@ -218,8 +220,8 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
       expect((await ui.find({ key: 'row-prompts' }))?.text).toMatch(/ 2\.9k +1\.0%$/)
     }
     // 48k and 235k of 283k: 16.9% and 83.1%, which add up once rounded to the nearest.
-    expect(await ui.find({ type: 'Text', text: /^ +Baseline +48k +17%$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^ +Conversation +235k +83%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ +Baseline · before your first prompt +48k +17%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^ +Conversation · since the session started +235k +83%$/ })).toBeDefined()
 
     // The largest segment's name alone is bold; the group headings are dim.
     const bold = (await ui.findAll({ type: 'Text' })).filter(text => text.props.weight === 'bold')
@@ -276,7 +278,7 @@ test('Free space, Reserve and Not loaded line up with the segment rows', async (
       const segment = (await ui.find({ key: 'row-tool-results' }))!.text
       const free = (await ui.find({ type: 'Text', text: /Free space/ }))!.text
       const reserve = (await ui.find({ type: 'Text', text: /Reserve/ }))!.text
-      const heading = (await ui.find({ type: 'Text', text: /Not loaded$/ }))!.text
+      const heading = (await ui.find({ type: 'Text', text: /Not loaded( · outside the window)?$/ }))!.text
       const deferred = (await ui.find({ type: 'Text', text: /MCP tools/ }))!.text
       const nameAt = segment.indexOf('Tool results')
       const tokensEnd = segment.indexOf('30k') + 3
@@ -321,7 +323,7 @@ const TEN_SERVERS = [
   ['clock', 1, 1000],
 ] as const
 
-test('Not loaded lists the MCP servers under MCP tools, aligned, cut to the table, and none takes focus', async ($, on) => {
+test('Not loaded is one MCP tools row that counts the servers, opens their list, and comes after the segments in the ring', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
@@ -332,6 +334,8 @@ test('Not loaded lists the MCP servers under MCP tools, aligned, cut to the tabl
     for (const key of ROWS) {
       before[`${bodyColumns} ${key}`] = (await ui.find({ key }))!.text
     }
+    // No server: MCP tools is a plain line, no control.
+    expect(await ui.find({ key: 'row-not-loaded' })).toBeUndefined()
     await ui.unmount()
   }
   w.usage = withServers(TEN_SERVERS)
@@ -341,50 +345,124 @@ test('Not loaded lists the MCP servers under MCP tools, aligned, cut to the tabl
   await first.unmount()
 
   // A desktop's rows are a Button with the name beside Texts of figures: see desktop.test.tsx.
-  for (const surface of ['terminal'] as const) {
-    for (const bodyColumns of [45, 68, 100]) {
-      const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns } })
-      const segment = (await ui.find({ key: 'row-tool-results' }))!.text
-      const nameAt = segment.indexOf('Tool results')
-      const tokensEnd = segment.indexOf('30k') + 3
-      // Rows only: the figures' own nested Texts hold no word.
-      const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => /[A-Za-z]{2}/.test(text))
-      const mcpAt = texts.findIndex(text => /^ *MCP tools +9k$/.test(text))
-      expect(mcpAt).toBeGreaterThan(-1)
-      // Eight servers, then one row for the other two; each under MCP tools.
-      const serverRows = texts.slice(mcpAt + 1, mcpAt + 10)
-      expect(serverRows[0]).toMatch(/^ +tickets +40 tools +40k$/)
-      expect(serverRows[2]).toMatch(/^ +red team +20 tools +20k$/)
-      expect(serverRows[8]).toMatch(/^ +2 more servers +3 tools +3k$/)
-      expect(texts[mcpAt + 10]).toMatch(/^Per MCP server: the tools not loaded yet, and the tokens/)
-      for (const row of serverRows) {
-        // Indented under the category's name, the tokens in every row's column, no wrap.
-        expect(row.indexOf(row.trim())).toBe(nameAt + 2)
-        expect(row.length).toBe(tokensEnd)
-        expect(cellWidth(row)).toBeLessThan(bodyColumns)
-      }
-      expect(serverRows[1]).toMatch(/a-server-name.*… +30 tools +30k$/)
-      expect(texts.join('\n')).not.toMatch(/\x1b|\t|\x9b|​|‮|1m/)
-      expect(texts.some(text => text.includes('loaded-only'))).toBe(false)
-      // The rows above keep their place: the table is as it was without servers.
-      if (surface === 'terminal') {
-        for (const key of ROWS) {
-          expect((await ui.find({ key }))!.text).toBe(before[`${bodyColumns} ${key}`]!)
-        }
-      }
-      // Not Buttons: the rows stay out of the ring's way.
-      const buttons = (await ui.findAll({ type: 'Button' })).map(button => button.text)
-      expect(buttons.some(text => /tickets|more servers/.test(text))).toBe(false)
-      await ui.unmount()
+  for (const bodyColumns of [45, 68, 100]) {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns } })
+    const segment = (await ui.find({ key: 'row-tool-results' }))!.text
+    const tokensEnd = segment.indexOf('30k') + 3
+    const row = (await ui.find({ key: 'row-not-loaded' }))!
+    expect(row.props.label).toBe('MCP tools')
+    // All ten servers and their 133 tools; a narrower table drops the tools.
+    expect(row.text).toMatch(bodyColumns >= 68 ? /MCP tools · 10 servers, 133 tools +9k *$/ : /MCP tools · 10 servers +9k *$/)
+    // The eighth row that opens: its digit, as the segments before it.
+    expect(row.text.startsWith('8: ')).toBe(true)
+    expect(row.text.indexOf('9k') + 2).toBe(tokensEnd)
+    // No line per server and no sentence about them at level 1.
+    const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text)
+    expect(texts.some(text => /tickets|Per MCP server/.test(text))).toBe(false)
+    // The rows above keep their place: the table is as it was without servers.
+    for (const key of ROWS) {
+      expect((await ui.find({ key }))!.text).toBe(before[`${bodyColumns} ${key}`]!)
     }
+    // After the segment rows, before the controls.
+    const keys = (await ui.findAll({ type: 'Button' })).map(button => button.key)
+    expect(keys.slice(keys.indexOf('row-claude-output'), keys.indexOf('row-claude-output') + 3)).toEqual([
+      'row-claude-output',
+      'row-not-loaded',
+      'refresh',
+    ])
+    await ui.unmount()
   }
 })
 
-test('with no token figure for the servers, Not loaded shows their tool counts and an empty token cell', async ($, on) => {
+test('the list of servers: one row per server, largest first, s for most tools first, and b back onto its row', async ($, on) => {
+  const w = world(on)
+  w.usage = withServers([...TEN_SERVERS, ['many', 50, 100]])
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  await ui.press({ key: 'row-not-loaded' })
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools  138k once loaded')
+  expect(await ui.find({ type: 'Text', text: 'Tool schemas that Claude Code loads on demand. Not in the window.' })).toBeDefined()
+  // The facts and the column name share a row; the shares are of the list's total.
+  expect(await ui.find({ type: 'Text', text: /^11 servers · 183 tools · largest first +% of 138k$/ })).toBeDefined()
+  // Rows do not open: no Button, no ring on a row, and the names dim.
+  expect((await ui.findAll({ type: 'Button' })).filter(button => /^item-/.test(button.key ?? ''))).toEqual([])
+  const BAR = /tools? +[█▉▊▋▌▍▎▏]/
+  const rows = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => BAR.test(text))
+  expect(rows).toHaveLength(11)
+  expect(rows[0]).toMatch(/^ +tickets +40 tools +█+ +40k +29%$/)
+  expect(rows[2]).toMatch(/^ +red team +20 tools /)
+  expect(rows[1]).toMatch(/a-server-name.*… +30 tools /)
+  expect(rows.find(row => /^ +many /.test(row))).toMatch(/^ +many +50 tools +[█▌]+ +5k +3\.6%$/)
+  expect(rows[10]).toMatch(/^ +clock +1 tool +▎ +1k +0\.7%$/)
+  expect(rows.join('\n')).not.toMatch(/\x1b|\t|\x9b|​|‮|1m|loaded-only/)
+  // The bar is the neutral grey, no segment's colour.
+  const bar = (await ui.findAll({ type: 'Text' })).find(text => /^█+$/.test(text.text))
+  expect(bar?.props.color).toBe(DARK.notLoaded)
+
+  // s names the order it switches to.
+  expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Most tools first')
+  await ui.press({ key: 'sort' })
+  expect(await ui.find({ type: 'Text', text: /^11 servers · 183 tools · most tools first/ })).toBeDefined()
+  expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Largest first')
+  const sorted = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => BAR.test(text))
+  expect(sorted[0]).toMatch(/^ +many +50 tools /)
+  // One page: p and n leave the line.
+  expect(await ui.find({ key: 'prev' })).toBeUndefined()
+  expect(await ui.find({ key: 'next' })).toBeUndefined()
+
+  // b goes back to the segments with the ring on the MCP tools row.
+  await ui.press({ key: 'back' })
+  expect((await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)).toEqual([
+    'row-not-loaded',
+  ])
+
+  // A measurement rebuilds the list; with no server left, the segments show.
+  await ui.press({ key: 'row-not-loaded' })
+  w.usage = usage(66_000)
+  await ui.press({ key: 'refresh' })
+  await w.clock.advance(0)
+  expect(await ui.find({ key: 'row-system' })).toBeDefined()
+  expect(await ui.find({ key: 'row-not-loaded' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('/ctx not, and any start of "not loaded", opens the servers; with none, the segments with the note for no match', async ($, on) => {
+  const w = world(on)
+  w.usage = withServers([['tickets', 4, 1000]])
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const run = (args: string) =>
+    $.command.run({ command: 'ctx', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+  for (const args of ['not', 'n', 'not loaded', 'NOT L', 'not-loaded']) {
+    await run(args)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toMatch(/^Context › Not loaded › MCP tools/)
+    await ui.unmount()
+  }
+  // A longer start of "Notifications" still names that segment.
+  await run('noti')
+  const notifications = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await notifications.find({ type: 'Text', text: /^Context › / }))?.text).toMatch(/System notifications/)
+  await notifications.unmount()
+
+  w.usage = usage(66_000)
+  await run('')
+  await w.clock.advance(0)
+  await run('not')
+  const none = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await none.find({ type: 'Text', text: 'No segment matches "not".' })).toBeDefined()
+  expect(await none.find({ key: 'row-system' })).toBeDefined()
+  await none.unmount()
+})
+
+test('with no token figure for the servers, the list orders by tools, draws no bar or share, and has no s', async ($, on) => {
   const w = world(on)
   const zero = withServers([
-    ['tickets', 4, 0],
     ['notes', 2, 0],
+    ['tickets', 4, 0],
   ])
   const categories = zero.context.breakdown.categories.map(category =>
     category.kind === 'deferred' ? { ...category, tokens: 0 } : category,
@@ -393,14 +471,21 @@ test('with no token figure for the servers, Not loaded shows their tool counts a
   await $.session.start(START)
   await w.clock.advance(0)
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 68 } })
-  // Rows only: the figures' own nested Texts hold no word.
-  const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text).filter(text => /[A-Za-z]{2}/.test(text))
-  const mcpAt = texts.findIndex(text => /^ *MCP tools *$/.test(text))
-  expect(mcpAt).toBeGreaterThan(-1)
-  expect(texts[mcpAt + 1]).toMatch(/^ +tickets +4 tools$/)
-  expect(texts[mcpAt + 2]).toMatch(/^ +notes +2 tools$/)
-  expect(texts[mcpAt + 3]).toBe('Per MCP server: the tools not loaded yet. Claude Code gives no token figure for them.')
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 68 } })
+  // The row stays a control with no figure: the token cell is empty.
+  expect((await ui.find({ key: 'row-not-loaded' }))?.text).toMatch(/MCP tools · 2 servers, 6 tools *$/)
+  await ui.press({ key: 'row-not-loaded' })
+  expect((await ui.find({ type: 'Text', text: /^Context › / }))?.text).toBe('Context › Not loaded › MCP tools')
+  expect(await ui.find({ type: 'Text', text: '2 servers · 6 tools · most tools first' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /% of/ })).toBeUndefined()
+  const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text)
+  const at = texts.findIndex(text => /^ +tickets +4 tools$/.test(text))
+  expect(at).toBeGreaterThan(-1)
+  expect(texts.slice(at).find(text => /^ +notes/.test(text))).toMatch(/^ +notes +2 tools$/)
+  // One order only: s leaves the line, and on the terminal the pane still takes its key.
+  expect(await ui.find({ key: 'sort' })).toBeUndefined()
+  expect((await ui.find({ key: 'taken-s' }))?.props.hotkey).toBe('s')
+  await ui.press({ key: 'back' })
   await ui.unmount()
 })
 
@@ -432,7 +517,7 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     expect(hint.props.dimColor).toBe(true)
     expect(hint.props.wrap).toBe('wrap')
     // The terminal drops the key words; a desktop keeps them, so Esc adds only the hint's row there.
-    expect((await ui.find({ type: 'Text', text: /tab: Move|1-9/ })) === undefined).toBe(surface === 'terminal')
+    expect((await ui.find({ type: 'Text', text: /1-9/ })) === undefined).toBe(surface === 'terminal')
     const row = (await ui.find({ key: 'row-system' }))!
     // The terminal's Button draws a dim mark in its text and has no hotkey. A
     // desktop's Button keeps its hotkey, drawn as a key cap, and the mod draws
@@ -448,9 +533,9 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     // The pane takes the keyboard: the keys show.
     await ui.redraw({ ...PANE.props, isFocused: true })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeUndefined()
-    // Off the terminal the arrows scroll the pane: Tab alone moves the ring.
-    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
+    // The words name Enter and the digits, 0 for the tenth row; the arrows and Tab go unnamed.
+    expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '⏎ 1-9 0: Open' })).toBeDefined()
     expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
     expect((await ui.find({ key: 'row-system' }))?.text.startsWith('1: ')).toBe(false)
     // Both surfaces leave the digit to the Button.
@@ -460,28 +545,81 @@ test('without the keyboard the key line says how to get it; the terminal dims th
   }
 })
 
-test('the key words for each state', () => {
-  // Without the keyboard the hint stands on its own line, apart from the controls.
-  expect(keyWords(true, 88, false)).toEqual([])
-  expect(keyWords(false, 88, false)).toEqual([])
-  expect(keysHint('terminal')).toBe('For keys: click the pane, or run /ctx')
-  expect(keysHint('desktop')).toBe('Click the pane for keys')
-  // The arrows and Tab move the ring along the rows; j and k are controls of their own.
-  expect(keyWords(true, 88, true)).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
-  expect(keyWords(true, 24, true)).toEqual(['↑↓ tab: Move', '⏎: Open'])
-  expect(keyWords(false, 88, true)).toEqual([])
-  // Off the terminal the mod leaves the arrows to the app: Tab alone moves the ring.
-  expect(keyWords(true, 88, true, 'desktop')).toEqual(['tab: Move', '⏎ or 1-9: Open'])
-  expect(keyWords(true, 88, true, 'terminal')).toEqual(['↑↓ tab: Move', '⏎ or 1-9: Open'])
+test('on the terminal a dim line describes the row with the ring, in two rows that never move; other surfaces draw none', async ($, on) => {
+  await realWorld($, on)
+  const ring = (element: string) =>
+    $.ui.focus({ component: 'Pane', requestId: 'context-breakdown', plugin: 'context-breakdown', element, origin: { kind: 'person' } })
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  /** The two rows above "All numbers are estimates.", and where they stand. */
+  const described = async () => {
+    const lines = flatten(await ui.drawn(), { columns: 88 })
+    const at = lines.indexOf('All numbers are estimates.')
+
+    return { at, rows: lines.slice(at - 3, at - 1), around: [lines[at - 4], lines[at - 1]] }
+  }
+  // The first row holds the ring: its name, then its definition, no wider than the table.
+  const first = await described()
+  expect(first.rows).toEqual(['System prompt and built-in tools: Claude Code’s own', 'instructions and tool schemas.'])
+  expect(first.around).toEqual(['', ''])
+  const table = cellWidth((await ui.find({ key: 'row-system' }))!.text) + 3
+  expect(first.rows.every(row => cellWidth(row) <= table)).toBe(true)
+  // The ring moves: the line follows it, and nothing below it moves.
+  await ring('row-tool-results')
+  const tools = await described()
+  expect(tools.rows).toEqual(['Tool results: the output of tool calls, such as file reads', 'and command output.'])
+  expect(tools.at).toBe(first.at)
+  // One row of text still takes two rows.
+  await ring('row-claude-output')
+  expect((await described()).rows).toEqual(['Claude output: replies, thinking and tool-call inputs.', ''])
+  // On a control: blank, in the same two rows.
+  await ring('refresh')
+  const blank = await described()
+  expect([blank.rows, blank.at]).toEqual([['', ''], first.at])
+  // Without the keyboard: blank too.
+  await ui.redraw({ ...PANE.props, bodyColumns: 88 })
+  const idle = await described()
+  expect([idle.rows, idle.at]).toEqual([['', ''], first.at])
+  await ring('row-system')
+  await ui.unmount()
+
+  // The desktop does not report where the focus is: no such line.
+  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  expect(await desktop.find({ type: 'Text', text: /^System prompt and built-in tools: / })).toBeUndefined()
+  await desktop.unmount()
 })
 
-test('rows after the ninth: Tab reaches them from the first row, which takes the ring', async ($, on) => {
+test('describedText names the row and says what it holds; nothing for a control', () => {
+  expect(describedText('row-tool-results')).toBe('Tool results: the output of tool calls, such as file reads and command output.')
+  expect(describedText('row-not-loaded')).toBe('MCP tools: tool schemas that Claude Code loads on demand. Not in the window.')
+  expect(describedText('refresh')).toBe('')
+  expect(describedText('')).toBe('')
+  expect(describedText(null)).toBe('')
+})
+
+test('the open words for each state', () => {
+  // Without the keyboard the hint stands on its own line, apart from the controls.
+  expect(openWords(9, 88, false)).toEqual([])
+  expect(openWords(0, 88, false)).toEqual([])
+  expect(keysHint('terminal')).toBe('For keys: click the pane, or run /ctx')
+  expect(keysHint('desktop')).toBe('Click the pane for keys')
+  // The arrows and Tab still move the ring, unnamed: only Enter and the digits are named.
+  expect(openWords(9, 88, true)).toEqual(['⏎ 1-9: Open'])
+  // A tenth row that opens takes 0.
+  expect(openWords(10, 88, true)).toEqual(['⏎ 1-9 0: Open'])
+  expect(openWords(20, 88, true)).toEqual(['⏎ 1-9 0: Open'])
+  // Too narrow for digits: Enter alone.
+  expect(openWords(10, 24, true)).toEqual(['⏎: Open'])
+  // No row that opens: nothing to open.
+  expect(openWords(0, 88, true)).toEqual([])
+})
+
+test('the tenth row takes 0; rows after it: Tab reaches them from the first row, which takes the ring', async ($, on) => {
   await realWorld($, on)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     const rows = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('row-'))
-    expect(rows.map(row => row.props.hotkey ?? null)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', null])
+    expect(rows.map(row => row.props.hotkey ?? null)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])
     expect(rows.filter(row => row.props.autoFocus === true).map(row => row.key)).toEqual(['row-system'])
     // The tenth row is a Button: Tab walks onto it and Enter presses it.
     await ui.press({ key: 'row-claude-output' })
@@ -492,7 +630,7 @@ test('rows after the ninth: Tab reaches them from the first row, which takes the
     const items = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('item-'))
     // The page keeps its twenty rows: all twelve items on one page.
     expect(items).toHaveLength(12)
-    expect(items.slice(9).map(item => item.props.hotkey)).toEqual([undefined, undefined, undefined])
+    expect(items.slice(9).map(item => item.props.hotkey)).toEqual(['0', undefined, undefined])
     expect(items.filter(item => item.props.autoFocus === true).map(item => item.key)).toEqual(['item-r:real0'])
     await ui.press({ key: 'back' })
     // b put the ring back on Tool results; leave the view as the next surface expects it.
@@ -548,9 +686,17 @@ test('level 2: a breadcrumb with totals, bars to the largest item, shares of the
     await ui.press({ key: 'row-tool-results' })
     const crumb = (await ui.find({ type: 'Text', text: /^Context › / }))!
     expect(crumb.text).toBe('Context › ██ Tool results  114k · 40% of used')
-    expect(await ui.find({ type: 'Text', text: /^ +% of segment$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '12 items · largest first' })).toBeDefined()
-    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Sort by time')
+    // The facts and the column name share one row, the name ending at the share column.
+    const header = (await ui.find({ type: 'Text', text: /^12 items · largest first +% of segment$/ }))!
+    const first = (await ui.find({ key: 'item-r:real0' }))!.text
+    expect(cellWidth(header.text)).toBe(cellWidth(first) + 3)
+    // Under the title, the segment's definition as a sentence, in lines no wider than the table.
+    const texts = (await ui.findAll({ type: 'Text' })).map(text => text.text)
+    const at = texts.indexOf('The output of tool calls, such as file reads and command')
+    expect(at).toBeGreaterThan(-1)
+    expect(texts[at + 1]).toBe('output.')
+    expect(cellWidth(texts[at]!)).toBeLessThanOrEqual(cellWidth(header.text))
+    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Newest first')
     expect((await ui.find({ key: 'item-r:real0' }))?.text).toMatch(/^Read  ~\/project\/src\/module-1\.ts +████████████ +31k +27%$/)
     expect((await ui.find({ key: 'item-r:real11' }))?.text).toMatch(/^ +Bash  npm run step-12 +▎ +600 +0\.5%$/)
     // The colour shows once, in the breadcrumb: no per-row swatch.
@@ -588,7 +734,7 @@ test('every part of a table row asks for the monospaced face, so the columns lin
     for (const child of await parts('item-r:real0')) {
       expect(isFound(child) && child.props.mono === true).toBe(true)
     }
-    expect((await ui.find({ type: 'Text', text: /^ +% of segment$/ }))?.props.mono).toBe(true)
+    expect((await ui.find({ type: 'Text', text: / +% of segment$/ }))?.props.mono).toBe(true)
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
@@ -801,7 +947,13 @@ test('ringKey: the row b came back from when it is shown, else the first; at lev
   // j's Button at levels 1 and 2 has a key of its own: level 3's never stands
   // in the tree a press leaves, so `$.ui.focus` waits for the new tree.
   expect(ringKey(level1, null, true)).toBe('list-down')
-  expect(ringKey(level1, null, false)).toBe('back')
+  // Level 1 draws no Back: its first control is Refresh.
+  expect(ringKey(level1, null, false)).toBe('refresh')
+  expect(ringKey({ seq: 1, gen: 0, level: 1 }, null, false, 'desktop')).toBe('refresh')
+  // The MCP tools row of Not loaded opens a list too: b comes back onto it.
+  const withServers = { ...snapshot, notLoadedServers: [{ name: 'tickets', tools: 2, tokens: 10 }] }
+  expect(ringKey({ ...level1, from: 'not-loaded' }, withServers, true)).toBe('row-not-loaded')
+  expect(ringKey({ ...level1, from: 'not-loaded' }, snapshot, true)).toBe('row-system')
 
   const row = (id: string, isOpenable = true) => ({ id, title: id, detail: '', pathIn: null, tokens: 1, isOpenable })
   const list = {

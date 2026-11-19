@@ -125,6 +125,53 @@ export function headCells(text: string, cells: number): string {
   return text.slice(0, end)
 }
 
+/**
+ * A text broken into lines of at most `width` cells, at spaces. A word wider
+ * than a line is cut into pieces. With `maxLines`, the last line kept ends
+ * in an ellipsis when text is left over. A width below 1 gives the text as
+ * one line.
+ */
+export function wrapCells(text: string, width: number, maxLines = Number.POSITIVE_INFINITY): string[] {
+  const cells = Math.floor(width)
+  if (!(cells >= 1)) {
+    return [text]
+  }
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/).filter(part => part !== '')) {
+    let rest = word
+    while (rest !== '') {
+      const joined = line === '' ? rest : `${line} ${rest}`
+      if (cellWidth(joined) <= cells) {
+        line = joined
+        rest = ''
+      } else if (line !== '') {
+        lines.push(line)
+        line = ''
+      } else {
+        // A word wider than a whole line: a piece of it per line.
+        // A wide character on a one-cell line still takes a line of its own.
+        const head = headCells(rest, cells) || [...rest][0]!
+        lines.push(head)
+        rest = rest.slice(head.length)
+      }
+    }
+  }
+  if (line !== '') {
+    lines.push(line)
+  }
+  if (lines.length <= maxLines) {
+    return lines
+  }
+  const kept = lines.slice(0, Math.max(0, maxLines))
+  const last = kept.length - 1
+  if (last >= 0) {
+    kept[last] = `${headCells(kept[last]!, cells - 1).trimEnd()}…`
+  }
+
+  return kept
+}
+
 /** A short, stable fingerprint of a text (FNV-1a, 32 bits, base 36). */
 export function hashText(text: string): string {
   let hash = 0x811c9dc5

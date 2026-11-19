@@ -25,8 +25,20 @@
 // the record keeps the last row the ring was on beside it, and j and k step
 // from that row (`RingMoves.from`).
 
-import type { ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
+import type { ContextBreakdownListId, ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
 import { LIST_DOWN, LIST_UP } from './scroll'
+import { NOT_LOADED } from './segments'
+
+/**
+ * The lists that level 1's rows open, in drawing order: the segments that
+ * hold anything, then, while a server has tools that are not loaded, the
+ * MCP tools row of Not loaded.
+ */
+export function levelOneLists(snapshot: ContextBreakdownSnapshot): ContextBreakdownListId[] {
+  const segments = [...snapshot.baseline, ...snapshot.conversation].filter(segment => segment.tokens > 0).map(segment => segment.id)
+
+  return snapshot.notLoadedServers.length > 0 ? [...segments, NOT_LOADED] : segments
+}
 
 /** The keys of the rows that open, in drawing order; none at level 3. */
 export function rowKeys(view: ContextBreakdownView, snapshot: ContextBreakdownSnapshot | null): string[] {
@@ -37,7 +49,7 @@ export function rowKeys(view: ContextBreakdownView, snapshot: ContextBreakdownSn
     return []
   }
 
-  return [...snapshot.baseline, ...snapshot.conversation].filter(segment => segment.tokens > 0).map(segment => `row-${segment.id}`)
+  return levelOneLists(snapshot).map(id => `row-${id}`)
 }
 
 /** Whether the list has a page before and after the one shown: only level 2 has pages. */

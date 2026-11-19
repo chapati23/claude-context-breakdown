@@ -8,7 +8,7 @@ import { expect, test } from 'claude-code/testing'
 import { CODE_LINE_CHARS } from '../../hooks/text'
 import { CHAT, LOCAL_COMMAND, SUMMARY } from '../fixtures'
 import { chat, flatten, mountPane, ringOf, session, tap } from './helpers'
-import { badLines, factsOf, figuresOf, keysWith, level2, level3, longest, widest } from './journeys'
+import { badLines, factsOf, figuresOf, keysWith, level2, level3, levelOne, longest, widest } from './journeys'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const COLUMNS = 88
@@ -110,7 +110,8 @@ for (const surface of SURFACES) {
 
       expect(level2(await tap(ui, 'back', opts)).name, kind.name).toBe(two.name)
       expect(await ringOf(ui), kind.name).toBe(key)
-      expect(await tap(ui, 'back', opts)).toEqual(level1)
+      // Level 1 as it was; only the line that describes the ringed row follows the ring.
+      expect(levelOne(await tap(ui, 'back', opts), surface).table).toEqual(levelOne(level1, surface).table)
     }
     await ui.unmount()
   })
@@ -160,7 +161,8 @@ for (const surface of SURFACES) {
       expect(two.keys, row).not.toContain('Open')
       // On the terminal a row that opens starts with its number; these do not.
       expect(two.rows.every(line => !/^\d: /.test(line)), row).toBe(true)
-      expect(await tap(ui, 'back', opts)).toEqual(level1)
+      // Level 1 as it was; only the line that describes the ringed row follows the ring.
+      expect(levelOne(await tap(ui, 'back', opts), surface).table).toEqual(levelOne(level1, surface).table)
     }
     await ui.unmount()
   })

@@ -3,12 +3,13 @@
 
 import type {
   ContextBreakdownList,
+  ContextBreakdownListId,
   ContextBreakdownRow,
   ContextBreakdownSegment,
   ContextBreakdownSegmentId,
   ContextBreakdownSort,
 } from '../types'
-import { apportion, baselineOf, isMemoryUnattributed, memorySegment } from './categories'
+import { apportion, baselineOf, isMemoryUnattributed, memorySegment, notLoadedServers } from './categories'
 import type { CategoryLike, MemoryFileLike } from './categories'
 import { blockChars, isCommandOutput, localCommandOf, sortMessage } from './classify'
 import type { BlockLike, MessageLike, SplitId } from './classify'
@@ -17,8 +18,9 @@ import type { ListingKind } from './listing'
 import { fenced } from './markdown'
 import type { Markup } from './markdown'
 import { loadedFileText } from './reminder'
-import { segmentDef } from './segments'
+import { NOT_LOADED, isSegmentList, segmentDef } from './segments'
 import { DEFAULT_CHARS_PER_TOKEN, MAX_API_MESSAGES } from './snapshot'
+import { countOf } from './table'
 import { firstWords, hashText, shortenPath } from './text'
 
 /** Rows on one page of level 2. */
@@ -78,6 +80,8 @@ export type Item = {
   loaded: (() => string | null) | null
   /** Why the as-loaded text may be missing, when the usual reason is wrong. */
   missing?: string
+  /** A server that is not loaded: how many of its tools are not loaded, for "most tools first". */
+  count?: number
 }
 
 export type ItemSet = {
@@ -89,9 +93,12 @@ export function isBaseline(segment: ContextBreakdownSegmentId): boolean {
   return segmentDef(segment).group === 'baseline'
 }
 
-/** Whether the segment's items have a time order to sort by. */
-export function canSort(segment: ContextBreakdownSegmentId): boolean {
-  return !isBaseline(segment) && segment !== 'conversation'
+/**
+ * Whether the segment's items have a time order to sort by. The servers that
+ * are not loaded sort by their figures instead (`listOf`).
+ */
+export function canSort(segment: ContextBreakdownListId): boolean {
+  return isSegmentList(segment) && !isBaseline(segment) && segment !== 'conversation'
 }
 
 function tokensOf(value: number): number {
@@ -637,8 +644,38 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
   return { items, note: isCut ? CUT_NOTE : items.length === 0 ? NO_ITEMS : null }
 }
 
-/** The items of one segment. */
-export function buildItems(segment: ContextBreakdownSegmentId, data: ItemData): ItemSet {
+/**
+ * The MCP servers whose tools are not loaded, as items: one per server, with
+ * its tool count as the detail. They hold no text: no row opens.
+ */
+function serverItems(data: ItemData): ItemSet {
+  if (data.breakdown === null) {
+    return { items: [], note: 'The breakdown could not be read.' }
+  }
+
+  return {
+    items: notLoadedServers(data.breakdown.mcpTools).map((server, order) => ({
+      id: `n:${hashText(server.name)}`,
+      title: server.name,
+      detail: countOf(server.tools, 'tool'),
+      tokens: server.tokens,
+      order,
+      path: null,
+      disk: null,
+      isNumbered: false,
+      markup: 'text' as const,
+      loaded: null,
+      count: server.tools,
+    })),
+    note: null,
+  }
+}
+
+/** The items of one segment, or the servers that are not loaded. */
+export function buildItems(segment: ContextBreakdownListId, data: ItemData): ItemSet {
+  if (!isSegmentList(segment)) {
+    return serverItems(data)
+  }
   if (segment === 'conversation') {
     return { items: [], note: 'The messages could not be read when measured, so the conversation is one segment.' }
   }
@@ -649,10 +686,14 @@ export function buildItems(segment: ContextBreakdownSegmentId, data: ItemData): 
   return conversationItems(segment as SplitId, data)
 }
 
-/** Largest first (ties keep their order: older first), or newest first. */
+/** Largest first (ties keep their order: older first), newest first, or most tools first (then largest). */
 export function sortItems(items: readonly Item[], sort: ContextBreakdownSort): Item[] {
   return [...items].sort((a, b) =>
-    sort === 'newest' ? b.order - a.order : b.tokens - a.tokens || a.order - b.order,
+    sort === 'newest'
+      ? b.order - a.order
+      : sort === 'tools'
+        ? (b.count ?? 0) - (a.count ?? 0) || b.tokens - a.tokens || a.order - b.order
+        : b.tokens - a.tokens || a.order - b.order,
   )
 }
 
@@ -680,14 +721,20 @@ function rowOf(item: Item): ContextBreakdownRow {
   }
 }
 
-/** One page of a segment's items, ready to store and draw. */
+/**
+ * One page of a segment's items, ready to store and draw. The servers that
+ * are not loaded sort largest first or most tools first; with no token
+ * figure for any of them, only by their tools.
+ */
 export function listOf(
-  segment: ContextBreakdownSegmentId,
+  segment: ContextBreakdownListId,
   set: ItemSet,
   sort: ContextBreakdownSort,
   page: number,
 ): ContextBreakdownList {
-  const order = canSort(segment) ? sort : 'size'
+  const isServers = segment === NOT_LOADED
+  const sortable = isServers ? set.items.some(item => item.tokens > 0) : canSort(segment)
+  const order: ContextBreakdownSort = sortable ? sort : isServers ? 'tools' : 'size'
   const sorted = sortItems(set.items, order)
   const pages = Math.max(1, Math.ceil(sorted.length / LIST_PAGE_ROWS))
   const index = Math.min(Math.max(0, Math.floor(page)), pages - 1)
@@ -698,12 +745,13 @@ export function listOf(
   return {
     segment,
     sort: order,
-    canSort: canSort(segment),
+    canSort: sortable,
     page: index,
     pages,
     rows: shown.map(rowOf),
     items: sorted.length,
     tokens,
+    ...(isServers ? { tools: sorted.reduce((sum, item) => sum + (item.count ?? 0), 0) } : {}),
     hiddenItems: sorted.length - shown.length,
     hiddenTokens: tokens - shownTokens,
     note: set.note,

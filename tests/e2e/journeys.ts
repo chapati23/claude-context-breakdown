@@ -50,10 +50,13 @@ export type Level2 = {
   name: string
   tokens: string
   share: string
-  /** The line under the breadcrumb, such as "12 items · largest first". */
+  /** The line under the breadcrumb: the segment's definition, "The output of tool calls, …". */
+  definition: string
+  /** The facts under the definition, such as "12 items · largest first", without the column name beside them. */
   facts: string
   /** The count that line states. */
   count: number
+  /** The line that ends in the column name: the facts' own line when they share it. */
   header: string
   /** The item rows, in order. */
   rows: string[]
@@ -64,9 +67,13 @@ export type Level2 = {
 /** Reads a flattened level 2. Throws with the lines when the shape is not there. */
 export function level2(lines: readonly string[]): Level2 {
   const crumb = /^Context › █+ (.+?) {2}(\S+) · (\S+) of used$/.exec(lines[0] ?? '')
-  const facts = lines[1] ?? ''
+  // The definition takes the lines up to the facts: more than one where the terminal wraps it.
+  const factsAt = Math.max(2, lines.findIndex((line, k) => k > 0 && /^\d+ items?\b/.test(line)))
+  const definition = lines.slice(1, factsAt).join(' ')
+  // The column name stands beside the facts where both fit on one row.
+  const facts = (lines[factsAt] ?? '').replace(/ {2,}% of segment$/, '')
   const count = /^(\d+) items?\b/.exec(facts)
-  const headerAt = lines.findIndex((line, k) => k > 1 && /% of segment$/.test(line))
+  const headerAt = lines.findIndex((line, k) => k >= factsAt && /% of segment$/.test(line))
   if (crumb === null || count === null || headerAt < 0) {
     throw new Error(`not a level 2:\n${lines.join('\n')}`)
   }
@@ -85,12 +92,28 @@ export function level2(lines: readonly string[]): Level2 {
     name: crumb[1]!,
     tokens: crumb[2]!,
     share: crumb[3]!,
+    definition,
     facts,
     count: Number(count[1]),
     header: lines[headerAt]!,
     rows,
     keys: lines.slice(lines.lastIndexOf('') + 1).join(' '),
   }
+}
+
+/**
+ * A flattened level 1 apart from the terminal's line that describes the row
+ * with the focus ring: that line follows the ring, the rest of the drawing
+ * does not. `described` holds its rows (with any marks), `table` the rest.
+ * Off the terminal there is no such line: `described` is empty.
+ */
+export function levelOne(lines: readonly string[], surface: 'terminal' | 'desktop'): { table: string[]; described: string[] } {
+  const at = lines.findIndex(line => line.includes('All numbers are estimates.'))
+  if (surface !== 'terminal' || at < 4) {
+    return { table: [...lines], described: [] }
+  }
+
+  return { table: [...lines.slice(0, at - 3), ...lines.slice(at - 1)], described: lines.slice(at - 3, at - 1) }
 }
 
 export type Level3 = {

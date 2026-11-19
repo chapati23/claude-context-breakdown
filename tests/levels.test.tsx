@@ -4,6 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
 import { cellWidth } from '../hooks/text'
+import { flatten } from './e2e/helpers'
 import { BAND, CHAT, FOCUSED_PANE, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
@@ -36,7 +37,7 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
-    expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '⏎ 1-9 0: Open' })).toBeDefined()
 
     await ui.press({ key: 'row-tool-results' })
     expect(await itemKeys(ui)).toEqual(['item-r:tu2', 'item-r:tu1'])
@@ -47,7 +48,7 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
     expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(
       surface === 'terminal' ? /Read +~\/project\/notes\.txt/ : /^Read$/,
     )
-    expect(await ui.find({ type: 'Text', text: /^2 items · largest first$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^2 items · largest first +% of segment$/ })).toBeDefined()
     expect((await ui.find({ key: 'back' }))?.props.hotkey).toBe('b')
     expect((await ui.find({ key: 'sort' }))?.props.hotkey).toBe('s')
     // Without the keyboard the terminal drops the hotkeys; a desktop keeps
@@ -74,15 +75,17 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
   }
 })
 
-test('a baseline segment lists its items; its sort key is there but does nothing', async ($, on) => {
+test('a baseline segment lists its items; it has one order, so s leaves the line', async ($, on) => {
   await chatWorld($, on)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'row-mcp' })
-    expect(isOff(await ui.find({ key: 'sort' }), surface)).toBe(true)
-    await ui.press({ key: 'sort' })
+    expect(await ui.find({ key: 'sort' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /largest first|newest first/ })).toBeUndefined()
+    // Its rows that do not open are dim all through, title and detail.
+    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
+    expect(title?.props.dimColor).toBe(true)
     // Tool schemas have no text: rows, not buttons.
     expect(await itemKeys(ui)).toEqual([])
     expect(await ui.find({ type: 'Text', text: /mcp__notes__search +notes/ })).toBeDefined()
@@ -112,7 +115,7 @@ test('the sort toggle and the pages', async ($, on) => {
     await ui.press({ key: 'sort' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b45')
     expect(await ui.find({ type: 'Text', text: /newest first · page 1 of 3$/ })).toBeDefined()
-    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Sort by size')
+    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Largest first')
 
     await ui.press({ key: 'next' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b25')
@@ -213,7 +216,8 @@ test('an instruction file shows its as-loaded text, and the file when the remind
     await ui.press({ key: global! })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('Be brief.')
     expect(await ui.find({ type: 'Text', text: /shown from disk/ })).toBeDefined()
-    expect(isOff(await ui.find({ key: 'view' }), surface)).toBe(true)
+    // No as-loaded text to switch to: v leaves the line.
+    expect(await ui.find({ key: 'view' })).toBeUndefined()
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -242,11 +246,15 @@ test('c copies the path and m mentions it; for an item without a path they do no
     await ui.press({ key: 'back' })
 
     await ui.press({ key: 'item-r:tu2' })
-    // Still controls with their keys, so v, c and m stay in the pane.
-    for (const key of ['copy', 'mention', 'view']) {
-      expect(isOff(await ui.find({ key }), surface)).toBe(true)
-      expect((await ui.find({ key }))?.props.hotkey).toBeDefined()
-      await ui.press({ key })
+    // No file: v, c and m leave the line. The terminal still takes their
+    // keys with nothing drawn, and a press of one does nothing.
+    for (const [key, letter] of [['copy', 'c'], ['mention', 'm'], ['view', 'v']] as const) {
+      expect(await ui.find({ key })).toBeUndefined()
+      const hidden = await ui.find({ key: `taken-${letter}` })
+      expect(hidden?.props.hotkey).toBe(surface === 'terminal' ? letter : undefined)
+      if (hidden !== undefined) {
+        await ui.press({ key: `taken-${letter}` })
+      }
     }
     // No copy, no mention: no answer line.
     expect(await ui.find({ type: 'Text', text: /the path|Copied/ })).toBeUndefined()
@@ -527,30 +535,50 @@ test('level 3: the controls stand between the facts line and the text, and the f
   }
 })
 
-/** The parts of the drawn key line, as the engine draws them: the words, and each plain control as `hotkey: label`. */
-function keyParts(node: unknown): string[] | null {
+type Part = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+
+/** The parts of one group, as the engine draws them: the words, and each plain control as `hotkey: label`. */
+function groupParts(group: Part): string[] {
+  return (group.children ?? []).flatMap(child => {
+    const part = child as Part
+    if (part.type === 'Text') {
+      return [(part.children ?? []).filter(text => typeof text === 'string').join('')]
+    }
+    if (part.type === 'Button') {
+      const label = String(part.props?.label ?? '')
+
+      return [part.props?.hotkey === undefined ? label : `${String(part.props.hotkey)}: ${label}`]
+    }
+
+    return []
+  })
+}
+
+/**
+ * The groups of the drawn key line: the wrapping row whose children are all
+ * wrapping rows of words and controls (a group can hold words only).
+ */
+function keyGroupsOf(node: unknown): string[][] | null {
   if (node === null || typeof node !== 'object') {
     return null
   }
-  const { type, props = {}, children = [] } = node as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-  const isLine = type === 'Box' && props.flexWrap === 'wrap' && children.some(child => (child as { type?: string })?.type === 'Button')
-  if (isLine) {
-    return children.flatMap(child => {
-      const part = child as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-      if (part.type === 'Text') {
-        return [(part.children ?? []).filter(text => typeof text === 'string').join('')]
-      }
-      if (part.type === 'Button') {
-        const label = String(part.props?.label ?? '')
+  const { type, props = {}, children = [] } = node as Part & { props?: Record<string, unknown>; children?: unknown[] }
+  const isGroup = (child: unknown) => {
+    const part = child as Part
+    const inner = part?.children ?? []
 
-        return [part.props?.hotkey === undefined ? label : `${String(part.props.hotkey)}: ${label}`]
-      }
-
-      return []
-    })
+    return (
+      part?.type === 'Box' &&
+      part.props?.flexWrap === 'wrap' &&
+      inner.length > 0 &&
+      inner.every(one => (one as Part)?.type === 'Button' || (one as Part)?.type === 'Text')
+    )
+  }
+  if (type === 'Box' && props.flexWrap === 'wrap' && children.length > 0 && children.every(isGroup)) {
+    return children.map(child => groupParts(child as Part))
   }
   for (const child of children) {
-    const found = keyParts(child)
+    const found = keyGroupsOf(child)
     if (found !== null) {
       return found
     }
@@ -559,75 +587,118 @@ function keyParts(node: unknown): string[] | null {
   return null
 }
 
-/** The drawn key line laid out in rows of `columns` cells: a gap of 2 between parts, wrapped between them. */
+/**
+ * The drawn key line laid out in rows of `columns` cells, by its rule: a gap
+ * of 2 between parts; a row breaks only between groups; a group wider than
+ * the row wraps inside itself, between its parts.
+ */
 function keyRows(node: unknown, columns: number): string[][] {
   const rows: string[][] = []
-  for (const part of keyParts(node) ?? []) {
+  let shared = false
+  for (const group of keyGroupsOf(node) ?? []) {
     const row = rows.at(-1)
-    if (row !== undefined && cellWidth([...row, part].join('  ')) <= columns) {
-      row.push(part)
-    } else {
-      rows.push([part])
+    if (row !== undefined && shared && cellWidth([...row, ...group].join('  ')) <= columns) {
+      row.push(...group)
+      continue
     }
+    // A new row for the group; it wraps inside itself when it is wider.
+    const own: string[][] = []
+    for (const part of group) {
+      const last = own.at(-1)
+      if (last !== undefined && cellWidth([...last, part].join('  ')) <= columns) {
+        last.push(part)
+      } else {
+        own.push([part])
+      }
+    }
+    rows.push(...own)
+    // Only a group that took one row leaves room beside it for the next.
+    shared = own.length === 1
   }
 
   return rows
 }
 
-test('every letter key of a level is a control there, in one order, readable at 45 columns', async ($, on) => {
+test('the keys stand in fixed groups, in one order; a control that cannot apply here leaves the line', async ($, on) => {
   await chatWorld($, on)
-  const keyLine = async (ui: { findAll: (q: { type: string }) => Promise<{ key: string | undefined }[]> }) =>
-    (await ui.findAll({ type: 'Button' }))
-      .map(button => button.key ?? '')
-      .filter(key => !/^(row|item)-/.test(key) && key !== 'next-below')
+  type Buttons = { findAll: (q: { type: string }) => Promise<{ key: string | undefined; props: Record<string, unknown> }[]> }
+  const controls = async (ui: Buttons) =>
+    (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => !/^(row|item)-/.test(key) && key !== 'next-below')
+  // The controls drawn in the line, and the keys the pane takes with nothing drawn.
+  const keyLine = async (ui: Buttons) => (await controls(ui)).filter(key => !key.startsWith('taken-'))
+  const taken = async (ui: Buttons) =>
+    (await ui.findAll({ type: 'Button' })).filter(button => (button.key ?? '').startsWith('taken-')).map(button => button.props.hotkey)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 45 } })
     // Only the terminal draws Down and Up (j and k): elsewhere Tab moves the
     // ring along the rows and the app scrolls the text.
     const steps = (down: string, up: string) => (surface === 'terminal' ? [down, up] : [])
-    // b at level 1 does nothing, but keeps the key in the pane.
-    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'close', 'refresh'])
-    // The words name the keys that move the ring: the arrows and Tab on the
-    // terminal, Tab alone elsewhere. j and k say Down and Up.
-    const words = (await ui.findAll({ type: 'Text', text: /: (Move|Open)$/ })).map(text => text.text)
-    expect(words).toEqual([surface === 'terminal' ? '↑↓ tab: Move' : 'tab: Move', '⏎ or 1-9: Open'])
-    // The key line as drawn wraps between its parts (a gap of 2): every row,
-    // words and controls, fits the pane's 45 columns, in cells.
-    const rows1 = keyRows(await ui.drawn(), 45)
-    expect(rows1.flat().length).toBe(2 + (await keyLine(ui)).length)
-    expect(rows1.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
-    if (surface === 'terminal') {
-      expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: 'Down' })
-      expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: 'Up' })
-    }
-    expect(isOff(await ui.find({ key: 'back' }), surface)).toBe(true)
-    await ui.press({ key: 'back' })
-    expect(await ui.find({ key: 'row-system' })).toBeDefined()
-
-    await ui.press({ key: 'row-tool-results' })
-    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
-    await ui.press({ key: 'item-r:tu2' })
-    expect(await keyLine(ui)).toEqual([
-      ...steps('scroll-down', 'scroll-up'),
-      'back',
-      'prev',
-      'next',
-      'format',
-      'view',
-      'copy',
-      'mention',
-      'close',
-      'refresh',
+    // Only the terminal was seen to keep the key of a hidden Button.
+    const keeps = (...keys: string[]) => (surface === 'terminal' ? keys : [])
+    // Level 1: move [open words, j, k], pane [r, x]. No Back: there is no
+    // level to go back to. The terminal takes b all the same, drawing nothing.
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('b'))
+    // The words name Enter and the digits; the arrows and Tab go unnamed.
+    const words = (await ui.findAll({ type: 'Text', text: /: Open$/ })).map(text => text.text)
+    expect(words).toEqual(['⏎ 1-9 0: Open'])
+    expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
+    const groups1 = keyGroupsOf(await ui.drawn())!
+    expect(groups1).toEqual([
+      ['⏎ 1-9 0: Open', ...steps('j: ↓', 'k: ↑')],
+      ['r: Refresh', 'x: Close'],
     ])
-    // Each control fits a 45-column pane whole; the line wraps between them.
+    // Every row of the line, as its rule lays it, fits the pane's 45 columns.
+    expect(keyRows(await ui.drawn(), 45).every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
+    if (surface === 'terminal') {
+      expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: '↓' })
+      expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: '↑' })
+      // A press of the taken b does nothing: level 1 stays.
+      await ui.press({ key: 'taken-b' })
+      expect(await ui.find({ key: 'row-system' })).toBeDefined()
+    }
+
+    // Level 2 of one page: move [open words, j, k, b], pane [s, r, x]. p and n leave together.
+    await ui.press({ key: 'row-tool-results' })
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'sort', 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('p', 'n'))
+    expect(keyGroupsOf(await ui.drawn())!.at(-1)).toEqual(['s: Newest first', 'r: Refresh', 'x: Close'])
+
+    // Level 3 of a Bash result: no file, so v, c and m leave the line; p and n stay, fainter.
+    await ui.press({ key: 'item-r:tu2' })
+    expect(await keyLine(ui)).toEqual([...steps('scroll-down', 'scroll-up'), 'back', 'prev', 'next', 'format', 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('v', 'c', 'm'))
+    expect(keyGroupsOf(await ui.drawn())).toEqual([
+      [...steps('j: ↓', 'k: ↑'), 'b: Back', 'p: Prev page', 'n: Next page'],
+      ['f: Formatted'],
+      ['r: Refresh', 'x: Close'],
+    ])
     const rows3 = keyRows(await ui.drawn(), 45)
-    expect(rows3.flat().length).toBe((await keyLine(ui)).length)
     expect(rows3.every(row => cellWidth(row.join('  ')) <= 45)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
+})
+
+test('the key line breaks only between groups; a group wider than the pane wraps inside itself', async ($, on) => {
+  await chatWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 40 } })
+  const tail = async (n: number) => flatten(await ui.drawn(), { columns: 40 }).slice(-n)
+  // "r: Refresh" would fit beside k at 40 columns, but it is of the next group.
+  expect(await tail(2)).toEqual(['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'])
+  // Level 3: the move group is wider than 40 columns and wraps inside
+  // itself; the next groups start a row of their own, and share it where
+  // they fit there whole.
+  await ui.press({ key: 'row-tool-results' })
+  await ui.press({ key: 'item-r:tu2' })
+  const lines = flatten(await ui.drawn(), { columns: 40 })
+  const at = lines.findIndex(line => line.startsWith('j: ↓'))
+  expect(lines.slice(at, at + 3)).toEqual(['j: ↓  k: ↑  b: Back  p: Prev page', 'n: Next page', 'f: Formatted  r: Refresh  x: Close'])
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'back' })
+  await ui.unmount()
 })
 
 

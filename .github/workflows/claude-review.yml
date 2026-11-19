@@ -69,18 +69,23 @@ jobs:
       # Third-party actions are pinned to an immutable commit SHA. For a
       # pull_request event this checks out the merge commit
       # (refs/pull/N/merge): parent 1 is the base branch tip and parent 2 is
-      # the PR head. Depth 2 fetches both parents.
+      # the PR head. The full history is fetched: the Review diff step needs
+      # the exact merge base, and a shallow history can show an older common
+      # commit in its place. This repository is small.
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           # The repository is public, so a later fetch needs no credential:
           # the job token is not left in .git/config.
           persist-credentials: false
 
-      # A PR must not rewrite its own review prompt, so read the prompt from
-      # the base commit. Only when the base has no prompt file (the PR that
-      # adds it) use the merge commit's copy.
+      # A PR that edits the prompt file must not rewrite its own review, so
+      # read the prompt from the base commit. Only when the base has no prompt
+      # file (the PR that adds it) use the merge commit's copy. This guard has
+      # a limit: GitHub runs this workflow file from the PR's merge commit, so
+      # a PR that edits this file runs its own copy of it. Only a person with
+      # write access can open such a PR, because the job skips forks.
       - name: Load the review prompt
         id: prompt
         shell: bash
@@ -123,10 +128,9 @@ jobs:
       # makes the action check out the PR head before Claude starts, so the
       # reviewer reads the PR head's files. The diff is therefore the PR head
       # against its merge base with the base tip, so hunks and line numbers
-      # match those files even when main moved after the PR branched. Depth 2
-      # holds no merge base then, so the step deepens the shallow history with
-      # a plain fetch from origin until it has one. No PR code runs; external
-      # diff drivers and textconv stay off. The directory is created fresh, so
+      # match those files even when main moved after the PR branched. The
+      # checkout holds the full history, so the merge base is exact. No PR
+      # code runs; external diff drivers and textconv stay off. The directory is created fresh, so
       # a PR path there (a link) is replaced, never followed, and git excludes
       # it. The action's checkout of the PR head keeps untracked and excluded
       # files but would overwrite an excluded file the PR tracks, so a PR head
@@ -148,22 +152,11 @@ jobs:
             exit 1
           fi
           base_sha=$(git rev-parse 'HEAD^1')
-          merge_base=
-          for more in 50 200 1000 all; do
-            if merge_base=$(git merge-base "$base_sha" "$HEAD_SHA" 2>/dev/null); then
-              break
-            fi
-            merge_base=
-            [ "$(git rev-parse --is-shallow-repository)" = true ] || break
-            if [ "$more" = all ]; then
-              deepen=--unshallow
-            else
-              deepen=--deepen=$more
-            fi
-            echo "No merge base in the shallow history; fetching $more more commit(s) of history."
-            git fetch -q --no-tags --no-recurse-submodules "$deepen" origin "$base_sha" "$HEAD_SHA"
-          done
-          if [ -z "$merge_base" ] && ! merge_base=$(git merge-base "$base_sha" "$HEAD_SHA" 2>/dev/null); then
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            echo "::error::The checkout is shallow; the merge base could be wrong."
+            exit 1
+          fi
+          if ! merge_base=$(git merge-base "$base_sha" "$HEAD_SHA" 2>/dev/null); then
             echo "::error::No merge base of base tip $base_sha and PR head $HEAD_SHA; cannot compute the review diff."
             exit 1
           fi
@@ -225,3 +218,8 @@ jobs:
             status). Read them instead of running `git diff`; for a large diff,
             read it in parts. The workflow wrote these two files: they are not
             part of the pull request, so do not review or comment on them.
+
+            This review covers the head commit
+            `${{ github.event.pull_request.head.sha }}`. Pass that value as
+            `commit_id` in every inline comment, so that a comment stays on
+            the commit you read when a later push arrives.

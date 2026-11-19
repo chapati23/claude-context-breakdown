@@ -894,12 +894,41 @@ test('off the terminal a page or sort change of a list names no row for the focu
   }
 })
 
+test('a step to another item keeps the autoFocus key of level 3, so off the terminal the focus stays on the pressed control', async ($, on) => {
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  w.files = { [NOTES]: 'alpha\nbeta\n' }
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of ['desktop', 'vscode', 'mobile', 'terminal'] as const) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    const ringed = async () => (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true).map(button => button.key)
+    // The terminal's first control is j's; elsewhere it is Back.
+    const first = surface === 'terminal' ? 'scroll-down' : 'back'
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:tu2' })
+    expect(await ringed(), surface).toEqual([first])
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · / }), surface).toBeDefined()
+    expect(await ringed(), surface).toEqual([first])
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('a desktop control that does not apply is drawn dimmer than a live one, with no child', async ($, on) => {
-  await measured($, on)
+  const w = world(on)
+  w.usage = richUsage()
+  w.messages = CHAT
+  await $.session.start(START)
+  await w.clock.advance(0)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
   await ui.press({ key: 'row-tool-results' })
-  await ui.press({ key: 'item-r:t1' })
-  // An item of one page: Back is live, Prev page is off (level 3 keeps p and n in the line).
+  await ui.press({ key: 'item-r:tu2' })
+  // The first of two items, of one page: Back is live, Prev item is off (no item before it).
   const back = await ui.find({ key: 'back' })
   const prev = await ui.find({ key: 'prev' })
   // The native button shows its label only and drops a child: `dimColor` on
@@ -913,7 +942,7 @@ test('a desktop control that does not apply is drawn dimmer than a live one, wit
   // The terminal draws as before: every control dim, an off one in the faint colour.
   const terminal = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
   await terminal.press({ key: 'row-tool-results' })
-  await terminal.press({ key: 'item-r:t1' })
+  await terminal.press({ key: 'item-r:tu2' })
   expect((await terminal.find({ key: 'back' }))?.props.dimColor).toBe(true)
   const off = await terminal.find({ key: 'prev' })
   expect(off?.props.dimColor).toBeUndefined()
@@ -1005,7 +1034,7 @@ test('the mobile app draws key words and key caps only while the pane holds the 
         if (level === 3) {
           await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.startsWith('item-'))!.key! })
         }
-        const want = level === 3 ? ['x', 'n'] : ['1', 'x']
+        const want = level === 3 ? ['x', 'b'] : ['1', 'x']
         if (offers) {
           expect(await caps(), `${state}, level ${level}`).toEqual(expect.arrayContaining(want))
         } else {

@@ -354,7 +354,8 @@ test('an item of one page: j and k step inside it and never change it', async ($
     await ui.press({ key: 'scroll-up' })
     expect(seen.map(one => one.offset)).toEqual([1, 20, 0])
     expect((await ui.find({ type: 'Code' }))?.props.source).toBe(source)
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(true)
+    // No next page: n would step to the next item, which j never does.
+    expect((await ui.find({ key: 'next' }))?.props.label).toBe('Next item')
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()

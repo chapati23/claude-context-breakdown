@@ -25,6 +25,7 @@ import {
   keepsFocus,
   rebuildView,
   refreshItem,
+  stepItem,
   toLevel1,
   toLevel1With,
   toggleFormat,
@@ -1143,6 +1144,9 @@ export const register: Register = on => {
         return thenTop(() => listPage(nav, delta))
       },
       contentPage: delta => thenTop(() => contentPage(nav, delta)),
+      // Keeps the level: off the terminal the focus stays on the pressed
+      // control, as for Next page (`thenTopOf`).
+      stepItem: delta => thenTop(() => stepItem(nav, delta)),
       toggleSource: () => thenTop(() => toggleSource(nav)),
       copy: (path, surface) =>
         quietly(

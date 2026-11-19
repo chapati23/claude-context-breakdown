@@ -9,13 +9,14 @@ import type {
   ContextBreakdownFormat,
   ContextBreakdownList,
   ContextBreakdownListId,
+  ContextBreakdownPlace,
   ContextBreakdownSnapshot,
   ContextBreakdownSort,
   ContextBreakdownSource,
   ContextBreakdownView,
 } from '../types'
 import type { MessageLike } from './classify'
-import { NO_ITEMS, buildItems, isBaseline, listOf } from './items'
+import { NO_ITEMS, buildItems, isBaseline, listOf, opens, pageOf, placeOf } from './items'
 import type { Item, ItemBreakdown, ItemData, ItemSet } from './items'
 import { defaultFormat, formattedSource, mappedLine, markdownPages, pageAtLine } from './markdown'
 import { compareFile, compareRead } from './reminder'
@@ -186,7 +187,30 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
     return { seq: view.seq, gen, level: 1, note: GONE_NOTE }
   }
 
-  return { ...view, gen, list, item: { ...view.item, tokens: item.tokens } }
+  // A new item can push the open one to another page, or change its place.
+  const held = heldBy(view.list.segment, set, view.list.sort, item.id, view.list.page)
+
+  return { ...view, gen, ...held, item: { ...view.item, tokens: item.tokens } }
+}
+
+/**
+ * Level 3's list and place for the item `id`: the page of the list that
+ * holds the item, so b puts the ring on its row, and where the item stands
+ * (`placeOf`). Without the item in the set, the list at `page` and no place.
+ */
+function heldBy(
+  segment: ContextBreakdownListId,
+  set: ItemSet,
+  sort: ContextBreakdownSort,
+  id: string,
+  page: number,
+): { list: ContextBreakdownList; place?: ContextBreakdownPlace } {
+  const place = placeOf(segment, set, sort, id)
+  if (place === null) {
+    return { list: listOf(segment, set, sort, page) }
+  }
+
+  return { list: listOf(segment, set, sort, pageOf(place)), place }
 }
 
 // Content of level 3.
@@ -430,6 +454,32 @@ async function findItem(
   return { item, set }
 }
 
+/**
+ * Level 3 for `item` of `list` in the fresh `set`: as loaded, first page,
+ * in the item's own default view. Null for an item with no text to show.
+ */
+async function opened(
+  io: NavIo,
+  base: ContextBreakdownView,
+  list: ContextBreakdownList,
+  set: ItemSet,
+  item: Item,
+): Promise<Outcome | null> {
+  if (!opens(item)) {
+    return null
+  }
+  const resolved = await resolveText(io, item, true)
+  const isChanged = isChangedOnDisk(item, resolved.loaded, resolved.disk)
+
+  return commit(io, base, {
+    seq: base.seq,
+    gen: base.gen,
+    level: 3,
+    ...heldBy(list.segment, set, list.sort, item.id, list.page),
+    item: contentOf(item, resolved, 'loaded', 0, isChanged),
+  })
+}
+
 /** Level 3 for an item of the open list, as loaded, first page. */
 export function openItem(io: NavIo, id: string): Promise<void> {
   return retried(async () => {
@@ -442,20 +492,35 @@ export function openItem(io: NavIo, id: string): Promise<void> {
     if (typeof found === 'string') {
       return found
     }
-    const { item, set } = found
-    if (item.loaded === null && item.disk === null) {
+
+    return opened(io, base, list, found.set, found.item)
+  })
+}
+
+/**
+ * The next item that opens (`delta` 1) or the previous one (-1), in the
+ * list's order, across its pages: n and p at the end of an item. The order
+ * comes from a fresh build at the press, not from the stored place, which a
+ * measurement since may have made stale. Nothing at the list's end.
+ */
+export function stepItem(io: NavIo, delta: number): Promise<void> {
+  return retried(async () => {
+    const base = await io.view()
+    if (base.level !== 3) {
       return null
     }
-    const resolved = await resolveText(io, item, true)
-    const isChanged = isChangedOnDisk(item, resolved.loaded, resolved.disk)
+    const found = await findItem(io, base, base.list, base.item.id)
+    if (typeof found === 'string') {
+      return found
+    }
+    const place = placeOf(base.list.segment, found.set, base.list.sort, base.item.id)
+    const id = delta > 0 ? place?.next : place?.prev
+    const item = found.set.items.find(one => one.id === id)
+    if (item === undefined) {
+      return null
+    }
 
-    return commit(io, base, {
-      seq: base.seq,
-      gen: base.gen,
-      level: 3,
-      list: listOf(list.segment, set, list.sort, list.page),
-      item: contentOf(item, resolved, 'loaded', 0, isChanged),
-    })
+    return opened(io, base, base.list, found.set, item)
   })
 }
 
@@ -485,12 +550,12 @@ function reopen(
     const { source, page, format = base.item.format, share = 0, atEnd = false } = change(base.item)
     const resolved = await resolveText(io, found.item, isFresh || source === 'disk')
     const isChanged = isFresh ? isChangedOnDisk(found.item, resolved.loaded, resolved.disk) : base.item.isChanged
-    const list = listOf(base.list.segment, found.set, base.list.sort, base.list.page)
+    const held = heldBy(base.list.segment, found.set, base.list.sort, base.item.id, base.list.page)
     // A switch of view on the same source keeps the place, not the page number.
     const from = source === base.item.source ? { format: base.item.format, page: base.item.page, share } : undefined
     const item = { ...contentOf(found.item, resolved, source, page, isChanged, format, from), atEnd }
 
-    return commit(io, base, { ...base, list, item })
+    return commit(io, base, { ...base, ...held, item })
   })
 }
 

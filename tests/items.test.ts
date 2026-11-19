@@ -8,6 +8,8 @@ import {
   callSummary,
   injectionTitle,
   listOf,
+  pageOf,
+  placeOf,
   promptTitle,
   promptTitles,
   skillTitle,
@@ -16,7 +18,19 @@ import {
   toolPath,
 } from '../hooks/items'
 import type { ItemData } from '../hooks/items'
-import { GONE_NOTE, ITEMS_GONE_NOTE, afterClear, back, contentOf, isChangedOnDisk, mention, noMatchNote, openItem, rebuildView } from '../hooks/navigate'
+import {
+  GONE_NOTE,
+  ITEMS_GONE_NOTE,
+  afterClear,
+  back,
+  contentOf,
+  isChangedOnDisk,
+  mention,
+  noMatchNote,
+  openItem,
+  rebuildView,
+  stepItem,
+} from '../hooks/navigate'
 import type { NavIo } from '../hooks/navigate'
 import { matchSegment } from '../hooks/segments'
 import { MAX_API_MESSAGES } from '../hooks/snapshot'
@@ -290,6 +304,26 @@ describe('sorting and pages', () => {
     expect(list.sort).toBe('size')
     expect(list.rows.map(row => row.title)).toEqual(['System tools', 'System prompt'])
   })
+
+  test('an item’s place counts in the order shown, across pages, and names its neighbours that open', () => {
+    // Largest first: b1 is first, b45 last; b20 ends page 1 and b21 starts page 2.
+    expect(placeOf('tool-results', set, 'size', 'r:b1')).toEqual({ index: 0, prev: null, next: 'r:b2' })
+    expect(placeOf('tool-results', set, 'size', 'r:b20')).toEqual({ index: 19, prev: 'r:b19', next: 'r:b21' })
+    expect(pageOf(placeOf('tool-results', set, 'size', 'r:b20')!)).toBe(0)
+    expect(pageOf(placeOf('tool-results', set, 'size', 'r:b21')!)).toBe(1)
+    expect(placeOf('tool-results', set, 'size', 'r:b45')).toEqual({ index: 44, prev: 'r:b44', next: null })
+    // Newest first turns the order round.
+    expect(placeOf('tool-results', set, 'newest', 'r:b45')).toEqual({ index: 0, prev: null, next: 'r:b44' })
+    expect(placeOf('tool-results', set, 'newest', 'r:b1')).toEqual({ index: 44, prev: 'r:b2', next: null })
+    // An item the set does not hold has no place.
+    expect(placeOf('tool-results', set, 'size', 'r:gone')).toBeNull()
+  })
+
+  test('a row that does not open counts in the place, and n and p pass over it', () => {
+    const shut = { ...set, items: set.items.map(item => (item.id === 'r:b2' ? { ...item, loaded: null, disk: null } : item)) }
+    expect(placeOf('tool-results', shut, 'size', 'r:b1')).toEqual({ index: 0, prev: null, next: 'r:b3' })
+    expect(placeOf('tool-results', shut, 'size', 'r:b3')).toEqual({ index: 2, prev: 'r:b1', next: 'r:b4' })
+  })
 })
 
 describe('/ctx argument', () => {
@@ -481,8 +515,12 @@ describe('a move against a newer view', () => {
   const list = listOf('tool-results', buildItems('tool-results', DATA), 'size', 0)
 
   /** A NavIo over one stored view; `during` runs while the move reads the messages. */
-  function navIo(state: { view: ContextBreakdownView }, during: (data: { messages: MessageLike[] }) => void): NavIo {
-    const data = { messages: CHAT as unknown as MessageLike[] }
+  function navIo(
+    state: { view: ContextBreakdownView },
+    during: (data: { messages: MessageLike[] }) => void,
+    messages: readonly unknown[] = CHAT,
+  ): NavIo {
+    const data = { messages: messages as unknown as MessageLike[] }
     let isFirst = true
 
     return {
@@ -530,5 +568,79 @@ describe('a move against a newer view', () => {
       'r:tu1',
     )
     expect(state.view).toEqual({ seq: 2, gen: 0, level: 1, from: 'tool-results' })
+  })
+
+  /** `messages` with one more Bash result of `chars` characters, the newest. */
+  const withResult = (messages: readonly unknown[], id: string, chars: number) => [
+    ...messages,
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: id } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'x'.repeat(chars) }] },
+  ]
+
+  /** Level 3 on the Tool result `id` of `messages`, as the person opened it from the first page. */
+  async function openedAt(id: string, messages: readonly unknown[]): Promise<{ view: ContextBreakdownView }> {
+    const set = buildItems('tool-results', { ...DATA, messages: messages as MessageLike[] })
+    const state: { view: ContextBreakdownView } = { view: { seq: 1, gen: 0, level: 2, list: listOf('tool-results', set, 'size', 0) } }
+    await openItem(navIo(state, () => undefined, messages), id)
+
+    return state
+  }
+
+  test('n and p at the end of an item open the next and previous item that opens, across list pages', async () => {
+    const many = manyResults(45)
+    const state = await openedAt('r:b20', many)
+    expect(state.view).toMatchObject({ level: 3, list: { page: 0 }, place: { index: 19, next: 'r:b21' } })
+    await stepItem(navIo(state, () => undefined, many), 1)
+    expect(state.view).toMatchObject({ level: 3, item: { id: 'r:b21', page: 0 }, list: { page: 1 }, place: { index: 20, prev: 'r:b20' } })
+    // b goes to the page that holds it, with the ring on its row.
+    expect(back(state.view)).toMatchObject({ level: 2, list: { page: 1 }, from: 'r:b21' })
+    await stepItem(navIo(state, () => undefined, many), -1)
+    expect(state.view).toMatchObject({ level: 3, item: { id: 'r:b20' }, list: { page: 0 } })
+  })
+
+  test('at either end of the list a step that way does nothing', async () => {
+    const many = manyResults(45)
+    for (const [id, delta] of [
+      ['r:b1', -1],
+      ['r:b45', 1],
+    ] as const) {
+      const state = await openedAt(id, many)
+      await stepItem(navIo(state, () => undefined, many), delta)
+      expect(state.view).toMatchObject({ seq: 2, item: { id } })
+    }
+  })
+
+  test('a step reads the order afresh: a rebuild while it reads makes it run again on the new items', async () => {
+    const state = await openedAt('r:tu2', CHAT)
+    // A new result lands between the two: the next item after tu2 is now it.
+    const fresh = withResult(CHAT, 'fresh', 1000)
+    await stepItem(
+      navIo(state, data => {
+        data.messages = fresh as MessageLike[]
+        state.view = rebuildView(state.view, { ...DATA, messages: data.messages })
+      }),
+      1,
+    )
+    expect(state.view).toMatchObject({ level: 3, gen: 1, item: { id: 'r:fresh' }, place: { index: 1, prev: 'r:tu2', next: 'r:tu1' } })
+  })
+
+  test('a later press wins over a slow step', async () => {
+    const state = await openedAt('r:tu2', CHAT)
+    await stepItem(
+      navIo(state, () => {
+        state.view = back(state.view)
+      }),
+      1,
+    )
+    expect(state.view).toMatchObject({ level: 2, from: 'r:tu2' })
+  })
+
+  test('a rebuild keeps level 3 on the page of the list that holds the item, so b finds its row', async () => {
+    const many = manyResults(45)
+    const state = await openedAt('r:b20', many)
+    // A larger result than all others comes first, and pushes b20 to page 2.
+    const rebuilt = rebuildView(state.view, { ...DATA, messages: withResult(many, 'top', 10_000) as MessageLike[] })
+    expect(rebuilt).toMatchObject({ level: 3, list: { page: 1 }, place: { index: 20 } })
+    expect(back(rebuilt)).toMatchObject({ level: 2, list: { page: 1 }, from: 'r:b20' })
   })
 })

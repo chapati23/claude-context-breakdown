@@ -170,6 +170,73 @@ test('a long item pages with n and p, and the facts line says which lines it sho
   }
 })
 
+test('n and p at the end of an item step to the next and previous item of the list, in its order, across its pages', async ($, on) => {
+  await chatWorld($, on, manyResults(45))
+  const facts = async (ui: { find: (q: { type: string; text: RegExp }) => Promise<{ text?: string } | undefined> }) =>
+    (await ui.find({ type: 'Text', text: / tokens · / }))?.text
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    // The last row of the first page; the item has one page, so n names the next item.
+    await ui.press({ key: 'item-r:b20' })
+    expect(await facts(ui)).toMatch(/^item 20 of 45 · \S+ tokens · raw · as loaded\b/)
+    expect((await ui.find({ key: 'next' }))?.props).toMatchObject({ label: 'Next item', hotkey: 'n' })
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(false)
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step 21$/ })).toBeDefined()
+    expect(await facts(ui)).toMatch(/^item 21 of 45 · /)
+    expect((await ui.find({ key: 'prev' }))?.props.label).toBe('Prev item')
+    // b opens the page that holds the item, with the ring on its row.
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 2 of 3/ })).toBeDefined()
+    expect((await ui.find({ key: 'item-r:b21' }))?.props.autoFocus).toBe(true)
+    // p goes back across the page: the previous item, at its first page.
+    await ui.press({ key: 'item-r:b21' })
+    await ui.press({ key: 'prev' })
+    expect(await facts(ui)).toMatch(/^item 20 of 45 · /)
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 1 of 3/ })).toBeDefined()
+
+    // Newest first: the step follows that order. The first item has no item before it.
+    await ui.press({ key: 'sort' })
+    await ui.press({ key: 'item-r:b45' })
+    expect(await facts(ui)).toMatch(/^item 1 of 45 · /)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(true)
+    await ui.press({ key: 'prev' })
+    expect(await facts(ui)).toMatch(/^item 1 of 45 · /)
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step 44$/ })).toBeDefined()
+    expect(await facts(ui)).toMatch(/^item 2 of 45 · /)
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'sort' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('an item of one page that is the only one of its list that opens: p and n leave the line', async ($, on) => {
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:one' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 1 · / })).toBeDefined()
+    expect(await ui.find({ key: 'prev' })).toBeUndefined()
+    expect(await ui.find({ key: 'next' })).toBeUndefined()
+    // The terminal still takes the two letters, drawing nothing.
+    const taken = (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('taken-'))
+    expect(taken.filter(key => key === 'taken-p' || key === 'taken-n')).toEqual(surface === 'terminal' ? ['taken-p', 'taken-n'] : [])
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('v switches a Read result between as loaded and on disk, and marks a change', async ($, on) => {
   const w = await chatWorld($, on)
 
@@ -665,12 +732,14 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
     expect(await taken(ui)).toEqual(keeps('p', 'n'))
     expect(keyGroupsOf(await ui.drawn())!.at(-1)).toEqual(['s: Newest first', 'r: Refresh', 'x: Close'])
 
-    // Level 3 of a Bash result: no file, so v, c and m leave the line; p and n stay, fainter.
+    // Level 3 of a Bash result: no file, so v, c and m leave the line. It
+    // has one page, and the list has another item that opens: p and n step
+    // between the items.
     await ui.press({ key: 'item-r:tu2' })
     expect(await keyLine(ui)).toEqual([...steps('scroll-down', 'scroll-up'), 'back', 'prev', 'next', 'format', 'refresh', 'close'])
     expect(await taken(ui)).toEqual(keeps('v', 'c', 'm'))
     expect(keyGroupsOf(await ui.drawn())).toEqual([
-      [...steps('j: ↓', 'k: ↑'), 'b: Back', 'p: Prev page', 'n: Next page'],
+      [...steps('j: ↓', 'k: ↑'), 'b: Back', 'p: Prev item', 'n: Next item'],
       ['f: Formatted'],
       ['r: Refresh', 'x: Close'],
     ])
@@ -695,7 +764,7 @@ test('the key line breaks only between groups; a group wider than the pane wraps
   await ui.press({ key: 'item-r:tu2' })
   const lines = flatten(await ui.drawn(), { columns: 40 })
   const at = lines.findIndex(line => line.startsWith('j: ↓'))
-  expect(lines.slice(at, at + 3)).toEqual(['j: ↓  k: ↑  b: Back  p: Prev page', 'n: Next page', 'f: Formatted  r: Refresh  x: Close'])
+  expect(lines.slice(at, at + 3)).toEqual(['j: ↓  k: ↑  b: Back  p: Prev item', 'n: Next item', 'f: Formatted  r: Refresh  x: Close'])
   await ui.press({ key: 'back' })
   await ui.press({ key: 'back' })
   await ui.unmount()

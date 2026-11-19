@@ -94,6 +94,8 @@ From a shell:
 claude plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
+In the Claude desktop app, `/plugin` does not run. Click **+** next to the prompt box, then **Plugins**, then **Add marketplace** with `chapati23/claude-context-breakdown`, then **Add plugin**. A copy that you installed from a terminal at the user scope also loads in the desktop app's local sessions.
+
 ## Update
 
 By default, Claude Code does not update this mod by itself. From a shell:
@@ -165,6 +167,15 @@ Claude Code cuts a line of code after about 2,000 characters. So the raw view sp
 When a file changed on disk after Claude Code loaded it, the content view says so.
 
 When a compaction or `/clear` removes the item or every item of the list that the pane shows, the pane goes back to the segments and says so. After `/clear`, a list or item of a baseline segment goes back to the segments with no note, because baseline content stays in the context.
+
+## In the desktop app
+
+The mod draws the same bar and the same pane in the Claude desktop app. These things differ from the terminal:
+
+- The bar has no chips. The app draws each segment as a button of its own, so a chip counted in text cells would not sit beside its segment. Click a segment to open its items.
+- The rows and the controls of the pane are the app's own buttons. The app marks the button under the pointer or the focus itself, so a row keeps its colours there.
+- A minimized pane shows the bar, the total and the legend, with nothing to press.
+- The palette follows the `theme` setting of Claude Code, not the appearance of the app. With a dark Claude Code theme and a light app, the bar has the colours that are made for a dark background.
 
 ## How the numbers are made
 

@@ -19,7 +19,7 @@ import { baselineOf } from './categories'
 import { formatTokens } from './format'
 import { colorOf } from './palette'
 import type { Palette } from './palette'
-import { levelOneLists } from './ring'
+import { levelOneLists, rowKeys } from './ring'
 import { LIST_DOWN, LIST_UP, SCROLL_DOWN, SCROLL_UP } from './scroll'
 import { NOT_LOADED, NOT_LOADED_DEF, isSegmentList, segmentDef, sentence } from './segments'
 import { freeTokens, sumTokens, usedTokens } from './snapshot'
@@ -444,6 +444,11 @@ export function withoutDeferred(name: string): string {
   return name.replace(/\s*\(deferred\)\s*$/i, '') || name
 }
 
+/** Whether a deferred category is the MCP tools one, which holds the servers (`notLoadedRows`). */
+function isMcp(name: string): boolean {
+  return baselineOf(name) === 'mcp'
+}
+
 /** The key of the MCP tools row of Not loaded: it opens the servers that are not loaded. */
 export const SERVERS_ROW = `row-${NOT_LOADED}`
 
@@ -538,7 +543,7 @@ function segmentsBody(
 ) {
   const { Box, Text } = el
   const servers = snapshot.notLoadedServers
-  const deferred = notLoadedRows(snapshot.deferred, servers, name => baselineOf(name) === 'mcp')
+  const deferred = notLoadedRows(snapshot.deferred, servers, isMcp)
   const shown = [...snapshot.baseline, ...snapshot.conversation].filter(segment => segment.tokens > 0)
   const baselineRows = snapshot.baseline.filter(segment => segment.tokens > 0).length
   // The longer forms of the headings, of Reserve and of the MCP tools row
@@ -628,8 +633,17 @@ function plural(n: number, word: string): string {
  * The segment's own figure, as level 1 shows it; the items' sum without a
  * measurement. It can be more than the items' sum: a cut list leaves the
  * oldest items out, and a per-tool or per-skill figure is not the whole.
+ * For the servers that are not loaded: the MCP tools category's figure, as
+ * level 1 shows it; the servers' sum when it has none.
  */
 export function segmentTotal(list: ContextBreakdownList, snapshot: ContextBreakdownSnapshot | null): number {
+  if (!isSegmentList(list.segment)) {
+    // The figure of the MCP tools category, as level 1's row shows it: one
+    // figure for one thing. The servers' sum only when it has no figure.
+    const rows = snapshot === null ? [] : notLoadedRows(snapshot.deferred, snapshot.notLoadedServers, isMcp)
+
+    return rows.find(row => row.servers.length > 0)?.tokens ?? list.tokens
+  }
   const segment = [...(snapshot?.baseline ?? []), ...(snapshot?.conversation ?? [])].find(one => one.id === list.segment)
 
   return segment?.tokens ?? list.tokens
@@ -646,7 +660,8 @@ function crumbLine(
   const { Text } = el
   if (!isSegmentList(list.segment)) {
     // The servers that are not loaded are in no segment: no swatch.
-    const crumb = serversCrumb(PANE_TITLE, NOT_LOADED_DEF.block, NOT_LOADED_DEF.label, list.tokens > 0 ? list.tokens : null, columns)
+    // `tokens` is the category's figure where it has one (`segmentTotal`).
+    const crumb = serversCrumb(PANE_TITLE, NOT_LOADED_DEF.block, NOT_LOADED_DEF.label, tokens > 0 ? tokens : null, columns)
 
     return (
       <Text>
@@ -710,7 +725,8 @@ function listBody(
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
-  // The servers' shares are of their own total, which the column names.
+  // The servers' shares are of the MCP tools category's figure, as level 1
+  // shows it, which the column names.
   const total = segmentTotal(list, snapshot)
   const column = list.rows.length > 0 && table.share ? (def === null ? `% of ${formatTokens(total)}` : '% of segment') : null
   // The facts and the column name share a row where they fit on one.
@@ -727,6 +743,10 @@ function listBody(
           ? `${countOf(list.hiddenItems, 'more server')}, ${formatTokens(list.hiddenTokens)}, on other pages`
           : `${countOf(list.hiddenItems, 'more server')} on other pages`
   const sizes = def?.group === 'conversation' && list.items > 0 ? 'Sizes are estimated from each item’s characters.' : null
+  // A dim title marks a row that does not open beside rows that do. Where no
+  // row on the page opens (the servers, most skills lists), it would mark
+  // nothing, so the titles stay at full strength.
+  const marksClosed = list.rows.some(row => row.isOpenable)
   let openable = 0
 
   return (
@@ -762,8 +782,9 @@ function listBody(
           const names = servers?.[at] ?? itemNames(table, row.title, row.detail, row.pathIn)
           const inner = [
             mark,
-            // A row that does not open is dim all through, as a line that is not a control.
-            index === null ? (
+            // A row that does not open is dim all through, as a line that is
+            // not a control, while other rows on the page open (`marksClosed`).
+            index === null && marksClosed ? (
               <Text mono dimColor>
                 {names.title}
               </Text>
@@ -1077,8 +1098,8 @@ function keyGroups(
  * otherwise go to the prompt and take the keyboard from the pane. Seen live
  * on the terminal (Claude Code 2.1.328): a hidden Button keeps its hotkey,
  * and it also keeps a stop for Tab, on which no ring shows. So they stand
- * last, after Close. Only on the terminal, and only while the pane holds the
- * keys: no other surface was seen to hide a native button this way, so
+ * last, after Close, and the ring passes over them (`pastHidden`). Only on
+ * the terminal, and only while the pane holds the keys: no other surface was seen to hide a native button this way, so
  * there the keys of those controls are not taken.
  */
 export function hiddenKeys(gone: readonly string[], isFocused: boolean, surface: RenderSurface): string[] {
@@ -1088,6 +1109,36 @@ export function hiddenKeys(gone: readonly string[], isFocused: boolean, surface:
 /** The key of the hidden Button that takes the hotkey `letter` (`hiddenKeys`). */
 export function hiddenKey(letter: string): string {
   return `taken-${letter}`
+}
+
+/**
+ * Where the focus ring goes instead when Tab or Shift+Tab lands it on a
+ * hidden Button (`hiddenKeys`), or null for any other element. No ring shows
+ * on a hidden Button, so the ring passes over them. They stand right after
+ * Close. So a ring that comes from Close came forward: it goes to the element
+ * after them, the Next page button below the text of level 3 where it is
+ * drawn, else the first element of the pane. A ring that comes from anywhere
+ * else came backward: it goes to Close. `before` is the key the ring was on.
+ * Hidden Buttons are drawn only on the terminal with the keys, so j's control
+ * is drawn too.
+ */
+export function pastHidden(
+  element: string | undefined,
+  before: string | null,
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+): string | null {
+  if (element === undefined || !element.startsWith(hiddenKey(''))) {
+    return null
+  }
+  if (before !== 'close') {
+    return 'close'
+  }
+  if (view.level === 3) {
+    return view.item.page + 1 < view.item.pages ? NEXT_BELOW : downKey(view)
+  }
+
+  return rowKeys(view, snapshot)[0] ?? downKey(view)
 }
 
 /** How the pane gets the keyboard, on the terminal: ctrl+x tab reaches the bar only, never the pane. */

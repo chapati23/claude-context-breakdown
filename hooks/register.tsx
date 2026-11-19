@@ -32,7 +32,7 @@ import {
   toggleSource,
 } from './navigate'
 import type { NavIo } from './navigate'
-import { paneTree, ringKey } from './pane'
+import { hiddenKey, paneTree, pastHidden, ringKey } from './pane'
 import { paletteFor } from './palette'
 import { createRefresher } from './refresh'
 import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from './ring'
@@ -855,7 +855,14 @@ export const register: Register = on => {
   // A ring that moves in a pane means the band no longer holds the keyboard.
   // Any pane, any plugin's; nothing to do unless a chip may be up.
   on('ui.focus', { component: 'Pane', plugin: '*' }, async ($, e, next) => {
-    const result = await next(e)
+    // No ring shows on a hidden Button that only takes a letter (pane.tsx,
+    // `hiddenKeys`): a Tab or Shift+Tab onto one lands the ring on the next
+    // element it can show on instead (`pastHidden`), so every press shows it.
+    // The reads wait only for such a move.
+    const isHidden = e.requestId === PANE_ID && e.plugin === PLUGIN && e.element?.startsWith(hiddenKey('')) === true
+    const past = isHidden ? pastHidden(e.element, await read($, ringAtom), await read($, viewAtom), await read($, snapshotAtom)) : null
+    const landing = past === null ? e : { ...e, element: past }
+    const result = await next(landing)
     // Our pane's ring moved: onto `element`, whose row is drawn in one
     // highlight, or onto one of the engine's stops (the close mark), which
     // has no element. That is noted as no row, or the row the ring left
@@ -870,7 +877,7 @@ export const register: Register = on => {
       (drawnOn.size === 0 || drawnOn.has('terminal')) &&
       notesRing(e.origin, PLUGIN, ring.busy())
     ) {
-      const key = e.plugin === PLUGIN && e.element !== undefined ? e.element : OFF_ROWS
+      const key = landing.plugin === PLUGIN && landing.element !== undefined ? landing.element : OFF_ROWS
       // The person's move stands: a target of ours that still waits is older.
       if (e.origin.kind === 'person') {
         ring.drop()

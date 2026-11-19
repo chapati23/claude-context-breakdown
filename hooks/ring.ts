@@ -145,9 +145,10 @@ export type RingMoves = {
    * When the engine answers `{ deny }` and no later move has changed the
    * record, `undo` runs: it puts back what the move changed. A key that
    * replaced a waiting one keeps the waiting one's `undo`, so it goes back to
-   * before both. A call that fails runs no `undo`.
+   * before both; `undo` is told the key that was refused, which is then not
+   * the key its own move asked for. A call that fails runs no `undo`.
    */
-  focus: (key: string, apply: (key: string) => Promise<unknown>, undo?: () => Promise<unknown> | void) => Promise<void>
+  focus: (key: string, apply: (key: string) => Promise<unknown>, undo?: (denied: string) => Promise<unknown> | void) => Promise<void>
 }
 
 function isDeny(answer: unknown): boolean {
@@ -159,7 +160,7 @@ export function createRingMoves(): RingMoves {
   let row: string | null | undefined
   let tail: Promise<void> = Promise.resolve()
   let pressing = 0
-  type Wait = { key: string; apply: (key: string) => Promise<unknown>; undo: (() => Promise<unknown> | void) | undefined }
+  type Wait = { key: string; apply: (key: string) => Promise<unknown>; undo: ((denied: string) => Promise<unknown> | void) | undefined }
   let waiting: Wait | null = null
   let running: Promise<void> | null = null
 
@@ -170,7 +171,7 @@ export function createRingMoves(): RingMoves {
       try {
         const answer = await apply(key)
         if (isDeny(answer) && local === key && undo !== undefined) {
-          await undo()
+          await undo(key)
         }
       } catch {
         // A refused move leaves the ring where it was; the next one still runs.

@@ -322,9 +322,12 @@ async function moveRing($: Engine, step: number): Promise<boolean> {
     void ring.focus(
       target,
       next => applyRing($, next),
-      async () => {
+      // `denied` is the key the engine refused: this press's target, or a
+      // later one that took this press's place in the queue. The lit row
+      // goes back with the record, to the row before this press.
+      async denied => {
         ring.restore(before)
-        await quietly(writeRing($, now => (now === target ? noted : now)))
+        await quietly(writeRing($, now => (now === denied ? noted : now)))
       },
     )
   })

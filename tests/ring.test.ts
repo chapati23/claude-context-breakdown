@@ -172,6 +172,27 @@ test('the person’s move drops a target that waits: the call under way ends, an
   expect(moves.from()).toBe('row-7')
 })
 
+test('a refused target that replaced a waiting one tells the kept undo which key was refused', async () => {
+  const moves = createRingMoves()
+  const answers: ((answer: unknown) => void)[] = []
+  const apply = () => new Promise<unknown>(resolve => answers.push(resolve))
+  const undone: string[] = []
+  // B is under way; C waits; D takes C's place and keeps C's undo.
+  moves.set('row-b')
+  void moves.focus('row-b', apply, denied => void undone.push(`b:${denied}`))
+  moves.set('row-c')
+  void moves.focus('row-c', apply, denied => void undone.push(`c:${denied}`))
+  moves.set('row-d')
+  void moves.focus('row-d', apply, denied => void undone.push(`d:${denied}`))
+
+  answers.shift()!({})
+  await wait(0)
+  // The engine refuses D: the undo of C runs, and is told D, the row that is lit.
+  answers.shift()!({ deny: 'the pane lost the keyboard' })
+  await wait(0)
+  expect(undone).toEqual(['c:row-d'])
+})
+
 test('a refused focus call does not stop the next one', async () => {
   const moves = createRingMoves()
   const asked: string[] = []

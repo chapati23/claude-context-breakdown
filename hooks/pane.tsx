@@ -46,10 +46,11 @@ import {
   serversRowText,
   showsHotkeys,
   tableLayout,
+  windowText,
 } from './table'
 import type { LengthBarParts, NotLoadedRow, Table } from './table'
 import { cellWidth, codeRuns, wrapCells } from './text'
-import { paneHeading } from './view'
+import { headingLine, isLowFree, paneHeading } from './view'
 
 export type PaneActions = {
   close: () => unknown
@@ -529,6 +530,28 @@ function describeLine(rows: Rows) {
   return Array.from({ length: DESCRIBE_ROWS }, (_, row) => <Text dimColor>{lines[row] ?? ' '}</Text>)
 }
 
+/**
+ * Level 1's bold heading. While free space is low, the free part takes the
+ * host's `warning` colour, on every surface: the theme picks the paint, so
+ * the mod replaces no host style. The words say "free" too, so colour is not
+ * the only signal. The run sets no weight: it takes the heading's bold.
+ * Otherwise the heading is one plain text.
+ */
+function levelOneHeading(el: Ui, snapshot: ContextBreakdownSnapshot, columns: number) {
+  const { Text } = el
+  const heading = paneHeading(snapshot, columns)
+  if (!isLowFree(snapshot)) {
+    return <Text weight="bold">{headingLine(heading)}</Text>
+  }
+
+  return (
+    <Text weight="bold">
+      {heading.used === '' ? '' : `${heading.used} · `}
+      <Text color="warning">{heading.free}</Text>
+    </Text>
+  )
+}
+
 function segmentsBody(
   el: Ui,
   snapshot: ContextBreakdownSnapshot,
@@ -566,10 +589,10 @@ function segmentsBody(
 
   return (
     <Box flexDirection="column">
-      <Text weight="bold">{paneHeading(snapshot, columns)}</Text>
+      {levelOneHeading(el, snapshot, columns)}
       <Text mono dimColor>
         {' '.repeat(table.mark)}
-        {columnHeader(table, `${formatTokens(snapshot.window)} window`, `${mark}% of used`)}
+        {columnHeader(table, windowText(table, snapshot, stats.largest, used), `${mark}% of used`)}
       </Text>
       <Box flexDirection="column" marginTop={1}>
         {groupHeading(rows, 'Baseline', BASELINE_HEADING, sumTokens(snapshot.baseline), used)}

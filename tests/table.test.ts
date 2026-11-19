@@ -21,9 +21,10 @@ import {
   serversCrumb,
   serversRowText,
   tableLayout,
+  windowText,
 } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
-import { paneHeading } from '../hooks/view'
+import { LOW_FREE_SHARE, headingLine, isLowFree, paneHeading } from '../hooks/view'
 
 /** The session the critique looked at: 283k of 1M used, 33k reserve. */
 const REAL: ContextBreakdownSnapshot = {
@@ -183,10 +184,61 @@ describe('figures and headings', () => {
   })
 
   test('the heading says what is used and what is free before compaction', () => {
-    expect(paneHeading(REAL, 88)).toBe('283k used · 684k free before compaction')
-    expect(paneHeading(REAL, 30)).toBe('283k used · 684k free')
-    expect(paneHeading(REAL, 12)).toBe('283k used')
-    expect(paneHeading({ ...REAL, isEstimate: true }, 88)).toBe('~283k used · ~684k free before compaction')
+    expect(paneHeading(REAL, 88)).toEqual({ used: '283k used', free: '684k free before compaction' })
+    expect(headingLine(paneHeading(REAL, 88))).toBe('283k used · 684k free before compaction')
+    expect(paneHeading(REAL, 30)).toEqual({ used: '283k used', free: '684k free' })
+    expect(paneHeading(REAL, 12)).toEqual({ used: '283k used', free: '' })
+    expect(headingLine(paneHeading(REAL, 12))).toBe('283k used')
+    expect(paneHeading({ ...REAL, isEstimate: true }, 88)).toEqual({ used: '~283k used', free: '~684k free before compaction' })
+  })
+
+  // 340k less 283k used and 33k reserve: 24k free, 7% of the window.
+  const LOW = { ...REAL, window: 340_000 }
+
+  test('while free space is low, the narrowest heading keeps the free figure, not the used one', () => {
+    expect(isLowFree(LOW)).toBe(true)
+    expect(isLowFree(REAL)).toBe(false)
+    expect(paneHeading(LOW, 88)).toEqual({ used: '283k used', free: '24k free before compaction' })
+    expect(paneHeading(LOW, 30)).toEqual({ used: '283k used', free: '24k free' })
+    expect(paneHeading(LOW, 12)).toEqual({ used: '', free: '24k free' })
+    expect(headingLine(paneHeading(LOW, 12))).toBe('24k free')
+    expect(paneHeading({ ...LOW, isEstimate: true }, 12)).toEqual({ used: '', free: '~24k free' })
+  })
+
+  test('free space at exactly a tenth of the window is not low; one token less is', () => {
+    expect(LOW_FREE_SHARE).toBe(0.1)
+    // 400k less 283k used and 77k reserve: 40,000 free, exactly 10%.
+    expect(isLowFree({ ...REAL, window: 400_000, reserve: 77_124 })).toBe(false)
+    expect(isLowFree({ ...REAL, window: 400_000, reserve: 77_125 })).toBe(true)
+    // No free space at all is low; a window of nothing has nothing to warn about.
+    expect(isLowFree({ ...REAL, window: 300_000 })).toBe(true)
+    expect(isLowFree({ ...REAL, window: 0 })).toBe(false)
+  })
+
+  test('while free space is low, the column header names the largest segment and its share of used', () => {
+    const toolResults = largestOf([...LOW.baseline, ...LOW.conversation])
+    expect(windowText(table, LOW, toolResults, USED)).toBe('340k window · largest: Tool results 40%')
+    // Not low: the window alone, however wide the table.
+    expect(windowText(table, REAL, toolResults, USED)).toBe('1M window')
+    expect(windowText(table, LOW, null, USED)).toBe('340k window')
+    // A 1M window with a 650k reserve leaves 67k free, 6.7%. With the full
+    // name the text takes 45 cells: all of an 88-column pane's name and bar
+    // columns. A 60-column pane has 44, so the short name stands in.
+    const lowMillion = { ...REAL, reserve: 650_000 }
+    const injections = { id: 'injections', tokens: 65_000 } as const
+    const narrower = tableLayout(60, 32)
+    expect(nameAndBarCells(table)).toBe(45)
+    expect(windowText(table, lowMillion, injections, USED)).toBe('1M window · largest: System notifications 23%')
+    expect(nameAndBarCells(narrower)).toBe(44)
+    expect(windowText(narrower, lowMillion, injections, USED)).toBe('1M window · largest: Notifications 23%')
+    // Too narrow for either: the window alone, never a cut name.
+    expect(windowText(tableLayout(24, 32), LOW, toolResults, USED)).toBe('340k window')
+    // The share is marked as the heading is.
+    expect(windowText(table, { ...LOW, isEstimate: true }, toolResults, USED)).toBe('340k window · largest: Tool results ~40%')
+    // It fits the name and bar columns, so the share column keeps its place.
+    const header = columnHeader(table, windowText(table, LOW, toolResults, USED), '% of used')
+    expect(header).toMatch(/^340k window · largest: Tool results 40% +% of used$/)
+    expect(cellWidth(header)).toBe(rowCells(table) - table.mark)
   })
 
   test('the largest row is the first of the largest, never a zero one', () => {

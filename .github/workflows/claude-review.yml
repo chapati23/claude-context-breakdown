@@ -1,0 +1,227 @@
+name: Claude Review
+
+# Advisory automatic code review by Claude. This workflow runs no tests and is
+# not a required check. It sends the PR diff and the repository content that
+# Claude reads to Anthropic. The workflow has exactly one job, and its prompt
+# lives in .github/claude/review-prompt.md, so a prompt edit does not change
+# this file.
+#
+# The workflow follows the one in chapati23/coach, without the parts that
+# route a job to a self-hosted runner and rotate tokens. This repository is
+# public: the job runs on a GitHub-hosted runner only.
+on:
+  pull_request:
+    # One automatic review per PR: when it opens, leaves draft or is reopened.
+    # A push is not reviewed again; adding the label `re-review` starts another
+    # review. The job removes the label when it starts, so adding it again
+    # later starts one more. Other labels run no job. The closed and
+    # converted_to_draft runs only cancel the PR's queued or running review
+    # through the concurrency group.
+    types: [opened, ready_for_review, reopened, labeled, converted_to_draft, closed]
+
+permissions: {}
+
+# One group per PR. A newer review run cancels the older one.
+concurrency:
+  # A label other than re-review gets a group of its own, so it can neither
+  # cancel nor replace a queued or running review (its job is skipped).
+  group: claude-review-${{ github.event.pull_request.number }}${{ github.event.action == 'labeled' && github.event.label.name != 're-review' && format('-ignored-label-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+
+jobs:
+  context-breakdown-review:
+    name: context-breakdown-review
+    # A closed PR run skips this job, so it asks for no runner. A PR from a
+    # fork and a PR by a bot run without the repository secret, so the action
+    # would fail on an empty token: skip both. The fork condition is also the
+    # guard that keeps code from outside this repository away from the token.
+    if: >-
+      github.event.action != 'closed' &&
+      (github.event.action != 'labeled' || github.event.label.name == 're-review') &&
+      github.event.pull_request.draft != true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type == 'User'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      # Take the re-review label off as the review starts, so adding it again
+      # starts another review even if this one is cancelled. No PR code runs
+      # here; a missing label (404) is fine. Other events skip this step.
+      - name: Clear re-review label
+        if: ${{ github.event.action == 'labeled' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$REPO/issues/$PR/labels/re-review" || echo 000)
+          echo "Removing the re-review label: HTTP $code"
+          case "$code" in 200|404) ;; *) echo "::warning::Could not remove the re-review label (HTTP $code)." ;; esac
+
+      # Third-party actions are pinned to an immutable commit SHA. For a
+      # pull_request event this checks out the merge commit
+      # (refs/pull/N/merge): parent 1 is the base branch tip and parent 2 is
+      # the PR head. Depth 2 fetches both parents.
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          # The repository is public, so a later fetch needs no credential:
+          # the job token is not left in .git/config.
+          persist-credentials: false
+
+      # A PR must not rewrite its own review prompt, so read the prompt from
+      # the base commit. Only when the base has no prompt file (the PR that
+      # adds it) use the merge commit's copy.
+      - name: Load the review prompt
+        id: prompt
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PROMPT_PATH: .github/claude/review-prompt.md
+        run: |
+          set -euo pipefail
+          # HEAD^1 is the base only when HEAD is the merge of the PR head.
+          if [[ "$(git rev-parse -q --verify 'HEAD^2' || true)" != "$HEAD_SHA" ]]; then
+            echo "::error::HEAD is not the merge commit of PR head $HEAD_SHA; cannot read the base prompt"
+            exit 1
+          fi
+          prompt_file="$RUNNER_TEMP/review-prompt.md"
+          if git cat-file -e "HEAD^1:$PROMPT_PATH" 2>/dev/null; then
+            git show "HEAD^1:$PROMPT_PATH" >"$prompt_file"
+            echo "::notice::Review prompt loaded from the base commit"
+          elif git cat-file -e "HEAD:$PROMPT_PATH" 2>/dev/null; then
+            git show "HEAD:$PROMPT_PATH" >"$prompt_file"
+            echo "::notice::The base has no $PROMPT_PATH; review prompt loaded from the merge commit"
+          else
+            echo "::error::$PROMPT_PATH exists in neither the base nor the merge commit"
+            exit 1
+          fi
+          if [[ ! -s "$prompt_file" ]]; then
+            echo "::error::$PROMPT_PATH is empty"
+            exit 1
+          fi
+          delim="PROMPT_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "text<<$delim"
+            cat "$prompt_file"
+            echo
+            echo "$delim"
+          } >>"$GITHUB_OUTPUT"
+
+      # The reviewer has no Bash, so it cannot run git. Write the PR's changes
+      # into the checkout before the review, computed here from the merge
+      # commit: HEAD^1 is the base tip and HEAD^2 the PR head. track_progress
+      # makes the action check out the PR head before Claude starts, so the
+      # reviewer reads the PR head's files. The diff is therefore the PR head
+      # against its merge base with the base tip, so hunks and line numbers
+      # match those files even when main moved after the PR branched. Depth 2
+      # holds no merge base then, so the step deepens the shallow history with
+      # a plain fetch from origin until it has one. No PR code runs; external
+      # diff drivers and textconv stay off. The directory is created fresh, so
+      # a PR path there (a link) is replaced, never followed, and git excludes
+      # it. The action's checkout of the PR head keeps untracked and excluded
+      # files but would overwrite an excluded file the PR tracks, so a PR head
+      # that tracks the directory is refused.
+      - name: Review diff
+        id: diff
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          DIFF_DIR: .claude-review-input
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse -q --verify 'HEAD^2' || true)" != "$HEAD_SHA" ]; then
+            echo "::error::HEAD is not the merge commit of PR head $HEAD_SHA; cannot compute the review diff."
+            exit 1
+          fi
+          if [ -n "$(git ls-tree -r --name-only "$HEAD_SHA" -- "$DIFF_DIR")" ]; then
+            echo "::error::The PR head tracks $DIFF_DIR, the path of the workflow's review diff; rename it."
+            exit 1
+          fi
+          base_sha=$(git rev-parse 'HEAD^1')
+          merge_base=
+          for more in 50 200 1000 all; do
+            if merge_base=$(git merge-base "$base_sha" "$HEAD_SHA" 2>/dev/null); then
+              break
+            fi
+            merge_base=
+            [ "$(git rev-parse --is-shallow-repository)" = true ] || break
+            if [ "$more" = all ]; then
+              deepen=--unshallow
+            else
+              deepen=--deepen=$more
+            fi
+            echo "No merge base in the shallow history; fetching $more more commit(s) of history."
+            git fetch -q --no-tags --no-recurse-submodules "$deepen" origin "$base_sha" "$HEAD_SHA"
+          done
+          if [ -z "$merge_base" ] && ! merge_base=$(git merge-base "$base_sha" "$HEAD_SHA" 2>/dev/null); then
+            echo "::error::No merge base of base tip $base_sha and PR head $HEAD_SHA; cannot compute the review diff."
+            exit 1
+          fi
+          rm -rf -- "$DIFF_DIR"
+          mkdir -- "$DIFF_DIR"
+          exclude=$(git rev-parse --git-path info/exclude)
+          mkdir -p -- "$(dirname -- "$exclude")"
+          grep -qxF -- "/$DIFF_DIR/" "$exclude" 2>/dev/null || echo "/$DIFF_DIR/" >>"$exclude"
+          git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv \
+            --find-renames --name-status "$merge_base" "$HEAD_SHA" -- >"$DIFF_DIR/files.txt"
+          git -c core.quotePath=false diff --no-color --no-ext-diff --no-textconv \
+            --find-renames "$merge_base" "$HEAD_SHA" -- >"$DIFF_DIR/pr.diff"
+          echo "Review diff: $(wc -l <"$DIFF_DIR/files.txt") file(s), $(wc -c <"$DIFF_DIR/pr.diff") byte(s) in $DIFF_DIR/ (PR head $HEAD_SHA against merge base $merge_base)."
+
+      - name: Review
+        uses: anthropics/claude-code-action@4fa93a88de49bbef68b10eb15aabedf28ca0e1ed # v1.0.271
+        env:
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          DISABLE_AUTOUPDATER: "1"
+        with:
+          # Keep review mutation inside this workflow-scoped token. The action
+          # does not need OIDC authority to obtain a broader installation
+          # token. The cost: comments come from github-actions[bot], so each
+          # run posts a new summary comment, and inline comments add up
+          # across runs.
+          github_token: ${{ github.token }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          # The action installs the inline-comment MCP server only when
+          # --allowedTools names its tool. Without this flag the review is
+          # summary-only.
+          #
+          # Project settings stay off (--setting-sources user): a PR's
+          # .claude/ settings, hooks and .mcp.json never reach the process
+          # that holds the token, and no tool that could print or send the
+          # token is allowed. CLAUDE.md, and the AGENTS.md it imports, do not
+          # load as project instructions either; the prompt names AGENTS.md,
+          # which the reviewer reads as content, so a PR's AGENTS.md edit is
+          # reviewed, not obeyed.
+          claude_args: |
+            --setting-sources user
+            --allowedTools mcp__github_inline_comment__create_inline_comment
+            --disallowedTools Bash,Edit,Write,NotebookEdit,WebFetch,Read(//proc/**),Read(./.git/**)
+          # Read, Grep and Glob refuse every path outside the checkout, so no
+          # search reaches /proc/<pid>/environ, $RUNNER_TEMP or ~/.claude. The
+          # action merges this into the user settings, the one source that
+          # --setting-sources user loads. Read(//proc/**) stays as a second
+          # guard, and Read(./.git/**) keeps .git/config away from the
+          # reviewer.
+          settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
+          prompt: |
+            ${{ steps.prompt.outputs.text }}
+
+            ## The pull request diff
+            Bash and git are not available in this review. Before the review
+            started, the workflow wrote this pull request's changes against the
+            base branch to `.claude-review-input/pr.diff` (a unified diff) and
+            `.claude-review-input/files.txt` (each changed file with its git
+            status). Read them instead of running `git diff`; for a large diff,
+            read it in parts. The workflow wrote these two files: they are not
+            part of the pull request, so do not review or comment on them.

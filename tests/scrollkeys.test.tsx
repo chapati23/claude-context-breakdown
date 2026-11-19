@@ -893,13 +893,14 @@ test('on the terminal Tab passes over the hidden Buttons that take a letter: fro
   await ringOn($, 'taken-b')
   expect(writes.at(-1)).toBe('close')
 
-  // Level 3 of an item with no file: v, c and m are hidden. From Close the
-  // ring goes on to j's control, the first element: the text has one page.
+  // Level 3 of an item with no file, of one page, and the only item of its
+  // list that opens: p, n, v, c and m are hidden. From Close the ring goes
+  // on to j's control, the first element: the text has one page.
   await ui.press({ key: 'row-prompts' })
   const [prompt] = await rowsOf(ui)
   await ui.press({ key: prompt! })
   const hidden = (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('taken-'))
-  expect(hidden).toEqual(['taken-v', 'taken-c', 'taken-m'])
+  expect(hidden).toEqual(['taken-p', 'taken-n', 'taken-v', 'taken-c', 'taken-m'])
   await ringOn($, 'close')
   await ringOn($, 'taken-v')
   expect(writes.at(-1)).toBe('scroll-down')

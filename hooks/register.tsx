@@ -248,8 +248,13 @@ async function applyRing($: Engine, key: string): Promise<{ deny?: string }> {
  * previous page, with the ring on its first or last row. The focus call is
  * not waited for: the next press steps on. If the engine refuses it, the
  * record and the ring key go back to what they were before the move.
+ *
+ * Resolves false when the ring has nowhere to go that way: the list has no
+ * row that opens, or the ring is on the last (or first) row with no page
+ * after (or before) it.
  */
-async function moveRing($: Engine, step: number): Promise<void> {
+async function moveRing($: Engine, step: number): Promise<boolean> {
+  let moved = true
   await ring.serial(async () => {
     const view = await read($, viewAtom)
     if (view.level === 3) {
@@ -259,6 +264,8 @@ async function moveRing($: Engine, step: number): Promise<void> {
     const current = stepStart(view, snapshot, await read($, ringAtom))
     const move = ringTarget(rowKeys(view, snapshot), current, step, pagesOf(view))
     if (move === null) {
+      moved = false
+
       return
     }
     const before = ring.mark()
@@ -299,6 +306,8 @@ async function moveRing($: Engine, step: number): Promise<void> {
       },
     )
   })
+
+  return moved
 }
 
 /**
@@ -333,12 +342,13 @@ function thenTopOf($: Engine, surface: RenderSurface, work: () => Promise<unknow
 type PressNext = (e: UiPressArgument) => Promise<UiPressResult>
 
 /**
- * j and k at level 3, for the press hook of level 3 (`register`). That hook,
+ * j and k at level 3, for the press hook of level 3 (`register`), and at
+ * levels 1 and 2 when the ring has no row to go to. That hook,
  * not the Button's onPress, asks for the scroll: the engine shows this mod's `ui.scroll` hook a scroll a
  * registered hook asked for, never one from onPress (see scroll.ts). One
  * press at a time, so each steps from the row the last one left. At a
- * page's edge the press opens the next page at its top, or the previous
- * page at its bottom. Only the terminal draws j and k at level 3: elsewhere
+ * page's edge of level 3 the press opens the next page at its top, or the
+ * previous page at its bottom. Only the terminal draws j and k: elsewhere
  * the app's own scrolling moves the text.
  */
 async function scrollPress($: Engine, e: UiPressArgument, next: PressNext): Promise<UiPressResult> {
@@ -862,13 +872,17 @@ export const register: Register = on => {
   // (ring.ts). A registered hook, as for the scroll below, so the engine
   // raises this mod's `ui.focus` hook for the move. Every press counts: none
   // is dropped. A pane without the keys has no ring to move.
+  // Where the ring has no row to go to (a list whose rows do not open, or
+  // the list's edge), the press moves the window one row, as an arrow there
+  // does: the lines above and below the rows stay within reach of j and k.
   on('ui.press', { component: 'Pane', requestId: 'context-breakdown', element: ['list-down', 'list-up'] }, async ($, e, next) => {
-    const result = await next(e)
-    if (e.surface === 'terminal' && paneFocused) {
-      await quietly(moveRing($, stepOf(e.element)))
+    if (e.surface !== 'terminal' || !paneFocused) {
+      return next(e)
     }
+    // A failed move counts as made: it asks for no scroll.
+    const moved = await moveRing($, stepOf(e.element)).catch(() => true)
 
-    return result
+    return moved ? next(e) : scrollPress($, e, next)
   }).catch(($, e, next) => next(e))
 
   // j and k at level 3 (`scrollPress`) and f (`formatPress`). A registered

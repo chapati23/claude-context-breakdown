@@ -645,6 +645,50 @@ test('an arrow at the first or the last row scrolls the window: the ring cannot 
   await ui.unmount()
 })
 
+test('j on the last row and k on the first move the window one row; so does j in a list with no row that opens', async ($, on) => {
+  // Under each press the engine raises the scroll a step asks for, the window
+  // standing at row 5: a step token moves it to 6 (j) or 4 (k); with no step
+  // under way the mod's hook passes it on untouched (0).
+  const { seen } = await scrollWorld($, on, CHAT, () => 5)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal' })
+  const rows = await rowsOf(ui)
+  const offsets = async (key: string) => {
+    seen.length = 0
+    await ui.press({ key })
+    await settle()
+
+    return seen.map(one => one.offset)
+  }
+
+  // The ring on the last row: j has no row to go to, so the window goes down
+  // one row, as an arrow there does, and the ring stays.
+  await ringOn($, rows.at(-1)!)
+  expect(await offsets('list-down')).toEqual([6])
+  expect(await litRow(ui)).toBe(rows.at(-1))
+  // k from there moves the ring, and the window stays.
+  expect(await offsets('list-up')).toEqual([0])
+  expect(await litRow(ui)).toBe(rows.at(-2))
+
+  // The first row: k moves the window up one row.
+  await ringOn($, rows[0]!)
+  expect(await offsets('list-up')).toEqual([4])
+  expect(await litRow(ui)).toBe(rows[0])
+
+  // A list with no row that opens has no ring to move: j and k move the window.
+  let found = false
+  for (const row of rows) {
+    await ui.press({ key: row })
+    if ((await rowsOf(ui)).length === 0 && (await ui.find({ key: 'list-down' })) !== undefined) {
+      found = true
+      expect(await offsets('list-down'), row).toEqual([6])
+      expect(await offsets('list-up'), row).toEqual([4])
+    }
+    await ui.press({ key: 'back' })
+  }
+  expect(found).toBe(true)
+  await ui.unmount()
+})
+
 test('after a reload the ring state still names a row: an arrow steps from that row, not from the first', async ($, on) => {
   // A reload empties the mod's record of the ring, and the state keeps the
   // row. Here the second session start's write of no ring lands as that row,

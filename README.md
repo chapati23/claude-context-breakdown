@@ -8,7 +8,7 @@ Claude Code's own `/context` command shows a similar report, but only when you a
 
 ![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
 
-The pictures in this file show Claude Code 2.1.327 in Ghostty, in a session with a 200k window.
+The pictures in this file show Claude Code in Ghostty, in sessions with a 200k window: version 2.1.328, and version 2.1.327 for the picture of the bar.
 
 > Status: early version. The mod uses Claude Code's mods API, which is early access and can change between releases.
 

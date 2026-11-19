@@ -15,7 +15,7 @@ Two reviewers read each pull request. Both are advisory: the branch rule on `mai
 
 The Claude review posts inline comments and one summary comment with a numbered list of every finding. Answer each finding on its own surface. Start the reply to a finding that you decline with `Won't fix:`.
 
-The prompt of the Claude review is `.github/claude/review-prompt.md`. The job reads it from the base commit, so a pull request that edits the prompt is reviewed with the prompt on its base. GitHub runs the workflow file itself from the pull request, so this does not hold for a pull request that edits the workflow file. The job runs on a GitHub-hosted runner, skips pull requests from forks and from bots, and needs the repository secret `CLAUDE_CODE_OAUTH_TOKEN`. The reviewer can read the checkout and post comments; it cannot run commands, so it does not run the checks.
+The prompt of the Claude review is `.github/claude/review-prompt.md`. The job reads it from the base commit, so a pull request that edits the prompt is reviewed with the prompt on its base. GitHub runs the workflow file itself from the pull request, so this does not hold for a pull request that edits the workflow file. The job runs on a GitHub-hosted runner, skips pull requests from forks and from bots, and needs the repository secret `CLAUDE_CODE_OAUTH_TOKEN`. The reviewer can read the checkout and post comments; it cannot run commands, so it does not run the checks. Of the comments on a pull request, it reads only those by the repository owner and by the two review bots.
 
 ## Releases
 

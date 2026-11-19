@@ -37,6 +37,7 @@ jobs:
     # guard that keeps code from outside this repository away from the token.
     if: >-
       github.event.action != 'closed' &&
+      github.event.pull_request.state == 'open' &&
       (github.event.action != 'labeled' || github.event.label.name == 're-review') &&
       github.event.pull_request.draft != true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -49,10 +50,13 @@ jobs:
       actions: read
     steps:
       # Take the re-review label off as the review starts, so adding it again
-      # starts another review even if this one is cancelled. No PR code runs
-      # here; a missing label (404) is fine. Other events skip this step.
+      # starts another review even if this one is cancelled. The step runs on
+      # every review that starts with the label on the PR, not only on the
+      # labeled event: a label that was added to a draft starts no job, and
+      # GitHub sends no event for a label that is already there. No PR code
+      # runs here; a missing label (404) is fine.
       - name: Clear re-review label
-        if: ${{ github.event.action == 'labeled' }}
+        if: ${{ contains(github.event.pull_request.labels.*.name, 're-review') }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,7 +66,8 @@ jobs:
           set -uo pipefail
           code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/$REPO/issues/$PR/labels/re-review" || echo 000)
+            "https://api.github.com/repos/$REPO/issues/$PR/labels/re-review" || true)
+          code=${code:-000}
           echo "Removing the re-review label: HTTP $code"
           case "$code" in 200|404) ;; *) echo "::warning::Could not remove the re-review label (HTTP $code)." ;; esac
 
@@ -76,8 +81,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          # The repository is public, so a later fetch needs no credential:
-          # the job token is not left in .git/config.
+          # The repository is public, so the fetches in this job need no
+          # credential, and the two shell steps run without the job token in
+          # .git/config. The Review action later writes that token into the
+          # remote URL there; Read(./.git/**) below keeps it from the reviewer.
           persist-credentials: false
 
       # A PR that edits the prompt file must not rewrite its own review, so
@@ -185,6 +192,11 @@ jobs:
           github_token: ${{ github.token }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
+          # The repository is public, so any GitHub account can comment on a
+          # PR, and the action puts the PR's comments into the reviewer's
+          # prompt. Only comments by the owner and by the two review bots
+          # reach it: github-actions[bot] wrote this job's earlier reviews.
+          include_comments_by_actor: "chapati23,github-actions[bot],chatgpt-codex-connector[bot]"
           # The action installs the inline-comment MCP server only when
           # --allowedTools names its tool. Without this flag the review is
           # summary-only.
@@ -204,8 +216,8 @@ jobs:
           # search reaches /proc/<pid>/environ, $RUNNER_TEMP or ~/.claude. The
           # action merges this into the user settings, the one source that
           # --setting-sources user loads. Read(//proc/**) stays as a second
-          # guard, and Read(./.git/**) keeps .git/config away from the
-          # reviewer.
+          # guard. Read(./.git/**) is the guard for .git/config, where the
+          # action writes the job token into the remote URL.
           settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true}}'
           prompt: |
             ${{ steps.prompt.outputs.text }}

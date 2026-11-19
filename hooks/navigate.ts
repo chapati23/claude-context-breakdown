@@ -360,17 +360,13 @@ export function openSegment(io: NavIo, segment: ContextBreakdownSegmentId): Prom
 }
 
 /**
- * Whether a list keeps the focus where the person put it, after the view
- * went from `before` to `after`: true once the same segment's list changed
- * its page or its sort, until the level or the segment changes. `kept` is the
- * answer so far. Read off the terminal only (register.tsx, `staysOnControl`).
+ * Whether a list still keeps the focus where the person put it, after the
+ * view went from `before` to `after`: `kept`, the answer so far, holds only
+ * while the same segment's list stays open. A new level or another segment
+ * ends it. Read off the terminal only (register.tsx, `staysOnControl`).
  */
 export function keepsFocus(before: ContextBreakdownView, after: ContextBreakdownView, kept: boolean): boolean {
-  if (before.level !== 2 || after.level !== 2 || before.list.segment !== after.list.segment) {
-    return false
-  }
-
-  return kept || before.list.page !== after.list.page || before.list.sort !== after.list.sort
+  return kept && before.level === 2 && after.level === 2 && before.list.segment === after.list.segment
 }
 
 /** Which row of a new page takes the focus ring: its first or its last that opens. */

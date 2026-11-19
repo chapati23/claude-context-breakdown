@@ -152,8 +152,9 @@ const drawnOn = new Set<RenderSurface>()
 /**
  * Off the terminal, a list that changed its page or its sort names no row for
  * the ring: a desktop moves the focus to an element whose `autoFocus` key is
- * new, and the focus must stay on the control the person pressed. Set as the
- * view is written (`writeView`), cleared on a new level or another list.
+ * new, and the focus must stay on the control the person pressed. Set by the
+ * pane's page and sort presses; cleared on a new level or another list
+ * (`writeView`), and when `/ctx` or the bar opens a list.
  */
 let staysOnControl = false
 
@@ -226,6 +227,8 @@ function bandActs($: Engine): BandActs {
     dropFocus: () => update($, focusAtom, () => null),
     dropRing: () => {
       ring.forget()
+      // The bar opens a list afresh: its first row takes the focus again.
+      staysOnControl = false
 
       return writeRing($, () => null)
     },
@@ -582,7 +585,9 @@ export const register: Register = on => {
     }
     keepsPlace = !hasWord && isOpen
     if (!keepsPlace) {
-      // Another tree: the ring that was noted names an element of the old one.
+      // Another tree: the ring that was noted names an element of the old one,
+      // and a list opens with its first row asking for the focus.
+      staysOnControl = false
       ring.forget()
       await quietly(writeRing($, () => null))
     }
@@ -904,8 +909,14 @@ export const register: Register = on => {
     }
     // A failed move counts as made: it asks for no scroll.
     const moved = await moveRing($, stepOf(e.element)).catch(() => true)
+    if (moved) {
+      return next(e)
+    }
+    // A ring move's reveal scroll may still be on its way: the step waits for
+    // it, so the two never meet in the `ui.scroll` hook.
+    await ring.idle()
 
-    return moved ? next(e) : scrollPress($, e, next)
+    return scrollPress($, e, next)
   }).catch(($, e, next) => next(e))
 
   // j and k at level 3 (`scrollPress`) and f (`formatPress`). A registered
@@ -936,7 +947,10 @@ export const register: Register = on => {
   // the terminal) passes on untouched, and a j or k after it steps from where
   // it leaves the window.
   on('ui.scroll', { component: 'Pane', requestId: 'context-breakdown', origin: { kind: 'person' } }, ($, e, next) => {
-    // `paneFocused` is the terminal's: off the terminal no arrow steps the ring.
+    // `paneFocused` is the terminal's: off the terminal no arrow steps the
+    // ring. The event names no surface. So while a terminal pane holds the
+    // keys and an app shows the same session, an arrow scroll that the app
+    // raised would be read as the terminal's; that limit is accepted.
     const step = arrowStep(e, { isFocused: paneFocused, level: shownView.level })
     const moves =
       step !== null &&
@@ -1086,6 +1100,8 @@ export const register: Register = on => {
       close: () =>
         quietly(
           (async () => {
+            // A closed pane holds no keys: no drawing follows to say so.
+            paneFocused = false
             await $.ui.close({ id: PANE_ID })
             await writeView($, toLevel1)
           })(),
@@ -1111,8 +1127,16 @@ export const register: Register = on => {
       openSegment: id => thenTop(() => openSegment(nav, id)),
       openItem: id => thenTop(() => openItem(nav, id)),
       back: () => thenTop(() => writeView($, back)),
-      toggleSort: () => thenTop(() => toggleSort(nav)),
-      listPage: delta => thenTop(() => listPage(nav, delta)),
+      toggleSort: () => {
+        staysOnControl = true
+
+        return thenTop(() => toggleSort(nav))
+      },
+      listPage: delta => {
+        staysOnControl = true
+
+        return thenTop(() => listPage(nav, delta))
+      },
       contentPage: delta => thenTop(() => contentPage(nav, delta)),
       toggleSource: () => thenTop(() => toggleSource(nav)),
       copy: (path, surface) =>

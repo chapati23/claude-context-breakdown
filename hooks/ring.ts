@@ -134,6 +134,8 @@ export type RingMoves = {
   drop: () => void
   /** Whether a press or a focus call is under way. */
   busy: () => boolean
+  /** Resolves once no focus call is under way or waits. */
+  idle: () => Promise<void>
   /** Runs one press's work after the ones before it. None is dropped. */
   serial: (work: () => Promise<void>) => Promise<void>
   /**
@@ -198,6 +200,7 @@ export function createRingMoves(): RingMoves {
       waiting = null
     },
     busy: () => pressing > 0 || running !== null,
+    idle: () => running ?? Promise.resolve(),
     serial: work => {
       pressing += 1
       const turn = tail.then(work).finally(() => {

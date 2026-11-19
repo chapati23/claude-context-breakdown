@@ -881,6 +881,12 @@ test('off the terminal a page or sort change of a list names no row for the focu
     expect((await ringed(ui)).length, surface).toBe(1)
     await ui.press({ key: 'back' })
     expect(await ringed(ui), surface).toEqual([opened])
+
+    // The same list opened afresh by `/ctx`, after a page change: its first row asks again.
+    await ui.press({ key: 'next' })
+    await $.command.run({ command: 'ctx', args: 'tool', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+    expect(await ui.find({ type: 'Text', text: /page 1 of 3$/ }), surface).toBeDefined()
+    expect(await ringed(ui), surface).toEqual([(await items())[0]])
     await ui.press({ key: 'back' })
     await ui.unmount()
   }

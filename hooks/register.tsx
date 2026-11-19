@@ -50,6 +50,7 @@ import {
   stepOf,
 } from './scroll'
 import { NOT_LOADED, matchList } from './segments'
+import { baseOf } from './snapshot'
 import { PANE_ID, PANE_TITLE, PLUGIN } from './state'
 import { bandModelFor } from './view'
 import type { LayoutPart, SegmentPart } from './layout'
@@ -75,6 +76,10 @@ const OFF_ROWS = ''
 // The key of the pane's element under the focus ring (see `ring` in types).
 const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, null, {
   shape: 'ring-1',
+})
+// The measurement at the person's last prompt (see `base` in types).
+const baseAtom = atom({ plugin: 'context-breakdown', key: 'base' } as const, null, {
+  shape: 'base-1',
 })
 
 /**
@@ -537,6 +542,8 @@ export const register: Register = on => {
     void quietly(update($, focusAtom, () => null))
     ring.forget()
     void quietly(writeRing($, () => null))
+    // A new session has no prompt yet: level 1's column `added` has no base.
+    void quietly(update($, baseAtom, () => null))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
     void quietly(
@@ -751,6 +758,8 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const result = await next(e)
     if (!isSubagent(e) && e.trigger !== 'precompute' && result.skip === undefined) {
+      // The content the base counted is gone: no column `added` until the next prompt.
+      await quietly(update($, baseAtom, () => null))
       // The plain usage call is free; its token figure is the one that stays
       // stale until the next model response.
       let staleTokens: number | null = null
@@ -789,6 +798,7 @@ export const register: Register = on => {
       mayHoldFocus = false
       chipHold.stop()
       await quietly(update($, focusAtom, () => null))
+      await quietly(update($, baseAtom, () => null))
       await refresher.cleared({
         after: (ms, fn) => $.clock.after(ms, fn),
         now: () => $.clock.now(),
@@ -898,11 +908,27 @@ export const register: Register = on => {
   // it back without a focus event): drop the chip at once rather than when
   // its timer ends. Not on each keystroke (prompt.edit): that would put this
   // mod on the typing path.
+  //
+  // A prompt the person submits also sets the base of level 1's column
+  // `added`: the measurement in state now, which does not hold the prompt
+  // yet. Only the person's own words, typed or from Remote Control: a slash
+  // command (`/ctx` opens the pane and must not empty the column), a task
+  // notification, a peer, a plugin or a prompt the person does not see keep
+  // the base. In the background: the prompt does not wait for the state.
   on('prompt.submit', ($, e, next) => {
     if (mayHoldFocus) {
       mayHoldFocus = false
       chipHold.stop()
       void quietly(update($, focusAtom, () => null))
+    }
+    const isPersons = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+    if (isPersons && e.command === undefined && e.isMeta !== true) {
+      void quietly(
+        (async () => {
+          const base = baseOf(await read($, snapshotAtom))
+          await update($, baseAtom, () => base)
+        })(),
+      )
     }
 
     return next(e)
@@ -1084,6 +1110,8 @@ export const register: Register = on => {
     const view = await read($, viewAtom)
     shownView = view
     shownSnapshot = snapshot
+    // Only level 1 draws the column `added`: other levels do not redraw on a prompt.
+    const base = view.level === 1 ? await read($, baseAtom) : null
     // The ring's key, read from the state, so a move draws the row lit. Only
     // the terminal draws a lit row; elsewhere the key is not read, so its
     // writes draw nothing.
@@ -1171,7 +1199,7 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow)
+    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow, base)
 
     return tree
   })

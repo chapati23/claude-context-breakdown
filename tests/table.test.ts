@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownSnapshot } from '../types'
 import {
+  ADDED_CELLS,
   TABLE_MAX_COLUMNS,
   columnHeader,
   crumbFor,
@@ -22,6 +23,7 @@ import {
   serversRowText,
   tableLayout,
   windowText,
+  withAdded,
 } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
 import { LOW_FREE_SHARE, headingLine, isLowFree, paneHeading } from '../hooks/view'
@@ -161,6 +163,54 @@ describe('tableLayout', () => {
     }
     expect(rowCells(tableLayout(88, 200))).toBe(TABLE_MAX_COLUMNS)
     expect(rowCells(tableLayout(140, 200))).toBe(TABLE_MAX_COLUMNS)
+  })
+})
+
+describe('the column added', () => {
+  const WIDEST = 32
+
+  test('joins the table only with 7 cells to spare inside the cap and the pane', () => {
+    for (const columns of [64, 67]) {
+      expect(withAdded(tableLayout(columns, WIDEST), columns).added).toBeUndefined()
+    }
+    for (const columns of [68, 76, 88, 140]) {
+      const table = withAdded(tableLayout(columns, WIDEST), columns)
+      expect(table.added).toBe(true)
+      // The other columns keep their cells: the column comes on top.
+      expect(rowCells(table)).toBe(rowCells(tableLayout(columns, WIDEST)) + ADDED_CELLS)
+    }
+    // Without a share column there is no room to speak of.
+    expect(withAdded({ ...tableLayout(88, WIDEST), share: false }, 88).added).toBeUndefined()
+  })
+
+  test('a row with the column never reaches the pane edge or passes the cap', () => {
+    for (let columns = 20; columns <= 160; columns += 1) {
+      for (const widest of [8, WIDEST, 200]) {
+        const cells = rowCells(withAdded(tableLayout(columns, widest), columns))
+        expect(cells).toBeLessThan(columns)
+        expect(cells).toBeLessThanOrEqual(TABLE_MAX_COLUMNS)
+      }
+    }
+  })
+
+  test('the figure of growth follows the share, or blanks hold its place', () => {
+    const table = withAdded(tableLayout(88, WIDEST), 88)
+    expect(figuresText(table, 114_400, USED, 14_200)).toBe('  114k   40%   +14k')
+    expect(figuresText(table, 2900, USED, 38)).toBe('  2.9k  1.0%    +38')
+    expect(figuresText(table, 2900, USED)).toBe(`  2.9k  1.0%${' '.repeat(ADDED_CELLS)}`)
+    expect(figuresText(table, 684_124, null)).toBe(`  684k${' '.repeat(6 + ADDED_CELLS)}`)
+    // A table without the column ignores the figure.
+    expect(figuresText(tableLayout(88, WIDEST), 114_400, USED, 14_200)).toBe('  114k   40%')
+    for (const added of [undefined, 5, 4600, 14_200, 1_000_000]) {
+      expect(cellWidth(figuresText(table, 114_400, USED, added))).toBe(rowCells(table) - nameAndBarCells(table) - table.mark)
+    }
+  })
+
+  test('the header names the column over it', () => {
+    const table = withAdded(tableLayout(88, WIDEST), 88)
+    const header = columnHeader(table, '1M window', '% of used')
+    expect(header.endsWith('% of used  added')).toBe(true)
+    expect(cellWidth(header)).toBe(rowCells(table) - table.mark)
   })
 })
 

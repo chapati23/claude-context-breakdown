@@ -2,7 +2,9 @@
 // breakdown and the conversation's messages.
 
 import type {
+  ContextBreakdownBase,
   ContextBreakdownSegment,
+  ContextBreakdownSegmentId,
   ContextBreakdownSnapshot,
 } from '../types'
 import { apportion, notLoadedServers, splitCategories } from './categories'
@@ -156,4 +158,52 @@ export function usedTokens(snapshot: ContextBreakdownSnapshot): number {
 /** Free space: what the used content and the reserve leave of the window. */
 export function freeTokens(snapshot: ContextBreakdownSnapshot): number {
   return Math.max(0, snapshot.window - usedTokens(snapshot) - snapshot.reserve)
+}
+
+/**
+ * The base for level 1's column `added`: the tokens per segment of the
+ * measurement at the person's prompt. None from an estimate, whose figures
+ * were not measured, and none before the first measurement.
+ */
+export function baseOf(snapshot: ContextBreakdownSnapshot | null): ContextBreakdownBase | null {
+  if (snapshot === null || snapshot.isEstimate) {
+    return null
+  }
+
+  return { segments: [...snapshot.baseline, ...snapshot.conversation].map(({ id, tokens }) => ({ id, tokens })) }
+}
+
+/** The tokens each segment gained since the base; a segment that did not grow is not in it. */
+export type Added = Partial<Record<ContextBreakdownSegmentId, number>>
+
+/**
+ * What each segment of `snapshot` gained since `base`, above zero only; a
+ * segment the base does not hold counts from zero. Null when there is no
+ * column to show: no base, an estimate, nothing grew, or fewer tokens in use
+ * than at the base (a compaction or a rewind that raised no event, after
+ * which the base no longer holds). Null too when one side has the
+ * conversation as one segment and the other has it split: their segments
+ * do not compare.
+ */
+export function addedSince(base: ContextBreakdownBase | null, snapshot: ContextBreakdownSnapshot): Added | null {
+  if (base === null || snapshot.isEstimate || usedTokens(snapshot) < sumTokens(base.segments)) {
+    return null
+  }
+  const now = [...snapshot.baseline, ...snapshot.conversation]
+  const isWhole = (segments: readonly ContextBreakdownSegment[]) => segments.some(segment => segment.id === 'conversation')
+  if (isWhole(base.segments) !== isWhole(now)) {
+    return null
+  }
+  const before = new Map(base.segments.map(segment => [segment.id, segment.tokens]))
+  const added: Added = {}
+  let grew = false
+  for (const segment of now) {
+    const gain = segment.tokens - (before.get(segment.id) ?? 0)
+    if (gain > 0) {
+      added[segment.id] = gain
+      grew = true
+    }
+  }
+
+  return grew ? added : null
 }

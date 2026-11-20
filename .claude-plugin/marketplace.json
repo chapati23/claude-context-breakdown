@@ -1,5 +1,6 @@
 {
   "name": "claude-context-breakdown",
+  "description": "Context breakdown: a Claude Code mod that shows what fills the context window",
   "owner": { "name": "chapati23" },
   "plugins": [{ "name": "context-breakdown", "source": "./" }]
 }

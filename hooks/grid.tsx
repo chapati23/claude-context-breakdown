@@ -117,7 +117,11 @@ export const MEASURED_ADVANCE_PX = 8.43
  * second line. 5 cells is the target's width.
  */
 export const FIGURE_MIN_CELLS = 5
-/** The fewest cells an item's detail keeps at level 2: the title's column stops short of them. */
+/**
+ * The cells an item's detail keeps at level 2 where the row has room: the
+ * title's column stops short of them. In a narrow row the title still gets
+ * half of the cells that it shares with the detail.
+ */
 export const DETAIL_MIN_CELLS = 12
 /** The words before the controls while a row opens and the pane offers its keys: Enter opens the row with the focus. */
 export const OPEN_WORDS = '⏎: Open'
@@ -399,7 +403,7 @@ function segmentsGrid(
     const tokens = sumTokens(segments)
     const text = headingText(table, title, long).trimEnd()
 
-    return gridRow(rows, [<Text dimColor>{cellWidth(text) <= headingRoom ? text : title}</Text>], figures(
+    return gridRow(rows, [<Text dimColor wrap="truncate">{cellWidth(text) <= headingRoom ? text : title}</Text>], figures(
       rows,
       { text: formatTokens(tokens), dim: true },
       { text: formatShare(tokens, used), dim: true },
@@ -458,7 +462,9 @@ function segmentsGrid(
       </Box>
       {deferred.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>{notLoadedHeading(table, 'Not loaded', NOT_LOADED_HEADING)}</Text>
+          <Text dimColor wrap="truncate">
+            {notLoadedHeading(table, 'Not loaded', NOT_LOADED_HEADING)}
+          </Text>
           {deferred.map(category => {
             const name = withoutDeferred(category.name)
             const tokens: Figure = { text: category.tokens === null ? null : formatTokens(category.tokens), dim: category.servers.length === 0 }
@@ -510,7 +516,11 @@ function titleRow(g: Grid, list: ContextBreakdownList, snapshot: ContextBreakdow
   return (
     <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={1}>
       <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
-        {trail !== '' && <Text dimColor>{trail}</Text>}
+        {trail !== '' && (
+          <Text dimColor wrap="truncate">
+            {trail}
+          </Text>
+        )}
         {segment !== null && swatch(g, colorOf(palette, segment), segmentTexture(segment))}
         <Text weight="bold" wrap="truncate">
           {crumb.name}
@@ -523,8 +533,9 @@ function titleRow(g: Grid, list: ContextBreakdownList, snapshot: ContextBreakdow
 
 /**
  * A path in `cells`: the mod's short form (`shortenPath`), never shorter
- * than "…/" and the whole file name. The mod never cuts into the file name:
- * where even that form does not fit, the surface cuts its end.
+ * than "…/" and the whole file name. The mod never cuts into the file name.
+ * Where even that form does not fit, the surface cuts a detail, which is a
+ * Text, at its end; a title that is a Button's label shows whole.
  */
 export function fittedPath(text: string, cells: number): string {
   const name = text.split(/[/\\]/).pop() ?? text
@@ -583,8 +594,10 @@ function listGrid(
   const alt = (row: ContextBreakdownRow) => `${row.detail === '' ? row.title : `${row.title} ${row.detail}`}: ${formatTokens(row.tokens)}`
   let body: unknown[]
   if (def === null) {
-    // The servers: none opens. The name takes the room; the tool count has a column of its own.
-    const countCells = columnCells(list.rows.map(row => row.detail))
+    // The servers: none opens. The name takes the room; the tool count has a
+    // column of its own, as wide as its widest text and no wider: a gap and
+    // the length bar follow it, so it needs no spare cell.
+    const countCells = Math.max(0, ...list.rows.map(row => cellWidth(row.detail)))
     body = list.rows.map(row =>
       gridRow(
         rows,
@@ -608,9 +621,14 @@ function listGrid(
     // The title's column is as wide as the longest title of a row with a
     // detail on the page, and BUTTON_PAD_CELLS for the button's padding: a
     // native button does not shrink. It stops short of DETAIL_MIN_CELLS for
-    // the details. A row with no detail gives its title the detail's room too.
+    // the details, but where that leaves the title less than half of the
+    // cells that the title and the detail share, the title takes that half:
+    // in a narrow pane a title of three letters says nothing. The detail
+    // takes the rest. A row with no detail gives its title the detail's room
+    // too.
     const room = Math.max(1, grid - right - 1)
-    const cap = Math.max(4, room - BUTTON_PAD_CELLS - 1 - DETAIL_MIN_CELLS)
+    const shared = room - BUTTON_PAD_CELLS - 1
+    const cap = Math.max(4, shared - DETAIL_MIN_CELLS, Math.floor(shared / 2))
     const detailed = list.rows.filter(row => row.detail !== '')
     const titleCells = Math.min(cap, Math.max(1, ...detailed.map(row => cellWidth(row.title))))
     const detailCells = Math.max(1, room - (titleCells + BUTTON_PAD_CELLS) - 1)
@@ -740,8 +758,11 @@ function controlsRow(
       <Box flexDirection="row" flexWrap="wrap" columnGap={gap}>
         {line.groups.map(group => (
           <Box flexDirection="row" flexWrap="wrap" columnGap={gap}>
+            {/* The words start where a Button's label starts, so a second line, which starts with a Button, shares their left edge. */}
             {(group.key === 'move' ? words : group.words).map(text => (
-              <Text dimColor>{text}</Text>
+              <Box paddingLeft={LABEL_PAD_CELLS}>
+                <Text dimColor>{text}</Text>
+              </Box>
             ))}
             {group.controls.map(button)}
           </Box>

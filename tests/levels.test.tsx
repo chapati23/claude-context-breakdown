@@ -2,6 +2,7 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { LABEL_PAD_CELLS } from '../hooks/grid'
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
 import { cellWidth } from '../hooks/text'
 import { flatten } from './e2e/helpers'
@@ -780,10 +781,21 @@ test('level 3: the controls stand between the facts line and the text, and the f
 
 type Part = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
 
+/**
+ * Off the terminal the words of a group stand in a Box with the native
+ * button's padding, so that they start where a Button's label starts: that
+ * Box's one Text. The terminal draws no such Box.
+ */
+function wordsIn(part: Part): Part {
+  const inner = part.children ?? []
+
+  return part.type === 'Box' && part.props?.paddingLeft === LABEL_PAD_CELLS && inner.length === 1 && (inner[0] as Part)?.type === 'Text' ? (inner[0] as Part) : part
+}
+
 /** The parts of one group, as the engine draws them: the words, and each plain control as `hotkey: label`. */
 function groupParts(group: Part): string[] {
   return (group.children ?? []).flatMap(child => {
-    const part = child as Part
+    const part = wordsIn(child as Part)
     if (part.type === 'Text') {
       return [(part.children ?? []).filter(text => typeof text === 'string').join('')]
     }
@@ -814,7 +826,7 @@ function keyGroupsOf(node: unknown): string[][] | null {
       part?.type === 'Box' &&
       part.props?.flexWrap === 'wrap' &&
       inner.length > 0 &&
-      inner.every(one => (one as Part)?.type === 'Button' || (one as Part)?.type === 'Text')
+      inner.every(one => (one as Part)?.type === 'Button' || wordsIn(one as Part).type === 'Text')
     )
   }
   if (type === 'Box' && props.flexWrap === 'wrap' && children.length > 0 && children.every(isGroup)) {

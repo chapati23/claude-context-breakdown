@@ -211,10 +211,11 @@ export type WindowPart = { kind: 'segment' | 'free' | 'reserve'; color: string; 
 
 /**
  * The bar on top of level 1, `width` pixels: one stretch per part with
- * tokens, in their order, each as wide as its share of all the parts' tokens
- * and at least PART_MIN_PX, taken from the wider parts, where the bar has
- * room for every part to have that minimum. A thin space follows
- * a segment, except before free space. Corner radius 2.
+ * tokens, in their order, each as wide as its share of all the parts' tokens.
+ * Where the bar has room for every part to have PART_MIN_PX, a part below
+ * PART_MIN_PX is raised to it, and the wider parts give up the difference in
+ * proportion to their widths. A thin space follows a segment, except before
+ * free space. Corner radius 2.
  */
 export function windowBarPicture(parts: readonly WindowPart[], width: number): string {
   const drawn = parts.filter(part => part.tokens > 0)

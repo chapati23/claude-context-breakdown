@@ -330,7 +330,7 @@ test('servers without token figures: the name, then the tool count at the grid�
   expect(gridLines(tree)).toEqual(['tickets 4 tools', 'notes 2 tools'])
   for (const row of gridRowsOf(tree)) {
     const right = rightColumns(row)
-    expect(right.map(part => part.props?.width)).toEqual(['4 tools'.length + 1])
+    expect(right.map(part => part.props?.width)).toEqual(['4 tools'.length])
     expect(right[0]?.props?.justifyContent).toBe('flex-end')
   }
   expect(nodesOf(tree).filter(node => node.type === 'Svg')).toEqual([])
@@ -359,7 +359,7 @@ test('the servers list draws grey length bars and the tool counts in a column of
   expect(textOf(rows[0])).toContain('a-server-name-far-too-long-for-any-pane-to-show-whole')
   for (const row of rows) {
     const [count, bar] = rightColumns(row)
-    expect(count?.props?.width).toBe('12 tools'.length + 1)
+    expect(count?.props?.width).toBe('12 tools'.length)
     const picture = (bar?.children ?? []).filter(isNode)[0]!
     expect(String(picture.props?.source)).toContain(DARK.notLoaded)
   }
@@ -672,4 +672,132 @@ test('the pictures: grey grounds that read on light and dark, textures, the fewe
   expect(lengthBarPicture(100, 100, '#123456', 44)).toContain(`<rect width="44" height="${LENGTH_BAR_HEIGHT}"`)
   expect(swatchPicture('#123456', null)).toContain('fill="#123456"')
   expect(swatchPicture('#123456', 'striped')).toContain('<pattern id="t"')
+})
+
+/** The node of `tree` whose children hold `node`. */
+function parentOf(tree: unknown, node: Node): Node | undefined {
+  return nodesOf(tree).find(parent => (parent.children ?? []).includes(node))
+}
+
+/**
+ * The widest server id of the servers-100 scene, in cells: the reference
+ * renderer drew it 261.2 px wide at a cell of 7.92 px (the measured cell at
+ * the page's zoom), 32.98 cells.
+ */
+const WIDEST_ID_CELLS = 33
+
+test('the servers’ tool-count column is as wide as its widest text, with no spare cell; at 100 columns a server id shows whole', async ($, on) => {
+  const w = world(on)
+  const base = usage(66_000)
+  // The first servers of the servers-100 scene: two long ids, the widest id, and a short name.
+  const servers: [string, number, number][] = [
+    ['724b336b-d694-46f4-b9af-6d2655b2deab', 240, 150_000],
+    ['ceadc063-7ff5-41d4-93a2-b1525f9336b6', 78, 60_000],
+    ['grafana', 79, 52_000],
+    ['65cc47e7-438a-4b29-bd37-5989096a0f43', 27, 22_000],
+  ]
+  const mcpTools = servers.flatMap(([serverName, count, tokens]) =>
+    Array.from({ length: count }, (_, i) => ({ name: `mcp__${serverName}__t${i}`, serverName, tokens: tokens / count, isLoaded: false })),
+  )
+  // The category holds every server's tokens, so the shares are those of the scene.
+  const total = servers.reduce((sum, [, , tokens]) => sum + tokens, 0)
+  const categories = base.context.breakdown!.categories.map(category => (category.kind === 'deferred' ? { ...category, tokens: total } : category))
+  w.usage = { ...base, context: { ...base.context, breakdown: { ...base.context.breakdown!, categories, mcpTools } } }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 100 } })
+  await ui.press({ key: 'row-not-loaded' })
+  const rows = gridRowsOf(await ui.drawn())
+  expect(rows).toHaveLength(servers.length)
+  for (const row of rows) {
+    const [count] = rightColumns(row)
+    // A gap and the length bar follow the count: it needs no spare cell.
+    expect(count?.props?.width).toBe(cellWidth('240 tools'))
+    // The name has the grid less the columns on its right, each with its gap.
+    const room = gridCells(100) - rightColumns(row).reduce((sum, part) => sum + (part.props?.width as number) + 1, 0)
+    expect({ line: rowLine(row), room: room >= WIDEST_ID_CELLS }).toEqual({ line: rowLine(row), room: true })
+  }
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+})
+
+test('at 40 and 46 columns a long item title keeps at least half of the room it shares with its detail; at 46 it keeps 8 characters and the detail 4 cells', async ($, on) => {
+  const w = world(on)
+  const base = richUsage()
+  const mcpTools = [
+    { name: 'mcp__claude-in-chrome__computer', serverName: 'claude-in-chrome', tokens: 400, isLoaded: true },
+    { name: 'mcp__0d2d52de-84ea-4267__get_meetings', serverName: '0d2d52de-84ea-4267', tokens: 300, isLoaded: true },
+    { name: 'mcp__ccd_turn__update_plan', serverName: 'ccd_turn', tokens: 200, isLoaded: true },
+  ]
+  w.usage = { ...base, context: { ...base.context, breakdown: { ...base.context.breakdown!, mcpTools } } }
+  w.messages = OPENING
+  await $.session.start(START)
+  await w.clock.advance(0)
+  for (const columns of [46, 40]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    await ui.press({ key: 'row-mcp' })
+    const detailed = gridRowsOf(await ui.drawn()).filter(row => textOf(row).startsWith('mcp__'))
+    expect(detailed).toHaveLength(mcpTools.length)
+    for (const row of detailed) {
+      const [titleBox, detailBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+      const title = textOf(titleBox)
+      const titleCells = (titleBox!.props?.width as number) - BUTTON_PAD_CELLS
+      // The title and the detail share the grid less the columns on the right, the button's padding and the detail's margin.
+      const shared = gridCells(columns) - rightColumns(row).reduce((sum, part) => sum + (part.props?.width as number) + 1, 0) - 1 - BUTTON_PAD_CELLS - 1
+      const where = `${columns} columns, ${title} ${textOf(detailBox)}`
+      expect({ where, half: titleCells >= Math.floor(shared / 2) }).toEqual({ where, half: true })
+      if (columns === 46) {
+        expect({ where, title: (title.endsWith('…') ? title.length - 1 : title.length) >= 8 }).toEqual({ where, title: true })
+        expect({ where, detail: shared - titleCells >= 4 }).toEqual({ where, detail: true })
+      }
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('the words of the controls row start where a Button’s label starts, at every level; the hint does not', async ($, on) => {
+  await realWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
+  const check = async (where: string, hasWords: boolean) => {
+    const tree = await ui.drawn()
+    // No Text stands bare in a wrapping row of the key line: each sits in a Box with the button's padding.
+    const bare = nodesOf(tree).filter(node => node.type === 'Text' && parentOf(tree, node)?.props?.flexWrap === 'wrap')
+    expect({ where, bare: bare.map(textOf) }).toEqual({ where, bare: [] })
+    const words = nodesOf(tree).filter(node => node.type === 'Text' && textOf(node) === OPEN_WORDS)
+    expect({ where, words: words.length }).toEqual({ where, words: hasWords ? 1 : 0 })
+    for (const text of words) {
+      expect({ where, pad: parentOf(tree, text)?.props?.paddingLeft }).toEqual({ where, pad: LABEL_PAD_CELLS })
+    }
+  }
+  await check('level 1', true)
+  await ui.press({ key: 'row-tool-results' })
+  await check('level 2', true)
+  await ui.press({ key: 'item-r:real11' })
+  await check('level 3', false)
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+  // Without the keys the hint stands at the left edge, with no padding.
+  const away = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 46 } })
+  const tree = await away.drawn()
+  const hint = nodesOf(tree).find(node => node.type === 'Text' && textOf(node) === 'Click the pane for keys')
+  expect(hint).toBeDefined()
+  expect(parentOf(tree, hint!)?.props?.paddingLeft).toBeUndefined()
+  await away.unmount()
+})
+
+test('the group headings of level 1 and the trail of the level 2 title are cut at their end, never on a second line', async ($, on) => {
+  await realWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
+  const headings = nodesOf(await ui.drawn()).filter(node => node.type === 'Text' && /^(Baseline|Conversation|Not loaded)/.test(textOf(node)))
+  expect(headings.length).toBeGreaterThanOrEqual(2)
+  for (const heading of headings) {
+    expect({ heading: textOf(heading), wrap: heading.props?.wrap }).toEqual({ heading: textOf(heading), wrap: 'truncate' })
+  }
+  await ui.press({ key: 'row-tool-results' })
+  const trail = nodesOf(await ui.drawn()).find(node => node.type === 'Text' && textOf(node).endsWith('›'))
+  expect(trail?.props?.wrap).toBe('truncate')
+  await ui.press({ key: 'back' })
+  await ui.unmount()
 })

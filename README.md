@@ -219,7 +219,7 @@ When a compaction or `/clear` removes the item or every item of the list that th
 - The mod shows how the window grew since your last prompt only (the column `added`). It keeps no history.
 - The 10% threshold for the heading's warning is the mod's own, not a Claude Code setting. Only the pane's heading warns: the bar and the minimized pane do not. After a compaction the used figure is an estimate, so the warning can come and go between two measurements.
 - The mod reads at most the newest 4,096 messages of a conversation. The pane says so when older items are not listed.
-- The mod reads a file from disk only when you open an item that has one, or step to one with `n` or `p`. It never writes files and never sends content anywhere.
+- The mod reads a file from disk only for the item that you have open: when you open it or step to it with `n` or `p`, when `r` measures again, and when you change the page or the view of the file on disk. It never writes files and never sends content anywhere.
 - In the terminal, the pane takes the letter of a key that left the line through a control that it does not draw. The mods API offers no other way to take a key without drawing it. `tab` would stop on such a control with no ring to show, so the pane moves the ring past it at once: `tab` from `Close` goes on to the `Next page` button below an item's text where there is one, else to the first row or control of the pane, and `shift+tab` comes back to `Close`. A cost: `tab` from `Close` then passes over the pane's own close mark (`✕`), which `shift+tab` still reaches.
 
 ## Development

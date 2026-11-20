@@ -3,6 +3,7 @@
 This repository is a Claude Code mod. The repository root is the mod folder. The marketplace installs the mod from `main`.
 
 - Checks, and how to get the API declarations: see "Development" in [README.md](README.md).
+- Product record: [PRODUCT.md](PRODUCT.md). It states the users, the purpose and the constraints that bind a design.
 - Project terms: [CONTEXT.md](CONTEXT.md). Use them in code, comments and prose.
 - Decision records: [docs/adr](docs/adr).
 

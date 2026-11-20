@@ -15,7 +15,7 @@ import type { TokensOf } from './svgbar'
 import type { BarClientProps, BarRun, PartIdentity } from './barclient'
 import { usedTokens } from './snapshot'
 import type { BandModel } from './view'
-import { LEGEND_JOIN, bandModel, fit, legendCells } from './view'
+import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, bandModel, fit, legendCells } from './view'
 import { cellWidth } from './text'
 
 /** The element table of the surface being drawn. */
@@ -160,9 +160,10 @@ function row(
 
 /**
  * The row on a surface that draws a picture (the desktop app, the editor, the
- * mobile app): the bar as one SVG, then the total and the legend in the code
- * font. Those surfaces draw a Button as a native button showing only its
- * label, so the bar cannot be a row of segment Buttons there. The total is
+ * mobile app): the bar as one SVG, then the total and the legend in the
+ * surface's own face, with tabular digits. Those surfaces draw a Button as a
+ * native button showing only its label, so the bar cannot be a row of
+ * segment Buttons there. The total is
  * the one Button, with no label so its own text shows; it opens level 1.
  * With `openPane` null nothing is pressable.
  */
@@ -176,7 +177,11 @@ function pictureRow(
   const { Box, Text, Button, Svg } = ui
   const { legend } = model
   const hasBar = model.parts.length > 0
-  const total = <Text mono dimColor>{model.label}</Text>
+  const total = (
+    <Text tabular dimColor>
+      {model.label}
+    </Text>
+  )
 
   return (
     <Box flexDirection="row" alignItems="center" columnGap={1}>
@@ -196,11 +201,19 @@ function pictureRow(
           {total}
         </Button>
       )}
-      {legend !== null && <Text mono dimColor>·</Text>}
+      {legend !== null && (
+        <Text tabular dimColor>
+          ·
+        </Text>
+      )}
       {legend !== null && (
         <Svg source={swatchSvg(legend.cell, palette)} alt={segmentDef(legend.id).label} width={SVG_SWATCH_PX} height={SVG_SWATCH_PX} />
       )}
-      {legend !== null && <Text mono dimColor>{legend.text}</Text>}
+      {legend !== null && (
+        <Text tabular dimColor>
+          {legend.text}
+        </Text>
+      )}
     </Box>
   )
 }
@@ -208,8 +221,8 @@ function pictureRow(
 /**
  * The desktop band's row as data for the surface module `barclient.tsx`:
  * the terminal's cells and colours, each run marked with the part a click
- * on it opens, and per segment part which segments it holds and the text
- * that shows while the pointer is on it.
+ * on it opens and whether it is drawn in the code font, and per segment part
+ * which segments it holds and the text that shows while the pointer is on it.
  */
 export function barClientProps(model: BandModel, palette: Palette, tokensOf: TokensOf): BarClientProps {
   const runs: BarRun[] = []
@@ -218,12 +231,12 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
   const hoverParts: { index: number; forms: string[] }[] = []
   model.parts.forEach((part, index) => {
     if (part.kind === 'free') {
-      runs.push({ text: FREE.repeat(part.cells), color: palette.free, target: null })
+      runs.push({ text: FREE.repeat(part.cells), color: palette.free, target: null, mono: true })
 
       return
     }
     if (part.kind === 'reserve') {
-      runs.push({ text: RESERVE.repeat(part.cells), color: palette.reserve, target: null })
+      runs.push({ text: RESERVE.repeat(part.cells), color: palette.reserve, target: null, mono: true })
 
       return
     }
@@ -233,19 +246,22 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     // on a desktop it would stay bright while the rest dims under a hover,
     // and stand taller than the glyphs.
     if (fill !== '') {
-      runs.push({ text: fill, color, target: index })
+      runs.push({ text: fill, color, target: index, mono: true })
     }
     if (edge !== '') {
-      runs.push({ text: edge, color, target: index })
+      runs.push({ text: edge, color, target: index, mono: true })
     }
     parts[String(index)] = { id: part.id, members: [...part.members] }
     hoverParts.push({ index, forms: chipForms(part, tokensOf).map(form => form.trim()) })
   })
   const { legend } = model
-  // The name shows in the legend's place, so it gets the legend's cells:
-  // the longest form that fits, else the shortest cut to fit. With no legend
-  // there is no room, and no name shows.
-  const room = legend === null ? 0 : legendCells(legend) - LEGEND_JOIN.length
+  // The name shows in the legend's place, in the app's face as the legend's
+  // words are: the longest form that fits, else the shortest cut to fit. The
+  // cells of a text in that face no longer bound its drawn width, so the name
+  // gets as many characters as the words it replaces, not the swatch and the
+  // space too: those stay as a margin. With no legend there is no room, and
+  // no name shows.
+  const room = legend === null ? 0 : legendCells(legend) - LEGEND_JOIN.length - LEGEND_SWATCH_CELLS
   for (const { index, forms } of hoverParts) {
     const fits = forms.find(form => cellWidth(form) <= room)
     const text = fits ?? (room >= MIN_CHIP_CELLS ? fit(forms[forms.length - 1] ?? '', room).trimEnd() : '')
@@ -253,10 +269,21 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
       hovers[String(index)] = text
     }
   }
-  runs.push({ text: `${model.parts.length > 0 ? ' ' : ''}${model.label}`, dimColor: true, target: 'total' })
+  // The space after the bar is a cell of the code font, as the bar's are. From
+  // it on every column opens level 1 (see `targetAt`).
+  if (model.parts.length > 0) {
+    runs.push({ text: ' ', target: 'total', mono: true })
+  }
+  runs.push({ text: model.label, dimColor: true, target: 'total' })
   if (legend !== null) {
     runs.push({ text: LEGEND_JOIN, dimColor: true, target: null })
-    runs.push({ text: segmentCells(legend.cell, 1), color: colorOf(palette, legend.cell), target: null, isLegend: true })
+    runs.push({
+      text: segmentCells(legend.cell, 1),
+      color: colorOf(palette, legend.cell),
+      target: null,
+      isLegend: true,
+      mono: true,
+    })
     runs.push({ text: ` ${legend.text}`, dimColor: true, target: null, isLegend: true })
   }
 

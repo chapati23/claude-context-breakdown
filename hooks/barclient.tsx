@@ -4,6 +4,9 @@
 // button showing only its text, so the segments cannot be Buttons there;
 // here a click on a segment posts which segment it is, and the hooks module
 // opens it.
+// The bar's cells and the legend's swatch are drawn in the code font, whose
+// cells the pointer's column counts. The total, the join and the legend's
+// words are drawn in the app's own face, so their width in cells is not known.
 // While the pointer is on a segment, its name and tokens take the legend's
 // place, as the terminal's chip does.
 
@@ -19,6 +22,12 @@ export type BarRun = {
   target: number | 'total' | null
   /** Part of the legend: hidden while a segment's name shows. */
   isLegend?: boolean
+  /**
+   * Drawn in the code font, one cell a character: the bar's cells, the space
+   * after them and the legend's swatch. Any other run is text in the app's
+   * face, with tabular digits.
+   */
+  mono?: boolean
 }
 
 /** Which segments a bar part holds: its segment id and its members' ids. */
@@ -42,10 +51,19 @@ export type BarClientPost = { open: 'total' } | ({ open: number } & PartIdentity
 /** The pointer's column over the region, or null while it is outside. */
 type State = { x: number | null }
 
-/** The target under column `x`: every run is counted one cell a character. */
+/**
+ * The target under column `x`. The runs before the total are the bar's cells,
+ * one cell a character. The total and what follows it are text in the app's
+ * face, of a width the column cannot measure: every column from the total's
+ * start on opens it, the legend's included, so a click on any of its text
+ * opens level 1.
+ */
 export function targetAt(runs: readonly BarRun[], x: number): BarRun['target'] {
   let start = 0
   for (const run of runs) {
+    if (run.target === 'total') {
+      return x >= start ? 'total' : null
+    }
     const width = [...run.text].length
     if (x >= start && x < start + width) {
       return run.target
@@ -109,7 +127,7 @@ export default function ContextBar(props: BarClientProps, surface: ClientSurface
         .filter(run => !(label !== undefined && run.isLegend === true))
         .map(run => (
           <Text
-            mono
+            {...(run.mono === true ? { mono: true } : { tabular: true })}
             {...(run.color === undefined ? {} : { color: run.color })}
             {...(run.backgroundColor === undefined ? {} : { backgroundColor: run.backgroundColor })}
             {...(run.dimColor === true || isFaded(run, hover) ? { dimColor: true } : {})}
@@ -117,7 +135,7 @@ export default function ContextBar(props: BarClientProps, surface: ClientSurface
             {run.text}
           </Text>
         ))}
-      {label !== undefined && <Text mono>{label}</Text>}
+      {label !== undefined && <Text tabular>{label}</Text>}
     </Box>
   )
 }

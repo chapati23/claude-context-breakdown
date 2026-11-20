@@ -8,7 +8,7 @@
 //
 // On the desktop the pane uses the app's own keys only: no Down, Up, j or k
 // at any level, every arrow goes on to the engine, and the mod writes no ring
-// key. Enter and the digits still open rows, and b comes back.
+// key. Enter still opens rows, no digit does, and b comes back.
 //
 // What the kit lets a test see:
 // - It has no answer for the mod's own `$.ui.focus`, so no ring really
@@ -103,9 +103,11 @@ async function arrow($: Engine, by: 1 | -1): Promise<void> {
 }
 
 /** The page the level-2 facts line states, as "page 1 of 3". */
-async function pageOf(ui: PaneUi): Promise<string | undefined> {
+async function pageOf(ui: PaneUi, surface: 'terminal' | 'desktop'): Promise<string | undefined> {
+  // On the terminal the facts end the line. Off the terminal the column's name always follows them.
+  const page = surface === 'terminal' ? /page \d+ of \d+$/ : /page \d+ of \d+(?= +% of )/
   return flatten(await ui.drawn())
-    .map(line => /page \d+ of \d+$/.exec(line)?.[0])
+    .map(line => page.exec(line)?.[0])
     .find(page => page !== undefined)
 }
 
@@ -182,7 +184,7 @@ test('J6 terminal: j, k and the arrows move the ring at levels 1 and 2; Enter op
   expect(await hold(ui, 'k', rows.length - 1 - tools)).toBe(rows.length - 1 - tools)
   await lit('row-tool-results')
   await ui.press({ key: 'row-tool-results' })
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 1 of 3')
 
   // Level 2: 20 rows a page. Nineteen j stay on page 1, the twentieth
   // opens page 2 on its first row, and k goes back to page 1's last row.
@@ -190,21 +192,21 @@ test('J6 terminal: j, k and the arrows move the ring at levels 1 and 2; Enter op
   expect(page1.length).toBe(20)
   expect(await ringOf(ui)).toBe(page1[0])
   expect(await hold(ui, 'j', 19)).toBe(19)
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 1 of 3')
   await lit(page1[19])
   expect(await hotkey(ui, 'j')).toBe(true)
-  expect(await pageOf(ui)).toBe('page 2 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 2 of 3')
   const page2 = await rowsOf(ui)
   expect(await ringOf(ui)).toBe(page2[0])
   await lit(page2[0])
   expect(await hotkey(ui, 'k')).toBe(true)
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 1 of 3')
   expect(await ringOf(ui)).toBe(page1[19])
   expect(ring.at(-1)).toBe(page1[19])
   await lit(page1[19])
   // The arrow down crosses the same way.
   await arrow($, 1)
-  expect(await pageOf(ui)).toBe('page 2 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 2 of 3')
   expect(await ringOf(ui)).toBe(page2[0])
   expect(ring.at(-1)).toBe(page2[0])
 
@@ -228,7 +230,7 @@ test('J6 terminal: j, k and the arrows move the ring at levels 1 and 2; Enter op
   // b comes back to page 2 with the ring on the item, then to level 1 with
   // the ring on Tool results.
   expect(await hotkey(ui, 'b')).toBe(true)
-  expect(await pageOf(ui)).toBe('page 2 of 3')
+  expect(await pageOf(ui, 'terminal')).toBe('page 2 of 3')
   expect(await ringOf(ui)).toBe(page2[2])
   await lit(page2[2])
   expect(await hotkey(ui, 'b')).toBe(true)
@@ -242,7 +244,7 @@ test('J6 terminal: j, k and the arrows move the ring at levels 1 and 2; Enter op
   await ui.unmount()
 })
 
-test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; Enter and the digits open, b comes back', async ($, on) => {
+test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; Enter opens, no digit does, b comes back', async ($, on) => {
   const { seen, ring } = await listWorld($, on)
   const ui = await mountPane($, 'desktop', { columns: 88, isFocused: true, rows: WINDOW.bodyRows })
   /** No Down or Up control and no j or k key cap at this level. */
@@ -269,12 +271,12 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
    */
   const keysWritten = () => ring.filter(key => key !== 'null')
 
-  // Level 1: the ring starts on the first row; the key words name Enter and the digits only.
+  // Level 1: the ring starts on the first row; the key words name Enter only: the rows take no digit.
   const rows = await rowsOf(ui)
   expect(rows.length).toBeGreaterThan(5)
   expect(await ringOf(ui)).toBe(rows[0])
   await noSteps('level 1')
-  expect(flatten(await ui.drawn()).some(line => line.startsWith('⏎ 1-9') && !line.includes('Move'))).toBe(true)
+  expect(flatten(await ui.drawn()).some(line => line.startsWith('⏎: Open') && !line.includes('Move'))).toBe(true)
   ring.length = 0
   expect(await hotkey(ui, 'j')).toBe(false)
   expect(await pressDown()).toContain('no Button')
@@ -297,12 +299,13 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   // The tree still asks for the ring on the first row, its autoFocus key.
   expect(await ringOf(ui)).toBe(rows[0])
 
-  // The digit of Tool results opens its items.
+  // No digit opens Tool results; Enter on its row (a press) does.
   const tools = rows.indexOf('row-tool-results')
   expect(tools).toBeGreaterThanOrEqual(0)
   expect(tools).toBeLessThan(9)
-  expect(await hotkey(ui, String(tools + 1))).toBe(true)
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await hotkey(ui, String(tools + 1))).toBe(false)
+  await ui.press({ key: 'row-tool-results' })
+  expect(await pageOf(ui, 'desktop')).toBe('page 1 of 3')
 
   // Level 2: the same rule.
   const page1 = await rowsOf(ui)
@@ -312,7 +315,7 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   seen.length = 0
   await arrow($, 1)
   expect(seen.map(one => [one.origin, one.by])).toEqual([['person', 1]])
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await pageOf(ui, 'desktop')).toBe('page 1 of 3')
   expect(keysWritten()).toEqual([])
 
   // Enter (a press on a row) opens it; b comes back with the ring on it.
@@ -321,8 +324,9 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   await noSteps('level 3')
   expect(await hotkey(ui, 'b')).toBe(true)
   expect(await ringOf(ui)).toBe(page1[2])
-  // The digit 3 opens the same row.
-  expect(await hotkey(ui, '3')).toBe(true)
+  // The digit 3 opens nothing; Enter opens the same row again.
+  expect(await hotkey(ui, '3')).toBe(false)
+  await ui.press({ key: page1[2]! })
   expect(flatten(await ui.drawn()).some(line => / · lines [\d,]+-[\d,]+ of [\d,]+$|tokens/.test(line))).toBe(true)
   expect(await hotkey(ui, 'b')).toBe(true)
   expect(await hotkey(ui, 'b')).toBe(true)
@@ -333,7 +337,7 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   await setFocus(ui, false)
   expect(await hotkey(ui, String(tools + 1))).toBe(false)
   await ui.press({ key: 'row-tool-results' })
-  expect(await pageOf(ui)).toBe('page 1 of 3')
+  expect(await pageOf(ui, 'desktop')).toBe('page 1 of 3')
   expect(keysWritten()).toEqual([])
   await ui.unmount()
 })

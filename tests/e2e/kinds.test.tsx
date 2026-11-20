@@ -56,7 +56,7 @@ const KINDS: Kind[] = [
   { name: 'project instruction file', row: 'row-project-instructions', pick: 'CLAUDE.md', crumb: /^██ Project › ~\/project\/CLAUDE\.md$/, form: 'formatted', source: 'as loaded', start: ['# Project', '', 'Use tabs for indents.'] },
   { name: 'global instruction file', row: 'row-global-instructions', pick: 'CLAUDE.md', crumb: /^██ Global › ~\/\.claude\/CLAUDE\.md$/, form: 'formatted', source: 'on disk', start: ['Be brief.'], note: 'Not found in the conversation’s opening reminder: shown from disk.' },
   { name: 'skill body', row: 'row-skill-bodies', pick: 'demo-skill', crumb: /^██ Skill bodies › demo-skill$/, form: 'formatted', source: 'as loaded', start: ['Base directory for this skill: /home/user/.claude/skills/demo-skill', '', '# Demo', 'Do the steps.'] },
-  { name: 'prompt', row: 'row-prompts', pick: 'Please read the notes', crumb: /^██ Prompts › Please read the notes/, form: 'formatted', source: 'as loaded', start: ['Please read the notes file and list the folder.'] },
+  { name: 'prompt', row: 'row-prompts', pick: 'Please read', crumb: /^██ Prompts › Please read the notes/, form: 'formatted', source: 'as loaded', start: ['Please read the notes file and list the folder.'] },
   { name: 'prompt that ran a local command', row: 'row-prompts', pick: '/review src', crumb: /^██ Prompts › \/review src$/, form: 'formatted', source: 'as loaded', start: ['\\<command-message>review is running…\\</command-message>', '\\<command-name>/review\\</command-name>', '\\<command-args>src\\</command-args>'] },
   { name: 'Claude output', row: 'row-claude-output', pick: 'The folder holds one data file.', crumb: /^██ Claude › The folder holds one data file\.$/, form: 'formatted', source: 'as loaded', start: ['The folder holds one data file.'] },
   { name: 'task report', row: 'row-task-reports', pick: 'Build finished', crumb: /^██ Tasks › Build finished$/, form: 'raw', source: 'as loaded', start: ['<task-notification>', '<task-id>b1</task-id>', '<status>completed</status>', '<summary>Build finished</summary>'] },
@@ -88,7 +88,8 @@ for (const surface of SURFACES) {
       const lines = await tap(ui, key, opts)
       const three = level3(lines)
       const facts = factsOf(three.facts)
-      expect(three.crumb, kind.name).toMatch(kind.crumb)
+      // Off the terminal the swatch is a picture, which flatten prints as <svg>.
+      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^<svg> /, '██ '), kind.name).toMatch(kind.crumb)
       expect(facts, `${kind.name}: ${three.facts}`).toMatchObject({ tokens: size, form: kind.form, source: kind.source })
       expect(three.notes, kind.name).toEqual(kind.note === undefined ? [] : [kind.note])
       expect(three.controls.join(' '), kind.name).toContain('Back')

@@ -112,25 +112,26 @@ describe('acts on the pane', () => {
   })
 
   test('on a desktop a drawn hotkey presses nothing while the pane does not hold the keyboard', async ($, on) => {
-    await session($, on, chat())
+    const w = await session($, on, chat())
     const ui = await mountPane($, 'desktop', { columns: 88 })
-    // The desktop draws the hotkeys without the keyboard too, as key caps.
+    // The desktop draws the controls' hotkeys without the keyboard too, as
+    // key caps. Its rows have none: a click or Enter opens them.
     const row = (await ui.findAll({ type: 'Button' })).find(button => button.key === 'row-tool-results')
-    const digit = String(row?.props.hotkey)
-    expect(digit).toMatch(/^[1-9]$/)
+    expect(row?.props.hotkey).toBeUndefined()
     const before = flatten(await ui.drawn(), { surface: 'desktop' })
-    expect(await hotkey(ui, digit)).toBe(false)
     // The desktop draws no j: a drawn control's key stands in for it.
     expect((await ui.find({ key: 'refresh' }))?.props.hotkey).toBe('r')
+    const calls = w.usageCalls
     expect(await hold(ui, 'r', 3)).toBe(0)
+    expect(w.usageCalls).toBe(calls)
     expect(flatten(await ui.drawn(), { surface: 'desktop' })).toEqual(before)
 
-    // With the keyboard the same key opens the row; a redraw that takes it away stops it again.
+    // With the keyboard the same key presses the control; a redraw that takes it away stops it again.
     await setFocus(ui, true)
-    expect(await hotkey(ui, digit)).toBe(true)
-    expect(await ringOf(ui)).toBe('item-r:tu2')
+    expect(await hotkey(ui, 'r')).toBe(true)
+    expect(w.usageCalls).toBeGreaterThan(calls)
     await ui.redraw({ ...PANE.props, bodyColumns: 88 })
-    expect(await hotkey(ui, '1')).toBe(false)
+    expect(await hotkey(ui, 'r')).toBe(false)
     await ui.unmount()
   })
 

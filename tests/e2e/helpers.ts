@@ -14,6 +14,7 @@
 import type { On, RenderElement, RenderNode, RenderPropsOf, SessionUsage } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
+import { MEASURED_CELL_PX } from '../../hooks/svgbar'
 import { cellWidth, headCells } from '../../hooks/text'
 import { CHAT, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, realSession, richUsage, world } from '../fixtures'
 import type { World } from '../fixtures'
@@ -36,7 +37,12 @@ export type FlattenOptions = {
    * plain Button with hotkey h. 'desktop' prints the label alone, as the
    * native button shows it, after `h: ` for a Button with hotkey h: the
    * native button draws the hotkey as a key cap before the label, about
-   * three cells wide with its gap, so `h: ` stands for the cap.
+   * three cells wide with its gap, so `h: ` stands for the cap. On
+   * 'desktop' an Svg, printed `<svg>`, counts as the cells it takes there:
+   * its `width` in cells of MEASURED_CELL_PX, or else the width of its Box.
+   * A numeric width cuts a line of a row Box there too. A column Box with
+   * a numeric width only pads: the surface shrinks or wraps what it holds
+   * to that width, which flatten does not model.
    */
   surface?: 'terminal' | 'desktop'
   /**
@@ -54,8 +60,11 @@ export type Flat = {
   overlay: string[]
 }
 
-/** A run of text with one style. */
-type Span = { text: string; dim: boolean; ring: boolean; off: boolean }
+/**
+ * A run of text with one style. `cells`, where set, is the width the run
+ * counts as, whatever its text: an Svg on 'desktop'.
+ */
+type Span = { text: string; dim: boolean; ring: boolean; off: boolean; cells?: number }
 
 /** A block of lines, as a child of a Box lays out. */
 type Block = Span[][]
@@ -83,7 +92,7 @@ function num(value: unknown): number {
 }
 
 function lineWidth(line: Span[]): number {
-  return line.reduce((sum, span) => sum + cellWidth(span.text), 0)
+  return line.reduce((sum, span) => sum + (span.cells ?? cellWidth(span.text)), 0)
 }
 
 function blockWidth(block: Block): number {
@@ -105,6 +114,14 @@ function fit(line: Span[], cells: number): Span[] {
   for (const span of line) {
     if (left <= 0) {
       break
+    }
+    if (span.cells !== undefined) {
+      // A run of fixed width is whole or gone.
+      if (span.cells <= left) {
+        out.push(span)
+        left -= span.cells
+      }
+      continue
     }
     const head = headCells(span.text, left)
     out.push({ ...span, text: head })
@@ -297,7 +314,8 @@ function layout(drawn: RenderNode, style: Style, walk: Walk, room: Room): Block 
           : beside(blocks, gap)
       if (typeof props.width === 'number') {
         const width = num(props.width)
-        block = block.map(line => fit(line, width))
+        const cuts = walk.opts.surface !== 'desktop' || isRow
+        block = block.map(line => (cuts || lineWidth(line) <= width ? fit(line, width) : line))
       }
 
       return frame(block, props)
@@ -326,8 +344,14 @@ function layout(drawn: RenderNode, style: Style, walk: Walk, room: Room): Block 
       return textLines(String(props.source ?? ''), style)
     case 'Markdown':
       return textLines(String(props.text ?? ''), styleOf(props, style))
-    case 'Svg':
-      return textLines('<svg>', style)
+    case 'Svg': {
+      if (walk.opts.surface !== 'desktop') {
+        return textLines('<svg>', style)
+      }
+      const width = typeof props.width === 'number' ? Math.ceil(props.width / MEASURED_CELL_PX) : Number.isFinite(room) ? Math.max(0, Math.floor(room)) : cellWidth('<svg>')
+
+      return [[{ text: '<svg>', ...style, cells: width }]]
+    }
     case 'Client':
       return textLines(clientText(props), style)
     case 'Input':
@@ -401,7 +425,8 @@ function serialize(line: Span[], opts: FlattenOptions): string {
  *
  * A Box with flexDirection row (the default) joins its children left to
  * right, each padded to its widest line; a column Box stacks them. Gap,
- * margin and padding add space; a numeric width pads or cuts. With
+ * margin and padding add space; a numeric width pads or cuts (on 'desktop'
+ * a column Box only pads). With
  * `columns`, a row Box with flexWrap 'wrap' breaks onto new lines. A Box with
  * position absolute goes to `overlay`. Text joins its children; Code prints
  * its source, Markdown its text, Svg `<svg>`, a Client the text of its runs.

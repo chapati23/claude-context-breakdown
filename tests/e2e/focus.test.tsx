@@ -3,11 +3,11 @@
 // widths and at each level. Without the keys the hint line shows. On the
 // terminal the rows show dim number marks and no Button has a hotkey. A
 // desktop draws a hotkey as a key cap inside the native button, so there
-// every Button keeps its hotkey in both states, and a hotkey presses only
-// with the keys. With them the first nine rows have the hotkeys 1-9 and the
-// tenth has none. After Escape the drawing is the first one again, and no
-// column of a row moves between the two; on a desktop a row with a key cap
-// and a row without one start their names in one column. At every level
+// every control keeps its hotkey in both states, and a hotkey presses only
+// with the keys; its rows have none (grid.tsx). With the keys the terminal's
+// first nine rows have the hotkeys 1-9 and the tenth 0. After Escape the
+// drawing is the first one again, and no column of a row moves between the
+// two; on a desktop every row starts its name in one column. At every level
 // and in both states no two Buttons hold the same hotkey. Only the terminal,
 // with the keys, draws Down and Up (j and k); the desktop draws them at no
 // level, in either state.
@@ -96,20 +96,18 @@ async function stepsOf(ui: PaneUi): Promise<string[]> {
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
- * The column, in cells, where each row's name starts on a desktop: after
- * the key cap (`h: ` in the flattened text) or the blank cells that take its
- * place. One entry per row that opens.
+ * The column, in cells, where each row's name starts on a desktop: its
+ * Button's label, which has no key cap. One entry per row that opens.
  */
 async function nameColumns(ui: PaneUi, lines: readonly string[]): Promise<number[]> {
   const rows = (await ui.findAll({ type: 'Button' })).filter(button => /^(row|item)-/.test(button.key ?? ''))
 
   return rows.map(row => {
-    const hotkey = typeof row.props.hotkey === 'string' ? `${row.props.hotkey}: ` : ' {3}'
-    const name = new RegExp(`${hotkey}${literal(String(row.props.label))}`)
+    const name = new RegExp(literal(String(row.props.label)))
     const line = lines.map(unmarked).find((text, i) => i > 0 && name.test(text)) ?? ''
     const at = name.exec(line)?.index ?? -1
 
-    return at < 0 ? -1 : cellsTo(line, at) + 3
+    return at < 0 ? -1 : cellsTo(line, at)
   })
 }
 
@@ -138,8 +136,8 @@ for (const surface of SURFACES) {
         }
 
         // First look, without the keys: the hint line. The terminal: dim
-        // marks, no hotkey anywhere. A desktop: the rows' and the controls'
-        // hotkeys, drawn as key caps.
+        // marks, no hotkey anywhere. A desktop: the controls' hotkeys, drawn
+        // as key caps, and none on the rows.
         const first = flatten(await ui.drawn(), opts)
         const firstHotkeys = await allHotkeys(ui)
         expect({ where, hint: first.includes(`⟨${hint}⟩`) }).toEqual({ where, hint: true })
@@ -156,23 +154,23 @@ for (const surface of SURFACES) {
           // No Down and Up and no j or k: Tab moves the ring along the rows.
           expect({ where, steps: await stepsOf(ui) }).toEqual({ where, steps: [] })
           const keys = await rowHotkeys(ui)
-          expect({ where, keys: keys.slice(0, digits.length) }).toEqual({ where, keys: digits })
-          expect({ where, rest: keys.slice(digits.length).every(key => key === undefined) }).toEqual({ where, rest: true })
+          expect({ where, keys: keys.every(key => key === undefined) }).toEqual({ where, keys: true })
         } else {
           // Level 3 off the terminal has no j and k: the app scrolls the text.
           expect({ where, keys: firstHotkeys.slice(0, 3) }).toEqual({ where, keys: ['b', 'p', 'n'] })
         }
 
         // Tab in: the hint goes, the first nine rows take 1-9, the tenth 0, the rest none
-        // (at 24 columns no row has a digit).
+        // (at 24 columns no row has a digit). A desktop's rows take none.
         await setFocus(ui, true)
         const focused = flatten(await ui.drawn(), opts)
         expect({ where, hint: focused.includes(`⟨${hint}⟩`) }).toEqual({ where, hint: false })
         expect({ where, twice: await twiceHeld(ui) }).toEqual({ where, twice: [] })
         if (level < 3) {
           const keys = await rowHotkeys(ui)
-          expect({ where, keys: keys.slice(0, digits.length) }).toEqual({ where, keys: digits })
-          expect({ where, rest: keys.slice(digits.length).every(key => key === undefined) }).toEqual({ where, rest: true })
+          const rowDigits = surface === 'terminal' ? digits : []
+          expect({ where, keys: keys.slice(0, rowDigits.length) }).toEqual({ where, keys: rowDigits })
+          expect({ where, rest: keys.slice(rowDigits.length).every(key => key === undefined) }).toEqual({ where, rest: true })
           expect({ where, tenth: keys.length >= 10 }).toEqual({ where, tenth: true })
           // With the keys only the terminal draws Down and Up (j and k).
           const steps = surface === 'terminal' ? ['list-down:j', 'list-up:k'] : []
@@ -193,8 +191,8 @@ for (const surface of SURFACES) {
         expect({ where, lines: again }).toEqual({ where, lines: first })
         expect({ where, hotkeys: await allHotkeys(ui) }).toEqual({ where, hotkeys: firstHotkeys })
 
-        // On a desktop a row with a key cap and a row without one (the eleventh)
-        // start their names in one column, in both states.
+        // On a desktop every row, the eleventh too, starts its name in one
+        // column, in both states.
         if (surface === 'desktop' && level < 3 && marked) {
           for (const lines of [first, focused]) {
             const columns = await nameColumns(ui, lines)

@@ -38,8 +38,8 @@ Success is adoption (confirmed 2026-11-19): other Claude Code users install the 
 - The mod runs inside a Claude Code session, version 2.1.287 or newer. The user's attention is on the conversation and the prompt. The bar is one row at the edge of that work.
 - It draws on four surfaces, with different abilities:
   - **Terminal.** The bar in character cells, the pane beside the conversation, and the full set of keys, including `j`, `k` and the arrow keys.
-  - **Desktop app.** The bar in the code font with the same cells. Rows and controls are native buttons with key caps. The app's own keys move the focus. If the app cannot run the bar's module, the bar becomes a picture as in the mobile app, until the mod loads again.
-  - **Mobile app and editor.** The bar is a picture. Only the total is a button.
+  - **Desktop app.** The bar's cells in the code font, with the same cells as the terminal; the total and the legend in the app's face. A click on the total or the legend opens the segments. The pane is a grid of swatches, length bars and figures in fixed columns. Rows and controls are native buttons; only the controls have key caps. The app's own keys move the focus, and `enter` opens a row. If the app cannot run the bar's module, the bar becomes a picture as in the mobile app, until the mod loads again.
+  - **Mobile app and editor.** The bar is a picture. Only the total is a button. The pane is the desktop app's grid.
 - The user opens the pane with `/ctx`, with `/ctx <segment>`, or with a click on the bar.
 - Users install and update the mod through a marketplace. A release is a merge to `main` that raises the version. The rule is in "Releases" in [AGENTS.md](AGENTS.md).
 - Not decided: which surface wins when a design cannot serve all four. The evidence points to the terminal first and the desktop app second: the terminal has the most keys, and the README pictures show the terminal.

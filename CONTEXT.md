@@ -66,6 +66,10 @@ _Avoid_: Tooltip, popover, hover title
 The text right of the bar's total that names the largest conversation segment and its share of what is used.
 _Avoid_: Key, caption
 
+**Swatch**:
+A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The swatch of free space, the reserve or the compaction summary shows its texture. The legend has one, and so does the pane off the terminal.
+_Avoid_: Dot, icon, colour key
+
 **Added**:
 The tokens a segment gained since the person's last prompt, shown in the pane's column `added`.
 _Avoid_: Delta, diff, change

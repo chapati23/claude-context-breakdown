@@ -6,7 +6,7 @@
 
 terminal
 
-The mod draws in character cells inside a Claude Code session. The terminal is its first surface. The other surfaces it draws on are in "Operating Context".
+The mod draws in character cells inside a Claude Code session, and off the terminal the pane also draws pictures. The terminal is its first surface. The other surfaces it draws on are in "Operating Context".
 
 `terminal` is not one of the values that the Impeccable schema names (`web`, `ios`, `android`, `adaptive`). The maintainer chose it on 2026-11-19 because none of those describes the mod. Impeccable's browser tools (`live`, `generate`, `detect`) and its native iOS and Android guidance do not apply here. Impeccable does not know the value: `impeccable context` warns and treats the project as `web`. Its directives for web pages, such as the request to run the detector, do not apply to this mod.
 
@@ -96,5 +96,5 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 ## Accessibility & Inclusion
 
 - The palette is tested for the two common forms of colour blindness. There is one palette for dark themes and one for light themes.
-- Every action in the pane has a key. Each level shows the keys that can apply there, always in the same order.
+- Every action in the pane has a key. Each level shows the keys that can apply there, always in the same order. Off the terminal, a row opens with the app's focus keys and Enter, and the controls keep their letters.
 - No formal standard, such as a WCAG level, is established.

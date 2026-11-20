@@ -67,7 +67,7 @@ The text right of the bar's total that names the largest conversation segment an
 _Avoid_: Key, caption
 
 **Swatch**:
-A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The swatch of free space, the reserve or the compaction summary shows its texture. The legend has one, and so does the pane off the terminal.
+A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The swatch of free space, the reserve or the compaction summary shows its texture. The legend has one, and so does each row of the pane off the terminal. In the terminal, the title of level 3 has one as two block glyphs.
 _Avoid_: Dot, icon, colour key
 
 **Added**:

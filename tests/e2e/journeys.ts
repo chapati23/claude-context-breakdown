@@ -74,15 +74,17 @@ export type Level2 = {
  * the facts, a blank line before and after them.
  */
 export function level2(lines: readonly string[]): Level2 {
-  const crumb = /^Context › (?:█+|<svg>) (.+?)(?: {2}| )(\S+) · (\S+) of used$/.exec(lines[0] ?? '')
+  // Each surface keeps its own strict shape: a terminal line never passes on the grid's looser one.
+  const terminal = !(lines[0] ?? '').startsWith('Context › <svg> ')
+  const crumb = (terminal ? /^Context › █+ (.+?) {2}(\S+) · (\S+) of used$/ : /^Context › <svg> (.+?) (\S+) · (\S+) of used$/).exec(lines[0] ?? '')
   // The definition takes the lines up to the facts: more than one where the terminal wraps it.
   const factsAt = Math.max(2, lines.findIndex((line, k) => k > 0 && /^\d+ items?\b/.test(line)))
   // Off the terminal the definition ends at the blank line before the controls.
-  const blank = lines.slice(1, factsAt).indexOf('')
+  const blank = terminal ? -1 : lines.slice(1, factsAt).indexOf('')
   const definition = lines.slice(1, blank < 0 ? factsAt : blank + 1).join(' ')
   const controls = blank < 0 ? null : lines.slice(blank + 2, factsAt).filter(line => line !== '')
   // The column name stands beside the facts where both fit on one row.
-  const facts = (lines[factsAt] ?? '').replace(/ +% of segment$/, '')
+  const facts = (lines[factsAt] ?? '').replace(terminal ? / {2,}% of segment$/ : / +% of segment$/, '')
   const count = /^(\d+) items?\b/.exec(facts)
   const headerAt = lines.findIndex((line, k) => k >= factsAt && /% of segment$/.test(line))
   if (crumb === null || count === null || headerAt < 0) {

@@ -81,8 +81,19 @@ import { fit, headingLine, paneHeading } from './view'
 export const GRID_MAX_CELLS = 64
 /** The lead before a level 1 row's name: holds the swatch. */
 export const LEAD_CELLS = 2
-/** A figure's column: tokens ("406k"), share ("<0.1%"), added ("+2.5k"). */
-export const FIGURE_CELLS = 5
+/**
+ * The smallest cell the grid holds for, in CSS pixels. The declarations
+ * state no size: one Mac measured MEASURED_CELL_PX, and another code font
+ * gives another size.
+ */
+export const MIN_CELL_PX = 7
+/**
+ * A figure's column: tokens ("406k"), share ("<0.1%"), added ("+2.5k") and
+ * the name "added". Five characters and one cell to spare: in the surface's
+ * face a figure or a capital can be wider than a cell when the cell is
+ * small, and a column too narrow for its text breaks it onto a second line.
+ */
+export const FIGURE_CELLS = 6
 /** The length bar's column: in a grid at its widest, and in a narrower one. */
 export const BAR_CELLS = 8
 export const BAR_NARROW_CELLS = 5
@@ -92,6 +103,20 @@ export const BAR_NARROW_CELLS = 5
  * starts. The one fractional cell in the grid.
  */
 export const LABEL_PAD_CELLS = Math.round((6 / MEASURED_CELL_PX) * 10000) / 10000
+/**
+ * The padding a native button draws on both sides of its label, 12 CSS
+ * pixels, in whole cells at the smallest cell: a column that holds a Button
+ * leaves this room beside the label's cells, because the button does not
+ * shrink.
+ */
+export const BUTTON_PAD_CELLS = Math.ceil(12 / MIN_CELL_PX)
+/**
+ * The part of a pane's columns the grid may use. `columns` counts the
+ * advance of the code font, and a Box's cell can be wider: on one Mac 8.8
+ * against 8.43 pixels. Without this margin a grid of 48 to 71 columns ended
+ * past the pane's body.
+ */
+export const GRID_SHARE = 0.95
 /** The fewest cells an item's detail keeps at level 2: the title's column stops short of them. */
 export const DETAIL_MIN_CELLS = 12
 /** The words before the controls while a row opens and the pane offers its keys: Enter opens the row with the focus. */
@@ -106,9 +131,12 @@ export const SWATCH_ALT = 'Colour'
 /** The element table of a surface that has `Svg`. */
 type GridUi = Elements['desktop'] | Elements['mobile'] | Elements['vscode']
 
-/** The grid's width for a pane `columns` wide: one spare cell each side, at most GRID_MAX_CELLS. */
+/**
+ * The grid's width for a pane `columns` wide: GRID_SHARE of the columns, less
+ * one spare cell each side, at most GRID_MAX_CELLS.
+ */
 export function gridCells(columns: number): number {
-  return Math.max(1, Math.min(GRID_MAX_CELLS, Math.floor(columns) - 2))
+  return Math.max(1, Math.min(GRID_MAX_CELLS, Math.floor(columns * GRID_SHARE) - 2))
 }
 
 /** The length bar's cells: none where the terminal's table drops its bar, fewer where the grid is not at its widest. */
@@ -484,18 +512,18 @@ function listGrid(
     )
   } else {
     // The title's column is as wide as the longest title of a row with a
-    // detail on the page, and a cell for the button's padding: a native
-    // button does not shrink. It stops short of DETAIL_MIN_CELLS for the
-    // details. A row with no detail gives its title the detail's room too.
+    // detail on the page, and BUTTON_PAD_CELLS for the button's padding: a
+    // native button does not shrink. It stops short of DETAIL_MIN_CELLS for
+    // the details. A row with no detail gives its title the detail's room too.
     const room = Math.max(1, grid - right - 1)
-    const cap = Math.max(4, room - 1 - DETAIL_MIN_CELLS)
+    const cap = Math.max(4, room - BUTTON_PAD_CELLS - 1 - DETAIL_MIN_CELLS)
     const detailed = list.rows.filter(row => row.detail !== '')
     const titleCells = Math.min(cap, Math.max(1, ...detailed.map(row => cellWidth(row.title))))
-    const detailCells = Math.max(1, room - (titleCells + 1) - 1)
+    const detailCells = Math.max(1, room - (titleCells + BUTTON_PAD_CELLS) - 1)
     body = list.rows.map(row => {
       const key = `item-${row.id}`
       const hasDetail = row.detail !== ''
-      const title = fittedTitle(row.title, hasDetail ? titleCells : room - 1, row.pathIn === 'title')
+      const title = fittedTitle(row.title, hasDetail ? titleCells : room - BUTTON_PAD_CELLS, row.pathIn === 'title')
       // A row that does not open has a dim title, as a line that is not a
       // control, while other rows on the page open (`marksClosed`).
       const named = row.isOpenable ? (
@@ -508,7 +536,7 @@ function listGrid(
         rows,
         [
           hasDetail ? (
-            <Box width={titleCells + 1} flexShrink={0} flexDirection="row" {...(row.isOpenable ? {} : { paddingLeft: LABEL_PAD_CELLS })}>
+            <Box width={titleCells + BUTTON_PAD_CELLS} flexShrink={0} flexDirection="row" {...(row.isOpenable ? {} : { paddingLeft: LABEL_PAD_CELLS })}>
               {named}
             </Box>
           ) : (

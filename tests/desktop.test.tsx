@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 import { bandTree } from '../hooks/band'
 import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
 import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
-import { BAR_CELLS, FIGURE_CELLS, GRID_MAX_CELLS, LEAD_CELLS } from '../hooks/grid'
+import { BAR_CELLS, BUTTON_PAD_CELLS, FIGURE_CELLS, LEAD_CELLS, gridCells } from '../hooks/grid'
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
@@ -612,7 +612,7 @@ test('desktop item rows: the Button holds the title in a column as wide as the l
   expect(rowLine(row)).toBe('Read ~/project/src/module-1.ts ▬ 31k 27%')
   const [titleBox, detailBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
   // "Read" and "Bash": four cells, and one for the native button's padding.
-  expect(titleBox?.props).toMatchObject({ width: cellWidth('Read') + 1, flexShrink: 0 })
+  expect(titleBox?.props).toMatchObject({ width: cellWidth('Read') + BUTTON_PAD_CELLS, flexShrink: 0 })
   const detail = (detailBox?.children ?? []).filter(isNode)[0]!
   expect(detail.props?.dimColor).toBe(true)
   expect(textOf(detail)).toBe('~/project/src/module-1.ts')
@@ -621,7 +621,7 @@ test('desktop item rows: the Button holds the title in a column as wide as the l
   for (const key of ['item-r:real9', 'item-r:real10']) {
     expect((await ui.find({ key }))?.props.hotkey).toBeUndefined()
     const other = gridRowWith(tree, key)!
-    expect(((other.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]?.props?.width).toBe(cellWidth('Read') + 1)
+    expect(((other.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]?.props?.width).toBe(cellWidth('Read') + BUTTON_PAD_CELLS)
     expect(rightColumns(other).map(part => part.props?.width)).toEqual(rightColumns(row).map(part => part.props?.width))
   }
 
@@ -796,9 +796,9 @@ test('desktop plain lines stand in the rows’ columns, and the grid stops at it
     const label = String((await ui.find({ key: 'row-not-loaded' }))?.props.label)
     expect({ where, label: /^MCP tools( · 1 server(, 1 tool)?)?$/.test(label) }).toEqual({ where, label: true })
     expect({ where, server: lines.filter(text => text.includes('tickets')) }).toEqual({ where, server: [] })
-    // The grid is two cells narrower than the pane, at most GRID_MAX_CELLS.
+    // The grid keeps a margin inside the pane, at most GRID_MAX_CELLS (gridCells).
     const grid = nodesOf(tree).find(node => node.type === 'Box' && typeof node.props?.width === 'number' && node.props.width > LEAD_CELLS)
-    expect({ where, grid: grid?.props?.width }).toEqual({ where, grid: Math.min(GRID_MAX_CELLS, columns - 2) })
+    expect({ where, grid: grid?.props?.width }).toEqual({ where, grid: gridCells(columns) })
     await ui.unmount()
   }
   // A wide pane draws the same tree as one at the cap.

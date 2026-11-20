@@ -9,10 +9,12 @@ import type { Engine } from 'claude-code/testing'
 import {
   BAR_CELLS,
   BAR_NARROW_CELLS,
+  BUTTON_PAD_CELLS,
   FIGURE_CELLS,
   GRID_MAX_CELLS,
   LABEL_PAD_CELLS,
   LEAD_CELLS,
+  MIN_CELL_PX,
   OPEN_WORDS,
   SWATCH_ALT,
   barCells,
@@ -22,7 +24,8 @@ import {
 } from '../hooks/grid'
 import { DARK, LIGHT } from '../hooks/palette'
 import { LENGTH_BAR_HEIGHT, MEASURED_CELL_PX, lengthBarPicture, swatchPicture, windowBarPicture } from '../hooks/svgbar'
-import { tableLayout } from '../hooks/table'
+import { ADDED_NAME, tableLayout } from '../hooks/table'
+import { cellWidth } from '../hooks/text'
 import { CHAT, FOCUSED_PANE, NOTES, OPENING, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, TRANSCRIPT, realSession, richUsage, usage, world } from './fixtures'
 import { gridLines, gridRowWith, gridRowsOf, isNode, nodesOf, rightColumns, rowLine, textOf } from './grid'
 
@@ -450,8 +453,59 @@ test('the length bars scale to the largest row and alt texts use the full name a
   await ui.unmount()
 })
 
+test('every right-aligned column is a cell wider than its text, so no figure breaks onto a second line in a small cell', async ($, on) => {
+  // The longest figures and the column's name, with the cell to spare.
+  for (const text of ['406k', '<0.1%', '+2.5k', '100%', ADDED_NAME]) {
+    expect({ text, fits: cellWidth(text) + 1 <= FIGURE_CELLS }).toEqual({ text, fits: true })
+  }
+  await realWorld($, on)
+  for (const columns of [46, 88]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    for (const level of [1, 2]) {
+      const tree = await ui.drawn()
+      const columnsOf = nodesOf(tree).filter(node => node.type === 'Box' && node.props?.justifyContent === 'flex-end' && typeof node.props?.width === 'number')
+      expect(columnsOf.length).toBeGreaterThan(10)
+      for (const column of columnsOf) {
+        const text = textOf(column)
+        const where = `${columns} columns, level ${level}, ${text}`
+        expect({ where, fits: cellWidth(text) + 1 <= (column.props?.width as number) }).toEqual({ where, fits: true })
+      }
+      if (level === 1) {
+        await ui.press({ key: 'row-tool-results' })
+      }
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('an item title’s column holds its Button: the label’s cells and the native padding at the smallest cell', async ($, on) => {
+  expect(BUTTON_PAD_CELLS * MIN_CELL_PX).toBeGreaterThanOrEqual(12)
+  await realWorld($, on)
+  for (const columns of [40, 46, 88]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    await ui.press({ key: 'row-tool-results' })
+    const tree = await ui.drawn()
+    const held = nodesOf(tree).filter(
+      node => node.type === 'Box' && typeof node.props?.width === 'number' && (node.children ?? []).some(child => isNode(child) && child.type === 'Button'),
+    )
+    expect(held.length).toBeGreaterThan(5)
+    for (const box of held) {
+      const label = textOf(box)
+      const where = `${columns} columns, ${label}`
+      expect({ where, fits: cellWidth(label) + BUTTON_PAD_CELLS <= (box.props?.width as number) }).toEqual({ where, fits: true })
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
 test('gridCells and barCells: the grid stops at its cap; the bar is shorter in a narrower grid and gone where the table drops it', () => {
-  expect([24, 46, 66, 100, 200].map(gridCells)).toEqual([22, 44, 64, 64, 64])
+  expect([24, 46, 66, 100, 200].map(gridCells)).toEqual([20, 41, 60, 64, 64])
+  // The grid ends inside the body where a Box's cell (8.8 px) is wider than the code font's advance that the columns count (8.43 px).
+  for (let columns = 3; columns <= 200; columns++) {
+    expect({ columns, fits: gridCells(columns) * MEASURED_CELL_PX <= columns * 8.43 }).toEqual({ columns, fits: true })
+  }
   expect(barCells(tableLayout(100, 32), gridCells(100))).toBe(BAR_CELLS)
   expect(barCells(tableLayout(46, 32), gridCells(46))).toBe(BAR_NARROW_CELLS)
   expect(barCells(tableLayout(24, 32), gridCells(24))).toBe(0)

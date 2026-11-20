@@ -132,3 +132,8 @@ line per check:
 - [ ] Point at each segment of the bar: the other segments turn dim, and the segment's name and tokens take the place of the legend.
 - [ ] Click a segment of the bar: the pane opens its items. Click the total, then the legend: the pane opens the segments. Point at the total and at the legend: no segment turns dim.
 - [ ] Look at the segments in a session with less than 10% of the window free: the free part of the heading is in the theme's warning colour and bold, in the dark and the light theme.
+- [ ] Make the band as wide as the bar row needs, or a little narrower: the total and the legend show whole, with nothing cut at the right. Point at the largest segment: its name and tokens show whole in the legend's place.
+- [ ] Set the app's zoom to 90%, then to 110%, and look at each level: no picture passes its column or the grid's right edge, every figure stays on one line, each figure column lines up from row to row, and no item title's button runs into its detail.
+- [ ] Make the pane about 60, then about 66 columns wide: the bar picture and the right figure column end inside the pane, with space before its right edge.
+- [ ] Look at the segments in the dark and in the light theme: the dots of free space and the stripes of the reserve can be seen on their grey ground.
+- [ ] Open the pane and the bar in the editor (VS Code): the total, the `·` and the legend's words are in the editor's own face, and the figures line up.

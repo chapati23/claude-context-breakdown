@@ -458,7 +458,7 @@ function segmentsGrid(
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {partRow('Free space', freeTokens(snapshot), palette.free, 'dotted')}
-        {partRow(cellWidth(RESERVE_NAME) <= plainRoom - 1 ?RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
+        {partRow(cellWidth(RESERVE_NAME) <= plainRoom - 1 ? RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
       </Box>
       {deferred.length > 0 && (
         <Box flexDirection="column" marginTop={1}>

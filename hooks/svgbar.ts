@@ -212,7 +212,8 @@ export type WindowPart = { kind: 'segment' | 'free' | 'reserve'; color: string; 
 /**
  * The bar on top of level 1, `width` pixels: one stretch per part with
  * tokens, in their order, each as wide as its share of all the parts' tokens
- * and at least PART_MIN_PX, taken from the wider parts. A thin space follows
+ * and at least PART_MIN_PX, taken from the wider parts, where the bar has
+ * room for every part to have that minimum. A thin space follows
  * a segment, except before free space. Corner radius 2.
  */
 export function windowBarPicture(parts: readonly WindowPart[], width: number): string {
@@ -222,7 +223,9 @@ export function windowBarPicture(parts: readonly WindowPart[], width: number): s
   const exact = drawn.map(part => (total > 0 ? (part.tokens / total) * width : 0))
   const added = exact.reduce((sum, w) => sum + (w < PART_MIN_PX ? PART_MIN_PX - w : 0), 0)
   const wide = exact.reduce((sum, w) => sum + (w < PART_MIN_PX ? 0 : w), 0)
-  const widths = exact.map(w => (w < PART_MIN_PX ? PART_MIN_PX : wide > 0 ? w - (added * w) / wide : w))
+  // In a bar too short for every part to have PART_MIN_PX, each part keeps its exact share.
+  const keepsMin = drawn.length * PART_MIN_PX <= width
+  const widths = exact.map(w => (!keepsMin ? w : w < PART_MIN_PX ? PART_MIN_PX : wide > 0 ? Math.max(0, w - (added * w) / wide) : w))
   const defs: string[] = []
   const shapes: string[] = []
   let x = 0

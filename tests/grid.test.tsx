@@ -10,15 +10,17 @@ import {
   BAR_CELLS,
   BAR_NARROW_CELLS,
   BUTTON_PAD_CELLS,
-  FIGURE_CELLS,
   GRID_MAX_CELLS,
   LABEL_PAD_CELLS,
   LEAD_CELLS,
+  MEASURED_ADVANCE_PX,
   MIN_CELL_PX,
   OPEN_WORDS,
   SWATCH_ALT,
   barCells,
+  columnCells,
   fittedDetail,
+  fittedName,
   fittedTitle,
   gridCells,
 } from '../hooks/grid'
@@ -79,6 +81,25 @@ function partsOf(tree: unknown): string[] {
 
 const isGridRowNode = (node: Node) => gridRowsOf(node).includes(node)
 
+/** A right-aligned column of whole cells: a figure, or the servers' tool count. */
+const isFigureColumn = (node: Node) => node.type === 'Box' && node.props?.justifyContent === 'flex-end' && typeof node.props?.width === 'number'
+
+/** The cells a level 1 row's name has: the grid less the lead and the columns on its right, each with its gap. */
+const nameRoomOf = (row: Node, grid: number) => grid - LEAD_CELLS - rightColumns(row).reduce((sum, part) => sum + (part.props?.width as number) + 1, 0)
+
+/** A world after a compaction, so level 1 has the compaction summary's row. */
+async function compactedWorld($: Engine, on: On) {
+  const w = world(on)
+  w.files = { [GLOBAL_MD]: 'Be brief.\n' }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  w.messages = SUMMARY
+  await $.session.compact({ trigger: 'manual', messages: TRANSCRIPT })
+  await w.clock.advance(0)
+
+  return w
+}
+
 test('off the terminal no Text of the pane asks for the monospaced face; every figure is tabular', async ($, on) => {
   await realWorld($, on)
   for (const surface of GRID_SURFACES) {
@@ -88,7 +109,7 @@ test('off the terminal no Text of the pane asks for the monospaced face; every f
       expect({ where, mono: nodesOf(tree).filter(node => node.props?.mono === true).length }).toEqual({ where, mono: 0 })
       // A figure stands in a column of whole cells, right-aligned, in a tabular Text.
       for (const row of gridRowsOf(tree)) {
-        for (const column of rightColumns(row).filter(part => part.props?.width === FIGURE_CELLS)) {
+        for (const column of rightColumns(row).filter(isFigureColumn)) {
           const figure = (column.children ?? []).filter(isNode)[0]
           if (figure !== undefined) {
             expect({ where, line: rowLine(row), tabular: figure.props?.tabular }).toEqual({ where, line: rowLine(row), tabular: true })
@@ -307,7 +328,7 @@ test('servers without token figures: the name, then the tool count at the grid�
   expect(gridLines(tree)).toEqual(['tickets 4 tools', 'notes 2 tools'])
   for (const row of gridRowsOf(tree)) {
     const right = rightColumns(row)
-    expect(right.map(part => part.props?.width)).toEqual(['4 tools'.length])
+    expect(right.map(part => part.props?.width)).toEqual(['4 tools'.length + 1])
     expect(right[0]?.props?.justifyContent).toBe('flex-end')
   }
   expect(nodesOf(tree).filter(node => node.type === 'Svg')).toEqual([])
@@ -336,7 +357,7 @@ test('the servers list draws grey length bars and the tool counts in a column of
   expect(textOf(rows[0])).toContain('a-server-name-far-too-long-for-any-pane-to-show-whole')
   for (const row of rows) {
     const [count, bar] = rightColumns(row)
-    expect(count?.props?.width).toBe('12 tools'.length)
+    expect(count?.props?.width).toBe('12 tools'.length + 1)
     const picture = (bar?.children ?? []).filter(isNode)[0]!
     expect(String(picture.props?.source)).toContain(DARK.notLoaded)
   }
@@ -453,31 +474,71 @@ test('the length bars scale to the largest row and alt texts use the full name a
   await ui.unmount()
 })
 
-test('every right-aligned column is a cell wider than its text, so no figure breaks onto a second line in a small cell', async ($, on) => {
-  // The longest figures and the column's name, with the cell to spare.
-  for (const text of ['406k', '<0.1%', '+2.5k', '100%', ADDED_NAME]) {
-    expect({ text, fits: cellWidth(text) + 1 <= FIGURE_CELLS }).toEqual({ text, fits: true })
+test('every right-aligned column is as wide as its widest text on the page and one cell more, the same on every row', async ($, on) => {
+  expect(columnCells(['406k', '<0.1%', null])).toBe(6)
+  expect(columnCells(['150k', '36%'])).toBe(5)
+  expect(columnCells([ADDED_NAME, '+2.5k'])).toBe(6)
+  const check = (tree: unknown, where: string) => {
+    // The columns of every row, counted from the right; the window line's "added" stands in the last one.
+    const byPlace = new Map<number, Node[]>()
+    const rows = gridRowsOf(tree)
+    expect({ where, rows: rows.length > 0 }).toEqual({ where, rows: true })
+    for (const row of rows) {
+      rightColumns(row)
+        .reverse()
+        .forEach((part, place) => {
+          if (isFigureColumn(part)) {
+            byPlace.set(place, [...(byPlace.get(place) ?? []), part])
+          }
+        })
+    }
+    const added = nodesOf(tree).find(node => isFigureColumn(node) && textOf(node) === ADDED_NAME && !rows.some(row => nodesOf(row).includes(node)))
+    if (added !== undefined) {
+      byPlace.set(0, [...(byPlace.get(0) ?? []), added])
+    }
+    for (const [place, columns] of byPlace) {
+      const widths = [...new Set(columns.map(column => column.props?.width))]
+      const widest = Math.max(...columns.map(column => cellWidth(textOf(column))))
+      expect({ where, place, widths }).toEqual({ where, place, widths: [widest + 1] })
+    }
   }
   await realWorld($, on)
-  for (const columns of [46, 88]) {
+  for (const columns of [40, 46, 88]) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
-    for (const level of [1, 2]) {
-      const tree = await ui.drawn()
-      const columnsOf = nodesOf(tree).filter(node => node.type === 'Box' && node.props?.justifyContent === 'flex-end' && typeof node.props?.width === 'number')
-      expect(columnsOf.length).toBeGreaterThan(10)
-      for (const column of columnsOf) {
-        const text = textOf(column)
-        const where = `${columns} columns, level ${level}, ${text}`
-        expect({ where, fits: cellWidth(text) + 1 <= (column.props?.width as number) }).toEqual({ where, fits: true })
-      }
-      if (level === 1) {
-        await ui.press({ key: 'row-tool-results' })
-      }
+    check(await ui.drawn(), `${columns} columns, level 1`)
+    for (const key of ['row-tool-results', 'row-system']) {
+      await ui.press({ key })
+      check(await ui.drawn(), `${columns} columns, ${key}`)
+      await ui.press({ key: 'back' })
     }
-    await ui.press({ key: 'back' })
     await ui.unmount()
   }
 })
+
+test('fittedName: the name, else the short name, else the short name cut, in the room less the native padding', () => {
+  expect(fittedName('Compaction summary', 'Summary', 14)).toBe('Summary')
+  expect(fittedName('Global instructions', 'Global', 30)).toBe('Global instructions')
+  expect(fittedName('Skills list and custom agents', 'Skills/agents', 10)).toBe('Skills/…')
+})
+
+for (const make of [realWorld, compactedWorld]) {
+  test(`at 40 and 46 columns every level 1 row’s Button fits its name’s room: the label’s cells and the native padding (${make.name})`, async ($, on) => {
+    await make($, on)
+    for (const columns of [40, 46]) {
+      const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+      const tree = await ui.drawn()
+      const buttons = nodesOf(tree).filter(node => node.type === 'Button' && String(node.props?.key).startsWith('row-'))
+      expect(buttons.length).toBeGreaterThan(3)
+      for (const button of buttons) {
+        const row = gridRowWith(tree, String(button.props?.key))!
+        const label = String(button.props?.label)
+        const where = `${columns} columns, ${label}`
+        expect({ where, fits: cellWidth(label) + BUTTON_PAD_CELLS <= nameRoomOf(row, gridCells(columns)) }).toEqual({ where, fits: true })
+      }
+      await ui.unmount()
+    }
+  })
+}
 
 test('an item title’s column holds its Button: the label’s cells and the native padding at the smallest cell', async ($, on) => {
   expect(BUTTON_PAD_CELLS * MIN_CELL_PX).toBeGreaterThanOrEqual(12)
@@ -501,11 +562,14 @@ test('an item title’s column holds its Button: the label’s cells and the nat
 })
 
 test('gridCells and barCells: the grid stops at its cap; the bar is shorter in a narrower grid and gone where the table drops it', () => {
-  expect([24, 46, 66, 100, 200].map(gridCells)).toEqual([20, 41, 60, 64, 64])
+  expect(MEASURED_ADVANCE_PX).toBe(8.43)
+  expect([24, 40, 46, 60, 66, 100, 200].map(gridCells)).toEqual([22, 38, 44, 57, 63, 64, 64])
   // The grid ends inside the body where a Box's cell (8.8 px) is wider than the code font's advance that the columns count (8.43 px).
   for (let columns = 3; columns <= 200; columns++) {
     expect({ columns, fits: gridCells(columns) * MEASURED_CELL_PX <= columns * 8.43 }).toEqual({ columns, fits: true })
   }
+  // A pane too narrow for any grid still gets one cell.
+  expect([0, 1, 2].map(gridCells)).toEqual([1, 1, 1])
   expect(barCells(tableLayout(100, 32), gridCells(100))).toBe(BAR_CELLS)
   expect(barCells(tableLayout(46, 32), gridCells(46))).toBe(BAR_NARROW_CELLS)
   expect(barCells(tableLayout(24, 32), gridCells(24))).toBe(0)
@@ -517,8 +581,29 @@ test('fittedTitle and fittedDetail: a path keeps its file name; a command is giv
   expect(fittedDetail('~/project/src/ledger/balance.go', 40, true)).toBe('~/project/src/ledger/balance.go')
   expect(fittedDetail('go test ./src/ledger/... -run TestBalance -v', 20, false)).toBe('go test ./src/ledger/... -run TestBalance -v')
   expect(fittedTitle('~/.claude/projects/x/memory/MEMORY.md', 16, true).endsWith('MEMORY.md')).toBe(true)
+  // The shortest form is "…/" and the whole file name: the mod never cuts into the file name.
+  expect(fittedDetail('~/project/src/ledger/balance.go', 5, true)).toBe('…/balance.go')
+  expect(fittedTitle('~/.claude/projects/x/memory/MEMORY.md', 4, true)).toBe('…/MEMORY.md')
+  expect(fittedDetail('~/project/src/ledger/a-file-name-longer-than-the-room.go', 10, true)).toBe('…/a-file-name-longer-than-the-room.go')
   expect(fittedTitle('mcp__claude-in-chrome__computer', 12, false)).toBe('mcp__claude…')
   expect(fittedTitle('Read', 12, false)).toBe('Read')
+})
+
+test('at 40 and 46 columns no path detail is shorter than “…/” and its whole file name', async ($, on) => {
+  await realWorld($, on)
+  for (const columns of [40, 46]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    await ui.press({ key: 'row-tool-results' })
+    const reads = gridRowsOf(await ui.drawn()).filter(row => rowLine(row).startsWith('Read '))
+    expect(reads.length).toBeGreaterThan(3)
+    for (const row of reads) {
+      const detail = rowLine(row).split(' ')[1] ?? ''
+      const where = `${columns} columns, ${detail}`
+      expect({ where, whole: /^(~|…)(\/[^/]+)*\/module-\d+\.ts$/.test(detail) }).toEqual({ where, whole: true })
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
 })
 
 test('the pictures: grey grounds that read on light and dark, textures, the fewest pixels a part gets', () => {
@@ -540,6 +625,19 @@ test('the pictures: grey grounds that read on light and dark, textures, the fewe
     const widths = [...bar.matchAll(/<rect x="[\d.]+" y="0" width="([\d.]+)" height="10" fill="url\(#t1\)"/g)].map(match => Number(match[1]))
     expect(widths[0]).toBeGreaterThanOrEqual(1.5)
   }
+  // A bar too short for every part's minimum: no stretch gets a negative width, and none runs back.
+  const tiny = windowBarPicture(
+    [
+      { kind: 'segment', color: '#111111', tokens: 1, texture: null },
+      { kind: 'segment', color: '#222222', tokens: 1, texture: null },
+      { kind: 'segment', color: '#333333', tokens: 1, texture: null },
+      { kind: 'free', color: '#444444', tokens: 100_000, texture: null },
+    ],
+    3,
+  )
+  const xs = [...tiny.matchAll(/<rect x="(-?[\d.]+)" y="0" width="(-?[\d.]+)"/g)].map(match => [Number(match[1]), Number(match[2])] as const)
+  expect(xs.every(([x, width]) => x >= 0 && width >= 0)).toBe(true)
+  expect(xs.map(([x]) => x)).toEqual([...xs.map(([x]) => x)].sort((a, b) => a - b))
   // A part with no tokens draws nothing.
   expect(windowBarPicture([{ kind: 'reserve', color: '#000000', tokens: 0, texture: 'shaded' }], 100)).not.toContain('url(#t0)')
   expect(lengthBarPicture(0, 100, '#123456', 44)).not.toContain('#123456')

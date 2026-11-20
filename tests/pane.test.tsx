@@ -122,7 +122,7 @@ test('the pane fits 24 and 80 columns', async ($, on) => {
   }
 })
 
-test('at 24 columns every name reads whole, in its short form where needed', async ($, on) => {
+test('at 24 columns every name reads whole on the terminal, in its short form where needed; the grid cuts one that does not fit', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
@@ -142,12 +142,13 @@ test('at 24 columns every name reads whole, in its short form where needed', asy
     // labelled with the short name it shows, and the figures stand beside it.
     const system = await ui.find({ key: 'row-system' })
     expect(system?.props.label).toBe(surface === 'terminal' ? 'System prompt and built-in tools' : 'System')
-    expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe(surface === 'terminal' ? 'Skills list and custom agents' : 'Skills/agents')
+    // Below 40 columns the grid's name room can be smaller than the short name and the native padding: it cuts the name.
+    expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe(surface === 'terminal' ? 'Skills list and custom agents' : 'Skills/agen…')
     if (surface === 'terminal') {
       expect(await ui.find({ type: 'Text', text: /Conversation +40k$/ })).toBeDefined()
     } else {
       // No length bar and no share at 24 columns: the name and the tokens.
-      expect(gridLines(await ui.drawn())).toEqual(expect.arrayContaining(['Conversation 40k', 'System 20k', 'Skills/agents 2k']))
+      expect(gridLines(await ui.drawn())).toEqual(expect.arrayContaining(['Conversation 40k', 'System 20k', 'Skills/agen… 2k']))
     }
     // The key hint is wider than 24 cells: it wraps rather than losing its end.
     expect((await ui.find({ type: 'Text', text: keysHint(surface) }))?.props.wrap).toBe('wrap')

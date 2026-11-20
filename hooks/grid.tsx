@@ -56,7 +56,7 @@ import {
   showsKeys,
   withoutDeferred,
 } from './pane'
-import type { Control, PaneActions } from './pane'
+import type { Control, LevelTwo, PaneActions } from './pane'
 import { levelOneLists } from './ring'
 import { NOT_LOADED, NOT_LOADED_DEF, isSegmentList, segmentDef, sentence } from './segments'
 import { freeTokens, sumTokens, usedTokens } from './snapshot'
@@ -72,7 +72,7 @@ import {
   windowBarPicture,
 } from './svgbar'
 import type { Texture, WindowPart } from './svgbar'
-import { ADDED_NAME, crumbFor, headingText, nameText, notLoadedHeading, serversCrumb, serversRowText, windowText } from './table'
+import { ADDED_NAME, crumbFor, headingText, nameText, notLoadedHeading, serversCrumb, serversRowText, textCells, windowText } from './table'
 import type { Table } from './table'
 import { cellWidth, shortenPath } from './text'
 import { fit, headingLine, paneHeading } from './view'
@@ -87,13 +87,6 @@ export const LEAD_CELLS = 2
  * gives another size.
  */
 export const MIN_CELL_PX = 7
-/**
- * A figure's column: tokens ("406k"), share ("<0.1%"), added ("+2.5k") and
- * the name "added". Five characters and one cell to spare: in the surface's
- * face a figure or a capital can be wider than a cell when the cell is
- * small, and a column too narrow for its text breaks it onto a second line.
- */
-export const FIGURE_CELLS = 6
 /** The length bar's column: in a grid at its widest, and in a narrower one. */
 export const BAR_CELLS = 8
 export const BAR_NARROW_CELLS = 5
@@ -111,12 +104,13 @@ export const LABEL_PAD_CELLS = Math.round((6 / MEASURED_CELL_PX) * 10000) / 1000
  */
 export const BUTTON_PAD_CELLS = Math.ceil(12 / MIN_CELL_PX)
 /**
- * The part of a pane's columns the grid may use. `columns` counts the
- * advance of the code font, and a Box's cell can be wider: on one Mac 8.8
- * against 8.43 pixels. Without this margin a grid of 48 to 71 columns ended
- * past the pane's body.
+ * CSS pixels of one advance of the code font, measured on the same Mac as
+ * MEASURED_CELL_PX. A pane's `columns` count these advances, and a Box's
+ * cell is wider (8.8 against 8.43 pixels): a grid of `columns` cells would
+ * end past the pane's body. So the grid takes the cells that fit in the
+ * columns' pixels.
  */
-export const GRID_SHARE = 0.95
+export const MEASURED_ADVANCE_PX = 8.43
 /** The fewest cells an item's detail keeps at level 2: the title's column stops short of them. */
 export const DETAIL_MIN_CELLS = 12
 /** The words before the controls while a row opens and the pane offers its keys: Enter opens the row with the focus. */
@@ -132,11 +126,36 @@ export const SWATCH_ALT = 'Colour'
 type GridUi = Elements['desktop'] | Elements['mobile'] | Elements['vscode']
 
 /**
- * The grid's width for a pane `columns` wide: GRID_SHARE of the columns, less
- * one spare cell each side, at most GRID_MAX_CELLS.
+ * The grid's width for a pane `columns` wide: the cells that fit in the
+ * columns' pixels (MEASURED_ADVANCE_PX), at most the columns less one spare
+ * cell each side, and at most GRID_MAX_CELLS.
  */
 export function gridCells(columns: number): number {
-  return Math.max(1, Math.min(GRID_MAX_CELLS, Math.floor(columns * GRID_SHARE) - 2))
+  return Math.max(1, Math.min(GRID_MAX_CELLS, columns - 2, Math.floor((columns * MEASURED_ADVANCE_PX) / MEASURED_CELL_PX)))
+}
+
+/**
+ * A right-aligned column's width: its widest text on the page, and one cell
+ * to spare. In the surface's face a figure or a capital can be wider than a
+ * cell when the cell is small, and a column too narrow for its text breaks
+ * it onto a second line. Every row of the page takes this one width.
+ */
+export function columnCells(texts: readonly (string | null)[]): number {
+  return Math.max(0, ...texts.map(text => (text === null ? 0 : cellWidth(text)))) + 1
+}
+
+/**
+ * A level 1 row's name for a Button in `room` cells: the name, else the
+ * mod's short name, else the short name cut with an ellipsis. The Button
+ * takes the label's cells and BUTTON_PAD_CELLS, and does not shrink.
+ */
+export function fittedName(name: string, short: string, room: number): string {
+  const cells = Math.max(1, room - BUTTON_PAD_CELLS)
+  if (cellWidth(name) <= cells) {
+    return name
+  }
+
+  return cellWidth(short) <= cells ? short : fit(short, cells).trimEnd()
 }
 
 /** The length bar's cells: none where the terminal's table drops its bar, fewer where the grid is not at its widest. */
@@ -153,17 +172,29 @@ type Grid = {
   /** The figure columns each row has, in order after tokens: the share, the column `added`. */
   share: boolean
   added: boolean
+  /** The width of each figure column on the page (`columnCells`). */
+  cells: FigureCells
   /** The length bar's cells, 0 for none. */
   bar: number
   /** The key of the element that takes the focus ring (`ringKey`). */
   ring: string | null
 }
 
-function figureBox(g: Grid, figure: Figure) {
+/** The width of each figure column, in cells. */
+type FigureCells = { tokens: number; share: number; added: number }
+
+const NO_CELLS: FigureCells = { tokens: 1, share: 1, added: 1 }
+
+/** The cells the columns right of a row's name take, each with its gap of one cell. */
+function rightCells(g: Grid): number {
+  return (g.bar > 0 ? g.bar + 1 : 0) + g.cells.tokens + 1 + (g.share ? g.cells.share + 1 : 0) + (g.added ? g.cells.added + 1 : 0)
+}
+
+function figureBox(g: Grid, figure: Figure, width: number) {
   const { Box, Text } = g.el
 
   return (
-    <Box width={FIGURE_CELLS} flexShrink={0} justifyContent="flex-end">
+    <Box width={width} flexShrink={0} justifyContent="flex-end">
       {figure.text !== null && (
         <Text tabular {...(figure.dim ? { dimColor: true } : {})}>
           {figure.text}
@@ -175,7 +206,7 @@ function figureBox(g: Grid, figure: Figure) {
 
 /** A row's figure columns: tokens, then the share and the column `added` where the grid has them. */
 function figures(g: Grid, tokens: Figure, share: Figure, added: Figure) {
-  return [figureBox(g, tokens), g.share ? figureBox(g, share) : null, g.added ? figureBox(g, added) : null]
+  return [figureBox(g, tokens, g.cells.tokens), g.share ? figureBox(g, share, g.cells.share) : null, g.added ? figureBox(g, added, g.cells.added) : null]
 }
 
 const NONE: Figure = { text: null, dim: true }
@@ -230,13 +261,19 @@ function nameButton(g: Grid, key: string, label: string, onPress: () => void) {
   )
 }
 
-/** A name that does not open: a Text that starts where a Button's label starts. */
+/**
+ * A name that does not open: a Text that starts where a Button's label
+ * starts. Where it does not fit, the surface cuts it at its end: it never
+ * takes a second line.
+ */
 function plainName(g: Grid, name: string, dim: boolean) {
   const { Box, Text } = g.el
 
   return (
-    <Box flexDirection="row" paddingLeft={LABEL_PAD_CELLS}>
-      <Text {...(dim ? { dimColor: true } : {})}>{name}</Text>
+    <Box flexDirection="row" paddingLeft={LABEL_PAD_CELLS} flexShrink={1} minWidth={0}>
+      <Text wrap="truncate" {...(dim ? { dimColor: true } : {})}>
+        {name}
+      </Text>
     </Box>
   )
 }
@@ -286,7 +323,7 @@ function notes(el: GridUi, texts: readonly string[]) {
 function windowLine(g: Grid, snapshot: ContextBreakdownSnapshot, table: Table, largest: ContextBreakdownSegment | null, used: number, grid: number) {
   const { Box, Text } = g.el
   const label = `${snapshot.isEstimate ? '~' : ''}% of used`
-  const room = grid - (g.share ? cellWidth(label) + 1 : 0) - (g.added ? FIGURE_CELLS + 1 : 0)
+  const room = grid - (g.share ? cellWidth(label) + 1 : 0) - (g.added ? g.cells.added + 1 : 0)
   const left = windowText({ mark: 0, lead: 0, name: Math.max(0, room), bar: 0, share: table.share }, snapshot, largest, used)
 
   return (
@@ -300,7 +337,7 @@ function windowLine(g: Grid, snapshot: ContextBreakdownSnapshot, table: Table, l
         </Box>
       )}
       {g.added && (
-        <Box width={FIGURE_CELLS} flexShrink={0} justifyContent="flex-end">
+        <Box width={g.cells.added} flexShrink={0} justifyContent="flex-end">
           <Text dimColor>{ADDED_NAME}</Text>
         </Box>
       )}
@@ -319,16 +356,38 @@ function segmentsGrid(
 ) {
   const { Box, Svg, Text } = g.el
   const { deferred, shown, table, stats } = levelOne(snapshot, columns, base)
-  const rows: Grid = { ...g, share: table.share, added: table.added === true, bar: barCells(table, grid) }
   const { used } = stats
   const largest = stats.largest?.tokens ?? 0
-  const addedOf = (tokens: number | undefined): Figure => ({ text: tokens !== undefined && tokens > 0 ? `+${formatTokens(tokens)}` : null, dim: false })
+  const addedText = (tokens: number | undefined) => (tokens !== undefined && tokens > 0 ? `+${formatTokens(tokens)}` : null)
+  const addedOf = (tokens: number | undefined): Figure => ({ text: addedText(tokens), dim: false })
   const groupAdded = (segments: readonly ContextBreakdownSegment[]) =>
     segments.reduce((sum, segment) => sum + (stats.added[segment.id] ?? 0), 0)
+  // Each figure column is as wide as its widest text on the page: the
+  // headings', the segments', Free space's, the Reserve's and Not loaded's;
+  // and the column's name where it stands in the column ("added").
+  const groups = [snapshot.baseline, snapshot.conversation]
+  const drawn = groups.flatMap(segments => segments.filter(segment => segment.tokens > 0))
+  const cells: FigureCells = {
+    tokens: columnCells([
+      ...groups.map(segments => formatTokens(sumTokens(segments))),
+      ...drawn.map(segment => formatTokens(segment.tokens)),
+      formatTokens(freeTokens(snapshot)),
+      formatTokens(snapshot.reserve),
+      ...deferred.map(category => (category.tokens === null ? null : formatTokens(category.tokens))),
+    ]),
+    share: columnCells([...groups.map(segments => formatShare(sumTokens(segments), used)), ...drawn.map(segment => formatShare(segment.tokens, used))]),
+    added: columnCells([ADDED_NAME, ...groups.map(segments => addedText(groupAdded(segments))), ...drawn.map(segment => addedText(stats.added[segment.id]))]),
+  }
+  const rows: Grid = { ...g, share: table.share, added: table.added === true, cells, bar: barCells(table, grid) }
+  // The cells a heading's text has, and a row's name after the lead.
+  const headingRoom = grid - rightCells({ ...rows, bar: 0 })
+  const nameRoom = grid - LEAD_CELLS - rightCells(rows)
+  const plainRoom = grid - LEAD_CELLS - rightCells({ ...rows, bar: 0 })
   const heading = (title: string, long: string, segments: readonly ContextBreakdownSegment[]) => {
     const tokens = sumTokens(segments)
+    const text = headingText(table, title, long).trimEnd()
 
-    return gridRow(rows, [<Text dimColor>{headingText(table, title, long).trimEnd()}</Text>], figures(
+    return gridRow(rows, [<Text dimColor>{cellWidth(text) <= headingRoom ? text : title}</Text>], figures(
       rows,
       { text: formatTokens(tokens), dim: true },
       { text: formatShare(tokens, used), dim: true },
@@ -341,7 +400,7 @@ function segmentsGrid(
       .map(segment => {
         const def = segmentDef(segment.id)
         const color = colorOf(palette, def.id)
-        const name = nameText(table, def.label, def.short).trimEnd()
+        const name = fittedName(nameText(table, def.label, def.short).trimEnd(), def.short, nameRoom)
 
         return gridRow(
           rows,
@@ -383,7 +442,7 @@ function segmentsGrid(
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {partRow('Free space', freeTokens(snapshot), palette.free, 'dotted')}
-        {partRow(cellWidth(RESERVE_NAME) <= table.name ? RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
+        {partRow(cellWidth(RESERVE_NAME) <= Math.min(table.name, plainRoom - 1) ? RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
       </Box>
       {deferred.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
@@ -394,7 +453,13 @@ function segmentsGrid(
             // One row stands for every server, and opens their list; the others open nothing.
             const named =
               category.servers.length > 0
-                ? nameButton(rows, SERVERS_ROW, serversRowText(table, name, category.servers).trimEnd(), () => void actions.openSegment(NOT_LOADED))
+                ? nameButton(
+                    rows,
+                    SERVERS_ROW,
+                    // The longest form that fits the row's room: Not loaded rows have no length bar.
+                    serversRowText({ ...table, name: Math.min(textCells(table), Math.max(1, plainRoom - BUTTON_PAD_CELLS)), bar: 0 }, name, category.servers).trimEnd(),
+                    () => void actions.openSegment(NOT_LOADED),
+                  )
                 : plainName(rows, name, true)
 
             return gridRow(rows, [lead(rows, null), named], figures(rows, tokens, NONE, NONE))
@@ -435,7 +500,9 @@ function titleRow(g: Grid, list: ContextBreakdownList, snapshot: ContextBreakdow
       <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
         {trail !== '' && <Text dimColor>{trail}</Text>}
         {segment !== null && swatch(g, colorOf(palette, segment), segmentTexture(segment))}
-        <Text weight="bold">{crumb.name}</Text>
+        <Text weight="bold" wrap="truncate">
+          {crumb.name}
+        </Text>
       </Box>
       {crumb.figures !== '' && <Text dimColor>{crumb.figures}</Text>}
     </Box>
@@ -443,54 +510,69 @@ function titleRow(g: Grid, list: ContextBreakdownList, snapshot: ContextBreakdow
 }
 
 /**
+ * A path in `cells`: the mod's short form (`shortenPath`), never shorter
+ * than "…/" and the whole file name. The mod never cuts into the file name:
+ * where even that form does not fit, the surface cuts its end.
+ */
+export function fittedPath(text: string, cells: number): string {
+  const name = text.split(/[/\\]/).pop() ?? text
+
+  return shortenPath(text, Math.max(cells, name.length + 2))
+}
+
+/**
  * An item's title in a column `cells` wide, for a Button's label: a native
  * button does not shrink, so a title that does not fit is cut to fit with an
- * ellipsis, or, for a path, takes the mod's short form (`shortenPath`), which
- * keeps the file name. Cells count a monospaced face: the surface's own face
- * is narrower for most text.
+ * ellipsis, or, for a path, takes its short form (`fittedPath`). Cells count
+ * a monospaced face: the surface's own face is narrower for most text.
  */
 export function fittedTitle(text: string, cells: number, isPath: boolean): string {
   if (cellWidth(text) <= cells) {
     return text
   }
 
-  return isPath ? shortenPath(text, Math.max(2, cells)) : fit(text, Math.max(1, cells)).trimEnd()
+  return isPath ? fittedPath(text, cells) : fit(text, Math.max(1, cells)).trimEnd()
 }
 
 /**
  * An item's dim detail in the `cells` the row leaves it. The surface cuts an
  * over-long text at its end, whatever `wrap` says: a command loses its tail,
  * which is fine, but a path would lose its file name. So a path that does
- * not fit takes the mod's short form (`shortenPath`); any other detail is
- * given in full.
+ * not fit takes its short form (`fittedPath`); any other detail is given in
+ * full.
  */
 export function fittedDetail(text: string, cells: number, isPath: boolean): string {
-  return isPath && cellWidth(text) > cells ? shortenPath(text, Math.max(2, cells)) : text
+  return isPath && cellWidth(text) > cells ? fittedPath(text, cells) : text
 }
 
 function listGrid(
   g: Grid,
   list: ContextBreakdownList,
   snapshot: ContextBreakdownSnapshot | null,
-  columns: number,
   actions: PaneActions,
   palette: Palette,
   grid: number,
+  two: LevelTwo,
 ) {
   const { Box, Text } = g.el
-  const { def, hasTokens, facts, table, largest, total, column, hidden, sizes, marksClosed } = levelTwo(list, snapshot, columns)
+  const { def, hasTokens, facts, table, largest, total, column, hidden, sizes, marksClosed } = two
   // The servers that are not loaded have no segment's colour: a neutral grey.
   const color = isSegmentList(list.segment) ? colorOf(palette, list.segment) : palette.notLoaded
-  const rows: Grid = { ...g, share: hasTokens && table.share, added: false, bar: hasTokens ? barCells(table, grid) : 0 }
+  const cells: FigureCells = {
+    tokens: columnCells(list.rows.map(row => formatTokens(row.tokens))),
+    share: columnCells(list.rows.map(row => formatShare(row.tokens, total))),
+    added: 1,
+  }
+  const rows: Grid = { ...g, share: hasTokens && table.share, added: false, cells, bar: hasTokens ? barCells(table, grid) : 0 }
   // The cells the figures and the bar take at a row's right, with their gaps.
-  const right = (rows.bar > 0 ? rows.bar + 1 : 0) + (hasTokens ? FIGURE_CELLS + 1 : 0) + (rows.share ? FIGURE_CELLS + 1 : 0)
+  const right = hasTokens ? rightCells(rows) : 0
   const rowFigures = (row: ContextBreakdownRow) =>
     hasTokens ? figures(rows, { text: formatTokens(row.tokens), dim: false }, { text: formatShare(row.tokens, total), dim: true }, NONE) : []
   const alt = (row: ContextBreakdownRow) => `${row.detail === '' ? row.title : `${row.title} ${row.detail}`}: ${formatTokens(row.tokens)}`
   let body: unknown[]
   if (def === null) {
     // The servers: none opens. The name takes the room; the tool count has a column of its own.
-    const countCells = Math.max(1, ...list.rows.map(row => cellWidth(row.detail)))
+    const countCells = columnCells(list.rows.map(row => row.detail))
     body = list.rows.map(row =>
       gridRow(
         rows,
@@ -529,7 +611,9 @@ function listGrid(
       const named = row.isOpenable ? (
         rowButton(rows, key, title, () => void actions.openItem(row.id))
       ) : (
-        <Text {...(marksClosed ? { dimColor: true } : {})}>{title}</Text>
+        <Text wrap="truncate" {...(marksClosed ? { dimColor: true } : {})}>
+          {title}
+        </Text>
       )
 
       return gridRow(
@@ -680,7 +764,7 @@ export function gridTree(
   const { Box, Text } = el
   const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
   const grid = gridCells(columns)
-  const g: Grid = { el, share: false, added: false, bar: 0, ring }
+  const g: Grid = { el, share: false, added: false, cells: NO_CELLS, bar: 0, ring }
   if (view.level === 3) {
     const keys = controlsRow(el, view, 0, columns, isFocused, surface, actions, ring, 2)
     const segment = view.list.segment
@@ -697,18 +781,19 @@ export function gridTree(
     const { list } = view
     const def = isSegmentList(list.segment) ? segmentDef(list.segment) : null
     const openRows = list.rows.filter(row => row.isOpenable).length
+    const two = levelTwo(list, snapshot, columns)
 
     return (
       <Box flexDirection="column">
         <Box flexDirection="column" width={grid}>
-          {titleRow(g, list, snapshot, levelTwo(list, snapshot, columns).total, columns, palette)}
+          {titleRow(g, list, snapshot, two.total, columns, palette)}
           {/* What the list holds. */}
           <Text dimColor wrap="wrap">
             {sentence(def === null ? NOT_LOADED_DEF.definition : def.definition)}
           </Text>
         </Box>
         {controlsRow(el, view, openRows, columns, isFocused, surface, actions, ring, 1, false)}
-        {listGrid(g, list, snapshot, columns, actions, palette, grid)}
+        {listGrid(g, list, snapshot, actions, palette, grid, two)}
         {!isFocused && (
           <Box flexDirection="column" marginTop={1} width={grid}>
             <Text dimColor wrap="wrap">

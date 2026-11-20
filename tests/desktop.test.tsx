@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 import { bandTree } from '../hooks/band'
 import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
 import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
-import { BAR_CELLS, BUTTON_PAD_CELLS, FIGURE_CELLS, LEAD_CELLS, gridCells } from '../hooks/grid'
+import { BAR_CELLS, BUTTON_PAD_CELLS, LEAD_CELLS, gridCells } from '../hooks/grid'
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
@@ -557,9 +557,9 @@ test('a desktop pane row: a swatch, the name in a Button with no hotkey, a lengt
   expect(picture.props).toMatchObject({ alt: 'Tool results: 30k', height: 6 })
   expect(picture.props?.width).toBeUndefined()
   expect(String(picture.props?.source)).toContain(DARK.segments['tool-results'])
-  for (const column of [tokens, share]) {
-    expect(column?.props).toMatchObject({ width: FIGURE_CELLS, flexShrink: 0, justifyContent: 'flex-end' })
-  }
+  // Each figure column is as wide as its widest text on the page and one cell more: "101k" and "4.5%" have four characters.
+  expect(tokens?.props).toMatchObject({ width: 5, flexShrink: 0, justifyContent: 'flex-end' })
+  expect(share?.props).toMatchObject({ width: 5, flexShrink: 0, justifyContent: 'flex-end' })
   expect((tokens?.children ?? []).filter(isNode)[0]?.props).toEqual({ tabular: true })
   expect((share?.children ?? []).filter(isNode)[0]?.props).toEqual({ tabular: true, dimColor: true })
   // No part of the pane asks for the monospaced face, and no text holds a run of spaces.
@@ -578,16 +578,17 @@ test('a desktop pane row: a swatch, the name in a Button with no hotkey, a lengt
   await idle.unmount()
 })
 
-test('desktop segment rows keep their names whole in a narrow pane, figures beside them', async ($, on) => {
+test('desktop segment rows take their short names in a narrow pane, cut where even that does not fit, figures beside them', async ($, on) => {
   await measured($, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 24 } })
 
   expect((await ui.find({ key: 'row-system' }))?.props.label).toBe('System')
-  expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe('Skills/agents')
+  // Below 40 columns the name's room can be smaller than the short name and the native padding: the grid cuts it.
+  expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe('Skills/agen…')
   // Too narrow for a length bar and a share: the swatch, the name and the tokens.
   const row = gridRowWith(await ui.drawn(), 'row-system')!
   expect(rowLine(row)).toBe('System 20k')
-  expect(rightColumns(row).map(part => part.props?.width)).toEqual([FIGURE_CELLS])
+  expect(rightColumns(row).map(part => part.props?.width)).toEqual([cellWidth('101k') + 1])
   expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBeUndefined()
   await ui.unmount()
 })
@@ -611,7 +612,7 @@ test('desktop item rows: the Button holds the title in a column as wide as the l
   const row = gridRowWith(tree, 'item-r:real0')!
   expect(rowLine(row)).toBe('Read ~/project/src/module-1.ts ▬ 31k 27%')
   const [titleBox, detailBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
-  // "Read" and "Bash": four cells, and one for the native button's padding.
+  // "Read" and "Bash": four cells, and BUTTON_PAD_CELLS for the native button's padding.
   expect(titleBox?.props).toMatchObject({ width: cellWidth('Read') + BUTTON_PAD_CELLS, flexShrink: 0 })
   const detail = (detailBox?.children ?? []).filter(isNode)[0]!
   expect(detail.props?.dimColor).toBe(true)
@@ -681,7 +682,8 @@ test('desktop rows keep their parts and columns when Esc takes the keys and a cl
   // Level 1: every segment row has the same columns: the bar, the tokens, the share.
   const segments = await states(['row-system', 'row-tool-results', 'row-claude-output'])
   expect(new Set(segments.map(row => JSON.stringify(widthsOf(row)))).size).toBe(1)
-  expect(widthsOf(segments[0]!)).toEqual([BAR_CELLS, FIGURE_CELLS, FIGURE_CELLS])
+  // The figure columns: four characters at most ("235k", "1.2%") and one cell more.
+  expect(widthsOf(segments[0]!)).toEqual([BAR_CELLS, 5, 5])
 
   // Level 2: the first, the tenth and the eleventh row keep one title column and the same columns after it.
   await ui.press({ key: 'row-tool-results' })
@@ -781,7 +783,7 @@ test('desktop plain lines stand in the rows’ columns, and the grid stops at it
     for (const row of rows) {
       expect({ where, line: rowLine(row), shape: JSON.stringify(figures(row).map(part => part.props)) }).toEqual({ where, line: rowLine(row), shape })
     }
-    expect({ where, shape: figures(rows[0]!).every(part => part.props?.width === FIGURE_CELLS && part.props?.justifyContent === 'flex-end') }).toEqual({ where, shape: true })
+    expect({ where, shape: figures(rows[0]!).every(part => Number.isInteger(part.props?.width) && part.props?.justifyContent === 'flex-end') }).toEqual({ where, shape: true })
     for (const [label, figure] of [
       ['Free space', '101k'],
       ['Reserve', '33k'],

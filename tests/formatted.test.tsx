@@ -144,7 +144,7 @@ test('both views page; a switch shows the page that holds the same place', async
   }
 })
 
-test('a tool result opens raw; f gives the formatted view', async ($, on) => {
+test('a tool result opens raw, but a Read of a Markdown file opens formatted; f gives the other view', async ($, on) => {
   const messages = [
     ...CHAT,
     { role: 'assistant', content: [{ type: 'tool_use', id: 'md', name: 'Read', input: { file_path: README } }] },
@@ -165,15 +165,20 @@ test('a tool result opens raw; f gives the formatted view', async ($, on) => {
     expect(String((await ui.find({ type: 'Markdown' }))?.props.text).startsWith('```\ntotal 0\n')).toBe(true)
     await ui.press({ key: 'back' })
 
-    // A Read of a .md file: raw with its numbers; formatted without them.
+    // A Read of a .md file: formatted without its numbers; raw with them.
     await ui.press({ key: 'item-r:md' })
-    expect((await ui.find({ type: 'Code' }))?.props.source).toBe('     1\t# Readme\n     2\t\n     3\tHello <b>you</b>.')
-    await ui.press({ key: 'format' })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('# Readme\n\nHello \\<b>you\\</b>.')
+    expect(await ui.find({ type: 'Code' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /· formatted · as loaded$/ })).toBeDefined()
+    expect((await ui.find({ key: 'format' }))?.props.label).toBe('Raw')
+    await ui.press({ key: 'format' })
+    expect((await ui.find({ type: 'Code' }))?.props.source).toBe('     1\t# Readme\n     2\t\n     3\tHello <b>you</b>.')
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
     await ui.press({ key: 'back' })
 
-    // A Read of another file: fenced in its language.
+    // A Read of another file: raw; formatted, it is fenced in its language.
     await ui.press({ key: 'item-r:tu1' })
+    expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
     await ui.press({ key: 'format' })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('```txt\nalpha\nbeta\n```')
     await ui.press({ key: 'back' })

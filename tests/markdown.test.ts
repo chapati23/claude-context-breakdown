@@ -38,17 +38,27 @@ describe('the view an item opens in', () => {
     expect(defaults('compaction-summary', summary)).toEqual([['Compaction summary', 'formatted']])
   })
 
-  test('raw: tool results (a Read of a .md file too), task reports, injected text', () => {
+  test('raw: tool results that are not a Markdown file, task reports, injected text', () => {
+    // The Read of the fixture is of notes.txt.
     expect(defaults('tool-results')).toEqual([
       ['Read', 'raw'],
       ['Bash', 'raw'],
     ])
     expect(defaults('task-reports')).toEqual([['Build finished', 'raw']])
     expect(defaults('injections').every(([, format]) => format === 'raw')).toBe(true)
+    // A file that is not Markdown opens raw: a Read result and a memory file.
+    const txt = { markup: 'file', path: '/srv/rules.txt', isNumbered: true } as const
+    expect(defaultFormat(txt)).toBe('raw')
+    expect(defaultFormat({ ...txt, isNumbered: false })).toBe('raw')
+    // A tool result that is not a file opens raw, whatever path its call names.
+    expect(defaultFormat({ markup: 'text', path: '/srv/notes.md', isNumbered: false })).toBe('raw')
+    expect(defaultFormat({ markup: 'output', path: '/srv/notes.md', isNumbered: false })).toBe('raw')
+  })
+
+  test('formatted: a Read of a Markdown file, with its line numbers or without', () => {
     const md = { markup: 'file', path: '/srv/notes.md', isNumbered: true } as const
-    expect(defaultFormat(md)).toBe('raw')
-    // A memory file that is not Markdown opens raw.
-    expect(defaultFormat({ ...md, path: '/srv/rules.txt', isNumbered: false })).toBe('raw')
+    expect(defaultFormat(md)).toBe('formatted')
+    expect(defaultFormat({ ...md, path: '/srv/NOTES.MD' })).toBe('formatted')
     expect(defaultFormat({ ...md, isNumbered: false })).toBe('formatted')
   })
 

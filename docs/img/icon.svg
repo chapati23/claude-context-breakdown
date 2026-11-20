@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 34">
+  <!--
+    The source of .claude-plugin/icon.png. One unit is one pixel at 34 px, the
+    size at which the plugin directory lists an icon. The bar runs from edge to
+    edge: a baseline segment, two conversation segments, then the free space.
+  -->
+  <rect width="34" height="34" fill="#1E1E1E"/>
+  <rect x="0" y="7" width="10" height="20" fill="#3A87FE"/>
+  <rect x="11" y="7" width="8" height="20" fill="#E27117"/>
+  <rect x="20" y="7" width="4" height="20" fill="#F1AE00"/>
+  <rect x="25" y="7" width="9" height="20" fill="#4A4A4A"/>
+  <circle cx="27.5" cy="17" r="1" fill="#9A9A9A"/>
+  <circle cx="31.5" cy="17" r="1" fill="#9A9A9A"/>
+</svg>

@@ -9,7 +9,9 @@ This repository is a Claude Code mod. The repository root is the mod folder. The
 
 ## Reviews on pull requests
 
-Two reviewers read each pull request. Both are advisory: the branch rule on `main` requires only the version check.
+Two reviewers read each pull request. Both are advisory: neither review is a required check.
+
+Two rule sets guard `main`. "main: version check required" requires the version check (see "Releases"). "Pull Requests" requires a pull request with one approving review and with every review thread resolved, allows only a squash merge, and forbids a force push and the deletion of the branch. GitHub does not count an author's approval of their own pull request. A repository admin can bypass "Pull Requests"; that bypass is the maintainer's to use, not an agent's. So bring a pull request to ready, answer and resolve every thread, and hand it to the maintainer for the merge.
 
 - **Claude** (`.github/workflows/claude-review.yml`). It reviews a pull request once: when the pull request opens, leaves draft, or is reopened. It does not review a later push. To get another review of the current head, add the label `re-review`; the job removes the label when it starts. Add the label once per head, after a push that fixes a [P1] or [P2] finding or that changes behaviour beyond what the last review saw. Do not add it for a [P3] fix, a docs change, or a merge of the base branch. Add it also when the first review failed or was cancelled: a push that arrives while the review starts makes the job fail, because the job reviews only the head that started it.
 - **Codex** (the `chatgpt-codex-connector` app). It reviews each push by itself.
@@ -37,7 +39,7 @@ scripts/check-version.sh origin/main
 
 The script lists the shipped files that the branch's commits change against the base, and compares the two versions. It exits with 0 when the rule holds. It exits with 1 when a shipped file changed and the version on the branch is not higher than the version on the base, or when a version is not `major.minor.patch`. It exits with 2 when it cannot run the check: for example, the base is not fetched. It reads commits, not the working tree.
 
-CI runs the same script on every pull request and on every push to `main` (`.github/workflows/version.yml`). A branch rule on `main` makes this check required: a pull request merges only when the check passed. The rule does not require the branch to be up to date with `main`.
+CI runs the same script on every pull request and on every push to `main` (`.github/workflows/version.yml`). The rule set "main: version check required" makes this check required: a pull request merges only when the check passed. The rule does not require the branch to be up to date with `main`.
 
 - In a clone of a fork, `origin` is the fork. Fetch the repository that the pull request targets, and use its `main` in these commands and in the steps below.
 - For a pull request whose base is another branch (a stacked pull request), use that branch in place of `origin/main`.

@@ -111,6 +111,12 @@ export const BUTTON_PAD_CELLS = Math.ceil(12 / MIN_CELL_PX)
  * columns' pixels.
  */
 export const MEASURED_ADVANCE_PX = 8.43
+/**
+ * The fewest cells a figure column has. At a cell of about 7.5 pixels "%" is
+ * wider than a cell, and a share such as "50%" in 4 cells breaks onto a
+ * second line. 5 cells is the target's width.
+ */
+export const FIGURE_MIN_CELLS = 5
 /** The fewest cells an item's detail keeps at level 2: the title's column stops short of them. */
 export const DETAIL_MIN_CELLS = 12
 /** The words before the controls while a row opens and the pane offers its keys: Enter opens the row with the focus. */
@@ -142,6 +148,11 @@ export function gridCells(columns: number): number {
  */
 export function columnCells(texts: readonly (string | null)[]): number {
   return Math.max(0, ...texts.map(text => (text === null ? 0 : cellWidth(text)))) + 1
+}
+
+/** A figure column's width: `columnCells`, and at least FIGURE_MIN_CELLS. */
+export function figureColumnCells(texts: readonly (string | null)[]): number {
+  return Math.max(FIGURE_MIN_CELLS, columnCells(texts))
 }
 
 /**
@@ -364,19 +375,20 @@ function segmentsGrid(
     segments.reduce((sum, segment) => sum + (stats.added[segment.id] ?? 0), 0)
   // Each figure column is as wide as its widest text on the page: the
   // headings', the segments', Free space's, the Reserve's and Not loaded's;
-  // and the column's name where it stands in the column ("added").
+  // and the column's name where it stands in the column ("added"). Each has
+  // at least FIGURE_MIN_CELLS.
   const groups = [snapshot.baseline, snapshot.conversation]
   const drawn = groups.flatMap(segments => segments.filter(segment => segment.tokens > 0))
   const cells: FigureCells = {
-    tokens: columnCells([
+    tokens: figureColumnCells([
       ...groups.map(segments => formatTokens(sumTokens(segments))),
       ...drawn.map(segment => formatTokens(segment.tokens)),
       formatTokens(freeTokens(snapshot)),
       formatTokens(snapshot.reserve),
       ...deferred.map(category => (category.tokens === null ? null : formatTokens(category.tokens))),
     ]),
-    share: columnCells([...groups.map(segments => formatShare(sumTokens(segments), used)), ...drawn.map(segment => formatShare(segment.tokens, used))]),
-    added: columnCells([ADDED_NAME, ...groups.map(segments => addedText(groupAdded(segments))), ...drawn.map(segment => addedText(stats.added[segment.id]))]),
+    share: figureColumnCells([...groups.map(segments => formatShare(sumTokens(segments), used)), ...drawn.map(segment => formatShare(segment.tokens, used))]),
+    added: figureColumnCells([ADDED_NAME, ...groups.map(segments => addedText(groupAdded(segments))), ...drawn.map(segment => addedText(stats.added[segment.id]))]),
   }
   const rows: Grid = { ...g, share: table.share, added: table.added === true, cells, bar: barCells(table, grid) }
   // The cells a heading's text has, and a row's name after the lead.
@@ -559,8 +571,8 @@ function listGrid(
   // The servers that are not loaded have no segment's colour: a neutral grey.
   const color = isSegmentList(list.segment) ? colorOf(palette, list.segment) : palette.notLoaded
   const cells: FigureCells = {
-    tokens: columnCells(list.rows.map(row => formatTokens(row.tokens))),
-    share: columnCells(list.rows.map(row => formatShare(row.tokens, total))),
+    tokens: figureColumnCells(list.rows.map(row => formatTokens(row.tokens))),
+    share: figureColumnCells(list.rows.map(row => formatShare(row.tokens, total))),
     added: 1,
   }
   const rows: Grid = { ...g, share: hasTokens && table.share, added: false, cells, bar: hasTokens ? barCells(table, grid) : 0 }

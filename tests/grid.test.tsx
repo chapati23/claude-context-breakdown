@@ -10,6 +10,7 @@ import {
   BAR_CELLS,
   BAR_NARROW_CELLS,
   BUTTON_PAD_CELLS,
+  FIGURE_MIN_CELLS,
   GRID_MAX_CELLS,
   LABEL_PAD_CELLS,
   LEAD_CELLS,
@@ -19,6 +20,7 @@ import {
   SWATCH_ALT,
   barCells,
   columnCells,
+  figureColumnCells,
   fittedDetail,
   fittedName,
   fittedTitle,
@@ -365,6 +367,31 @@ test('the servers list draws grey length bars and the tool counts in a column of
   await ui.unmount()
 })
 
+test('a share column whose shares all have 2 digits still has FIGURE_MIN_CELLS cells, so "%" does not break onto a second line', async ($, on) => {
+  expect(figureColumnCells(['50%', '25%'])).toBe(FIGURE_MIN_CELLS)
+  expect(figureColumnCells(['<0.1%'])).toBe(6)
+  expect(columnCells(['50%', '25%'])).toBe(4)
+  const w = world(on)
+  const base = usage(66_000)
+  const mcpTools = [
+    ...Array.from({ length: 3 }, (_, i) => ({ name: `mcp__x__t${i}`, serverName: 'tickets', tokens: 1000, isLoaded: false })),
+    ...Array.from({ length: 12 }, (_, i) => ({ name: `mcp__x__u${i}`, serverName: 'notes', tokens: 500, isLoaded: false })),
+  ]
+  w.usage = { ...base, context: { ...base.context, breakdown: { ...base.context.breakdown!, mcpTools } } }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 100 } })
+  await ui.press({ key: 'row-not-loaded' })
+  const tree = await ui.drawn()
+  const shares = gridRowsOf(tree).flatMap(row => rightColumns(row).filter(column => isFigureColumn(column) && /^\d\d%$/.test(textOf(column))))
+  expect(shares.map(column => textOf(column)).sort()).toEqual(['33%', '67%'])
+  for (const column of shares) {
+    expect(column.props?.width).toBe(FIGURE_MIN_CELLS)
+  }
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+})
+
 test('while free space is low the window line names the largest segment where it fits beside the column name, else gives way', async ($, on) => {
   const w = world(on)
   w.usage = usage(156_000, 130_000)
@@ -474,7 +501,7 @@ test('the length bars scale to the largest row and alt texts use the full name a
   await ui.unmount()
 })
 
-test('every right-aligned column is as wide as its widest text on the page and one cell more, the same on every row', async ($, on) => {
+test('every right-aligned column is as wide as its widest text on the page and one cell more (a figure column at least FIGURE_MIN_CELLS), the same on every row', async ($, on) => {
   expect(columnCells(['406k', '<0.1%', null])).toBe(6)
   expect(columnCells(['150k', '36%'])).toBe(5)
   expect(columnCells([ADDED_NAME, '+2.5k'])).toBe(6)
@@ -499,7 +526,7 @@ test('every right-aligned column is as wide as its widest text on the page and o
     for (const [place, columns] of byPlace) {
       const widths = [...new Set(columns.map(column => column.props?.width))]
       const widest = Math.max(...columns.map(column => cellWidth(textOf(column))))
-      expect({ where, place, widths }).toEqual({ where, place, widths: [widest + 1] })
+      expect({ where, place, widths }).toEqual({ where, place, widths: [Math.max(FIGURE_MIN_CELLS, widest + 1)] })
     }
   }
   await realWorld($, on)

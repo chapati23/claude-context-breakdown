@@ -31,7 +31,7 @@ for (const surface of SURFACES) {
     // The Read result as the conversation carried it: with its own line numbers.
     const loaded = level3(await tap(ui, 'item-r:tu1', opts))
     // Off the terminal the swatch is a picture, which flatten prints as <svg>.
-    const swatched = (crumb: string) => crumb.replace(/^<svg> /, '██ ')
+    const swatched = (crumb: string) => (surface === 'terminal' ? crumb : crumb.replace(/^<svg> /, '██ '))
     expect(swatched(loaded.crumb)).toBe('██ Tool results › Read  ~/project/notes.txt')
     expect(factsOf(loaded.facts)).toMatchObject({ place: 'item 2 of 2', form: 'raw', source: 'as loaded' })
     expect(loaded.notes).toEqual([])

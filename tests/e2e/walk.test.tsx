@@ -54,7 +54,7 @@ for (const surface of SURFACES) {
       const label = await labelOf(ui, rowKey)
       // The row's figures on level 1, to hold level 2 against.
       // Off the terminal the row starts with its swatch, a picture flatten prints as <svg>.
-      const row = before.find(line => line.replace(/^(\d: | {3}|<svg>)/, '').startsWith(label))
+      const row = before.find(line => line.replace(surface === 'terminal' ? /^(\d: | {3})/ : /^<svg>/, '').startsWith(label))
       const figures = figuresOf(row ?? '')
       expect(figures, `${rowKey} has figures on level 1`).toBeDefined()
 
@@ -101,7 +101,7 @@ for (const surface of SURFACES) {
       expect(facts!.tokens).toBe(figuresOf(two.rows[0]!)!.tokens)
       // Its place counts all items of the list, as level 2's facts do.
       expect(facts!.place).toBe(`item 1 of ${two.count}`)
-      expect(three.crumb.replace(/^<svg> /, '██ ')).toMatch(/^█+ \S.* › \S/)
+      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^<svg> /, '██ ')).toMatch(/^█+ \S.* › \S/)
       expect(three.controls.join(' ')).toContain('Back')
       expect(three.body.find(line => line.trim() !== '') ?? '').not.toBe('')
       // The engine wraps text when it paints, so the pane promises only that the head

@@ -8,7 +8,7 @@
 //
 // On the desktop the pane uses the app's own keys only: no Down, Up, j or k
 // at any level, every arrow goes on to the engine, and the mod writes no ring
-// key. Enter and the digits still open rows, and b comes back.
+// key. Enter still opens rows, no digit does, and b comes back.
 //
 // What the kit lets a test see:
 // - It has no answer for the mod's own `$.ui.focus`, so no ring really

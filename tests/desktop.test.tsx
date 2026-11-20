@@ -637,7 +637,7 @@ test('the widget seat still shows a glance with no Button and no Client', async 
 
   expect(await ui.findAll({ type: 'Button' })).toEqual([])
   expect(await ui.findAll({ type: 'Client' })).toEqual([])
-  // The bar is the picture, with the total and the legend in the code font.
+  // The bar is the picture, with the total and the legend in the surface's own face, with tabular digits.
   expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
   expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
   expect(await ui.find({ type: 'Text', text: 'Tool results 45%' })).toBeDefined()
@@ -742,7 +742,7 @@ test('the desktop key line keeps one set of controls in one order when Esc takes
     return keys
   }
   // No Down and Up at any level: Tab moves the ring along the rows, and the
-  // app scrolls the text. The key words name Enter and the digits. A control
+  // app scrolls the text. The key words name Enter. A control
   // that cannot apply here leaves the line; off the terminal nothing takes
   // its key. Close is last.
   expect(await check()).toEqual(['refresh', 'close'])
@@ -1028,7 +1028,7 @@ test('the mobile app draws key words and key caps only while the pane holds the 
         } else {
           expect(await caps(), `${state}, level ${level}`).toEqual([])
         }
-        // One word group: Enter and the digits.
+        // One word group, which names Enter alone: these rows take no digit.
         expect((await words()).length, `${state}, level ${level}`).toBe(offers && level !== 3 ? 1 : 0)
       }
       await ui.press({ key: 'back' })

@@ -29,6 +29,7 @@ import {
 } from '../hooks/grid'
 import { DARK, LIGHT } from '../hooks/palette'
 import { LENGTH_BAR_HEIGHT, MEASURED_CELL_PX, lengthBarPicture, swatchPicture, windowBarPicture } from '../hooks/svgbar'
+import { BASELINE_HEADING, RESERVE_NAME } from '../hooks/pane'
 import { ADDED_NAME, tableLayout } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
 import { CHAT, FOCUSED_PANE, NOTES, OPENING, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, TRANSCRIPT, realSession, richUsage, usage, world } from './fixtures'
@@ -184,7 +185,67 @@ test('level 1: the heading, the bar, the window line with the column names, the 
   const lines = gridLines(tree)
   expect(lines).toContain('Free space 684k')
   expect(lines).toContain('Reserve for compaction 33k')
+  for (const [name, mark] of [
+    ['Free space', '<circle'],
+    ['Reserve for compaction', 'rotate(-45)'],
+  ] as const) {
+    const row = gridRowsOf(tree).find(line => rowLine(line).startsWith(name))!
+    const [leadBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+    expect({ name, width: leadBox?.props?.width }).toEqual({ name, width: LEAD_CELLS })
+    const picture = (leadBox?.children ?? []).filter(isNode)[0]
+    expect({ name, type: picture?.type, alt: picture?.props?.alt }).toEqual({ name, type: 'Svg', alt: SWATCH_ALT })
+    // Free space's swatch is dotted (circles), the Reserve's shaded (stripes turned -45 degrees).
+    expect({ name, texture: String(picture?.props?.source).includes(mark) }).toEqual({ name, texture: true })
+  }
+  expect(lines.filter(line => line.startsWith('Free space') || line.startsWith('Reserve')).every(line => !line.includes('▬'))).toBe(true)
   await ui.unmount()
+})
+
+test('level 1: a name that does not open starts in the rows’ name column, after the lead, where a Button’s label starts', async ($, on) => {
+  // The fixture's MCP tools (deferred) has no servers: its Not loaded row does not open.
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
+  const rows = gridRowsOf(await ui.drawn()).filter(row => /^(Free space|Reserve|MCP tools)/.test(rowLine(row)))
+  expect(rows.map(row => rowLine(row).split(' ')[0])).toEqual(['Free', 'Reserve', 'MCP'])
+  for (const row of rows) {
+    const where = rowLine(row)
+    expect({ where, button: nodesOf(row).some(node => node.type === 'Button') }).toEqual({ where, button: false })
+    const [leadBox, nameBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+    expect({ where, lead: [leadBox?.type, leadBox?.props?.width] }).toEqual({ where, lead: ['Box', LEAD_CELLS] })
+    expect({ where, name: [nameBox?.type, nameBox?.props?.paddingLeft] }).toEqual({ where, name: ['Box', LABEL_PAD_CELLS] })
+    expect({ where, text: (nameBox?.children ?? []).filter(isNode)[0]?.type }).toEqual({ where, text: 'Text' })
+  }
+  await ui.unmount()
+})
+
+test('level 1: where the long forms do not fit, Reserve takes its short name and a heading its title alone', async ($, on) => {
+  await realWorld($, on)
+  const formsAt = async (columns: number) => {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    const rows = gridRowsOf(await ui.drawn())
+    const reserve = rows.find(row => rowLine(row).startsWith('Reserve'))!
+    const heading = rows.find(row => rowLine(row).startsWith('Baseline'))!
+    // A heading's text has the grid less its figure columns.
+    const rightOf = (row: Node) => rightColumns(row).reduce((sum, part) => sum + (part.props?.width as number) + 1, 0)
+    const forms = {
+      reserve: textOf((reserve.children ?? []).filter(isNode)[0]),
+      heading: textOf((heading.children ?? []).filter(isNode)[0]),
+      headingRoom: gridCells(columns) - rightOf(heading),
+    }
+    await ui.unmount()
+
+    return forms
+  }
+  const wide = await formsAt(100)
+  expect([wide.reserve, wide.heading]).toEqual([RESERVE_NAME, BASELINE_HEADING])
+  const narrow = await formsAt(40)
+  expect([narrow.reserve, narrow.heading]).toEqual(['Reserve', 'Baseline'])
+  // The long heading does not fit there. In every scene tried (40 to 100 columns, a share of "<0.1%"), the
+  // terminal's table picks the title before the grid's own check does, so this line does not catch a
+  // removal of that check: only the Reserve's line catches a removal of its own.
+  expect(cellWidth(BASELINE_HEADING)).toBeGreaterThan(narrow.headingRoom)
 })
 
 test('level 2: the title row, the definition, the controls, then the facts with the column name, the rows and the notes', async ($, on) => {

@@ -877,7 +877,9 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
     // The drawn line, as the groups wrap at the pane's 45 columns: on the
     // desktop both groups fit on one row.
     const lines1 = flatten(await ui.drawn(), { surface, columns: 45 })
-    const keys1 = lines1.slice(lines1.findIndex(line => line.startsWith('⏎ ')))
+    const keysAt = lines1.findIndex(line => line.startsWith(open))
+    expect(keysAt).toBeGreaterThanOrEqual(0)
+    const keys1 = lines1.slice(keysAt)
     expect(keys1).toEqual(
       surface === 'terminal' ? ['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'] : ['⏎: Open  r: Refresh  x: Close'],
     )

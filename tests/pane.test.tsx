@@ -724,7 +724,7 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     // The pane takes the keyboard: the keys show.
     await ui.redraw({ ...PANE.props, isFocused: true })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeUndefined()
-    // The words name Enter and the digits, 0 for the tenth row; the arrows and Tab go unnamed.
+    // On the terminal the words name Enter and the digits, 0 for the tenth row; the arrows and Tab go unnamed.
     // A desktop's rows take no digit: its words name Enter alone.
     expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '⏎ 1-9 0: Open' : '⏎: Open' })).toBeDefined()

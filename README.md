@@ -96,7 +96,7 @@ claude plugin install context-breakdown --marketplace chapati23/claude-context-b
 
 In the Claude desktop app, `/plugin` does not run. Click **+** next to the prompt box, then **Plugins**, then **Add marketplace** with `chapati23/claude-context-breakdown`, then **Add plugin**.
 
-An install at the user scope from a terminal also loads in the local sessions of the desktop app. Start a new session to see the bar. The desktop app draws the bar's cells and the legend's swatch in its code font, with the same cells as the terminal. It draws the total, the `·` and the legend's words in its own face. If the app cannot run the bar's module, the mod draws the bar as a picture from then on, with the total as its only button, until the mod loads again. The bar, the pane and the minimized pane take their colours from the Claude Code theme setting, not from the app's light or dark appearance.
+An install at the user scope from a terminal also loads in the local sessions of the desktop app. Start a new session to see the bar. The desktop app draws the bar's cells, the `·` and the legend's swatch in its code font, with the same cells as the terminal, so the gaps between the total, the `·`, the swatch and the legend's words are one cell wide. It draws the total and the legend's words in its own face. If the app cannot run the bar's module, the mod draws the bar as a picture from then on, with the total as its only button, until the mod loads again. The bar, the pane and the minimized pane take their colours from the Claude Code theme setting, not from the app's light or dark appearance.
 
 In the mobile app and in the editor, the bar is a picture, and the total and the legend are in the app's own face. Only the total is a button: a click on it opens the segments.
 

@@ -119,15 +119,17 @@ test('the desktop band is one Client with the terminal row’s text, split into 
   const total = runs.filter(run => run.target === 'total')
   expect(total.map(run => run.text)).toEqual([' ', '66k/200k 33%'])
   expect(total[1]?.dimColor).toBe(true)
-  // The bar's cells, the space after them and the legend's swatch are cells
-  // of the code font; the total, the join and the legend's words are text in
-  // the app's face.
+  // The bar's cells, the space after them, the join, the legend's swatch and
+  // the space after it are cells of the code font, so the gaps are as wide as
+  // the bar's cells; the total and the legend's words are text in the app's
+  // face.
   const isBarCell = (run: BarRun) => typeof run.target === 'number' || run.color === DARK.free || run.color === DARK.reserve
   expect(runs.filter(isBarCell).every(run => run.mono === true)).toBe(true)
   expect(total.map(run => run.mono === true)).toEqual([true, false])
-  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', ' · ', ' Tool results 45%'])
-  // The legend's swatch and words are marked as legend, so a hover can replace them.
-  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' Tool results 45%'])
+  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', 'Tool results 45%'])
+  expect(runs.filter(run => run.mono === true && !isBarCell(run)).map(run => run.text)).toEqual([' ', ' · ', '▉', ' '])
+  // The legend's swatch, the space after it and the words are marked as legend, so a hover can replace them.
+  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' ', 'Tool results 45%'])
   expect(runs.find(run => run.isLegend === true)?.color).toBe(DARK.segments['tool-results'])
   expect(runs.filter(run => run.isLegend !== true && run.text.includes('Tool results'))).toEqual([])
 

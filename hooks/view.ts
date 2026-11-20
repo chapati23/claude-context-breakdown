@@ -31,19 +31,41 @@ export function totalLabel(snapshot: ContextBreakdownSnapshot): string {
   return labelForms(snapshot)[0]!
 }
 
+/** Free space below this share of the window is low: the pane's heading warns. */
+export const LOW_FREE_SHARE = 0.1
+
+/** Whether free space is below LOW_FREE_SHARE of the window. Exactly at it is not low. */
+export function isLowFree(snapshot: ContextBreakdownSnapshot): boolean {
+  return freeTokens(snapshot) < LOW_FREE_SHARE * snapshot.window
+}
+
+/**
+ * Level 1's heading in two parts, so the pane can draw the free part in its
+ * own colour. A part is empty when the form leaves it out.
+ */
+export type PaneHeading = { used: string; free: string }
+
+/** The heading as one text: the parts that are set, joined by " · ". */
+export function headingLine(heading: PaneHeading): string {
+  return [heading.used, heading.free].filter(part => part !== '').join(' · ')
+}
+
 /**
  * Level 1's heading, the longest form that fits `columns` less one:
  * "283k used · 684k free before compaction", then without "before
- * compaction", then the used figure alone. Both figures carry "~" while the
- * conversation is estimated: free space is computed from what is used.
+ * compaction", then one figure alone. That figure is the used one, or the
+ * free one while free space is low, so a narrow pane still warns in words.
+ * Both figures carry "~" while the conversation is estimated: free space is
+ * computed from what is used.
  */
-export function paneHeading(snapshot: ContextBreakdownSnapshot, columns: number): string {
+export function paneHeading(snapshot: ContextBreakdownSnapshot, columns: number): PaneHeading {
   const mark = snapshot.isEstimate ? '~' : ''
   const used = `${mark}${formatTokens(usedTokens(snapshot))} used`
   const free = `${mark}${formatTokens(freeTokens(snapshot))} free`
-  const forms = [`${used} · ${free} before compaction`, `${used} · ${free}`, used]
+  const alone = isLowFree(snapshot) ? { used: '', free } : { used, free: '' }
+  const forms = [{ used, free: `${free} before compaction` }, { used, free }, alone]
 
-  return forms.find(form => cellWidth(form) < columns) ?? used
+  return forms.find(form => cellWidth(headingLine(form)) < columns) ?? alone
 }
 
 /** The word right of the total: the largest conversation segment, after a swatch of its colour. */

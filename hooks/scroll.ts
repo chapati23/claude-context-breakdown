@@ -1,5 +1,6 @@
 // j and k: the pane's body one row down or up, and on to the next or the
-// previous page at a page's edge.
+// previous page at a page's edge. Level 3 uses this on the terminal only:
+// elsewhere the app's own scrolling moves the text.
 //
 // `$.ui.scroll` takes no row number, only a thing to reveal. So a press asks
 // for the pane's `start`, and this mod's own `ui.scroll` hook rewrites the
@@ -249,12 +250,17 @@ function isOurs(e: ScrollEvent, plugin: string): boolean {
 
 /**
  * The offset this mod's `ui.scroll` hook passes on, or null to pass the event
- * on as it came. Only a scroll of ours with a token under way is moved: the
- * person's wheel and arrows, and our own `TOP_SCROLL`, go through unchanged.
+ * on as it came. Only a scroll of ours to `start` with a token under way is
+ * moved: the person's wheel and arrows, our own `TOP_SCROLL`, and our scrolls
+ * to anywhere else go through unchanged.
  * The token taken is marked seen; a step at the page's edge asks to cross.
  */
 export function stepAnswer(e: ScrollEvent, plugin: string, steps: Steps): number | null {
-  if (!isOurs(e, plugin)) {
+  // Every scroll with a token asks for `start`, which the engine resolves to
+  // row 0. Any other offset is another scroll of ours, with no token: the
+  // reveal of a row the ring moved to, or the bottom after k crossed back.
+  // It must not take the token of a step that is under way.
+  if (!isOurs(e, plugin) || e.offset !== 0) {
     return null
   }
   const token = steps.take()

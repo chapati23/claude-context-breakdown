@@ -8,17 +8,19 @@ import type {
   ContextBreakdownContent,
   ContextBreakdownFormat,
   ContextBreakdownList,
-  ContextBreakdownSegmentId,
+  ContextBreakdownListId,
+  ContextBreakdownPlace,
   ContextBreakdownSnapshot,
   ContextBreakdownSort,
   ContextBreakdownSource,
   ContextBreakdownView,
 } from '../types'
 import type { MessageLike } from './classify'
-import { NO_ITEMS, buildItems, isBaseline, listOf } from './items'
+import { NO_ITEMS, buildItems, isBaseline, listOf, opens, pageOf, placeOf } from './items'
 import type { Item, ItemBreakdown, ItemData, ItemSet } from './items'
 import { defaultFormat, formattedSource, mappedLine, markdownPages, pageAtLine } from './markdown'
 import { compareFile, compareRead } from './reminder'
+import { NOT_LOADED, isSegmentList } from './segments'
 import { displayText, firstWords, newlines, pageLines, textPage } from './text'
 
 export const LEVEL_1: ContextBreakdownView = { seq: 0, gen: 0, level: 1 }
@@ -28,6 +30,9 @@ export const GONE_NOTE = 'The item that was open is no longer in the context.'
 
 /** The level-1 line when every item of an open list left the context. */
 export const ITEMS_GONE_NOTE = 'The items that were open are no longer in the context.'
+
+/** The level-1 line when no server has tools that are not loaded any more: they loaded since the last measurement. */
+export const ALL_LOADED_NOTE = 'All MCP tools are loaded now.'
 
 /** The level-1 line for a `/ctx` word that names no segment. */
 export function noMatchNote(word: string): string {
@@ -121,11 +126,12 @@ export function toLevel1With(note: string): (view: ContextBreakdownView) => Cont
 
 /**
  * Level 1 after a /clear: an open list or item of the conversation says it
- * left the context. A baseline segment's items stay in the context, so its
- * list or item goes back with no note.
+ * left the context. A baseline segment's items stay in the context, and the
+ * servers that are not loaded were never in it, so their list or item goes
+ * back with no note.
  */
 export function afterClear(view: ContextBreakdownView): ContextBreakdownView {
-  if (view.level === 1 || isBaseline(view.list.segment)) {
+  if (view.level === 1 || !isSegmentList(view.list.segment) || isBaseline(view.list.segment)) {
     return toLevel1(view)
   }
 
@@ -160,21 +166,54 @@ export function rebuildView(view: ContextBreakdownView, data: ItemData): Context
   const set = buildItems(view.list.segment, data)
   const list = listOf(view.list.segment, set, view.list.sort, view.list.page)
   if (view.level === 2) {
+    // No server has tools that are not loaded any more: the list would be
+    // empty, so the segments show instead.
+    if (view.list.segment === NOT_LOADED && set.items.length === 0) {
+      return { seq: view.seq, gen, level: 1 }
+    }
     // Every item it listed left the context (a compaction, a /clear): an
     // empty list would read as "~0 · No items", so say what happened. A list
     // that could not be read keeps its own note.
     if (view.list.items > 0 && set.items.length === 0 && set.note === NO_ITEMS) {
       return { seq: view.seq, gen, level: 1, note: ITEMS_GONE_NOTE }
     }
+    // The row that took the ring before the rebuild keeps it (`from`, which
+    // `ringKey` reads): a new item first would take it otherwise, and a
+    // desktop moves the focus to it while the person is elsewhere.
+    const ids = view.list.rows.filter(row => row.isOpenable).map(row => row.id)
+    const from = view.from !== undefined && ids.includes(view.from) ? view.from : ids[0]
 
-    return { ...view, gen, list }
+    return { ...view, gen, list, ...(from === undefined ? {} : { from }) }
   }
   const item = set.items.find(one => one.id === view.item.id)
   if (item === undefined) {
     return { seq: view.seq, gen, level: 1, note: GONE_NOTE }
   }
 
-  return { ...view, gen, list, item: { ...view.item, tokens: item.tokens } }
+  // A new item can push the open one to another page, or change its place.
+  const held = heldBy(view.list.segment, set, view.list.sort, item.id, view.list.page)
+
+  return { ...view, gen, ...held, item: { ...view.item, tokens: item.tokens } }
+}
+
+/**
+ * Level 3's list and place for the item `id`: the page of the list that
+ * holds the item, so b puts the ring on its row, and where the item stands
+ * (`placeOf`). Without the item in the set, the list at `page` and no place.
+ */
+function heldBy(
+  segment: ContextBreakdownListId,
+  set: ItemSet,
+  sort: ContextBreakdownSort,
+  id: string,
+  page: number,
+): { list: ContextBreakdownList; place?: ContextBreakdownPlace } {
+  const place = placeOf(segment, set, sort, id)
+  if (place === null) {
+    return { list: listOf(segment, set, sort, page) }
+  }
+
+  return { list: listOf(segment, set, sort, pageOf(place)), place }
 }
 
 // Content of level 3.
@@ -344,18 +383,48 @@ export function contentOf(
 
 // Moves that read the conversation, the breakdown or a file.
 
-/** Level 2 for a segment, from its first page, largest first. */
-export function openSegment(io: NavIo, segment: ContextBreakdownSegmentId): Promise<void> {
+/**
+ * Level 1's note in place of a list of servers with no row: the breakdown
+ * could not be read, or every server's tools loaded since the last
+ * measurement. Null for any other list, or one with rows.
+ */
+function emptyServers(segment: ContextBreakdownListId, set: ItemSet): string | null {
+  return segment === NOT_LOADED && set.items.length === 0 ? (set.note ?? ALL_LOADED_NOTE) : null
+}
+
+/**
+ * Level 2 for a segment, or the servers that are not loaded, from its first
+ * page, largest first. With no server to list, level 1 shows instead, with
+ * a note that says why.
+ */
+export function openSegment(io: NavIo, segment: ContextBreakdownListId): Promise<void> {
   return retried(async () => {
     const base = await io.view()
     const set = buildItems(segment, await gather(io))
+    const none = emptyServers(segment, set)
+    if (none !== null) {
+      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, note: none })
+    }
 
     return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: listOf(segment, set, 'size', 0) })
   })
 }
 
-/** The list again, with another sort or page. */
-function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: ContextBreakdownSort; page: number }) {
+/**
+ * Whether a list still keeps the focus where the person put it, after the
+ * view went from `before` to `after`: `kept`, the answer so far, holds only
+ * while the same segment's list stays open. A new level or another segment
+ * ends it. Read off the terminal only (register.tsx, `staysOnControl`).
+ */
+export function keepsFocus(before: ContextBreakdownView, after: ContextBreakdownView, kept: boolean): boolean {
+  return kept && before.level === 2 && after.level === 2 && before.list.segment === after.list.segment
+}
+
+/** Which row of a new page takes the focus ring: its first or its last that opens. */
+export type RingAt = 'first' | 'last'
+
+/** The list again, with another sort or page; `at` puts the ring on the new page's first or last row. */
+function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: ContextBreakdownSort; page: number }, at?: RingAt) {
   return retried(async () => {
     const base = await io.view()
     const list = listOfView(base)
@@ -364,17 +433,26 @@ function relist(io: NavIo, change: (list: ContextBreakdownList) => { sort: Conte
     }
     const { sort, page } = change(list)
     const set = buildItems(list.segment, await gather(io))
+    const none = emptyServers(list.segment, set)
+    if (none !== null) {
+      return commit(io, base, { seq: base.seq, gen: base.gen, level: 1, note: none })
+    }
+    const next = listOf(list.segment, set, sort, page)
+    const ids = next.rows.filter(row => row.isOpenable).map(row => row.id)
+    const from = at === undefined ? undefined : at === 'first' ? ids[0] : ids[ids.length - 1]
 
-    return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: listOf(list.segment, set, sort, page) })
+    return commit(io, base, { seq: base.seq, gen: base.gen, level: 2, list: next, ...(from === undefined ? {} : { from }) })
   })
 }
 
+/** Largest first and newest first; for the servers that are not loaded, largest first and most tools first. */
 export function toggleSort(io: NavIo): Promise<void> {
-  return relist(io, list => ({ sort: list.sort === 'size' ? 'newest' : 'size', page: 0 }))
+  return relist(io, list => ({ sort: list.sort !== 'size' ? 'size' : list.segment === NOT_LOADED ? 'tools' : 'newest', page: 0 }))
 }
 
-export function listPage(io: NavIo, delta: number): Promise<void> {
-  return relist(io, list => ({ sort: list.sort, page: list.page + delta }))
+/** Another page of the list; `at`: j or k crossed into it, so its first or last row takes the ring. */
+export function listPage(io: NavIo, delta: number, at?: RingAt): Promise<void> {
+  return relist(io, list => ({ sort: list.sort, page: list.page + delta }), at)
 }
 
 /** Finds the item again in a fresh build; level 1, with a note, when it is gone. */
@@ -393,6 +471,32 @@ async function findItem(
   return { item, set }
 }
 
+/**
+ * Level 3 for `item` of `list` in the fresh `set`: as loaded, first page,
+ * in the item's own default view. Null for an item with no text to show.
+ */
+async function opened(
+  io: NavIo,
+  base: ContextBreakdownView,
+  list: ContextBreakdownList,
+  set: ItemSet,
+  item: Item,
+): Promise<Outcome | null> {
+  if (!opens(item)) {
+    return null
+  }
+  const resolved = await resolveText(io, item, true)
+  const isChanged = isChangedOnDisk(item, resolved.loaded, resolved.disk)
+
+  return commit(io, base, {
+    seq: base.seq,
+    gen: base.gen,
+    level: 3,
+    ...heldBy(list.segment, set, list.sort, item.id, list.page),
+    item: contentOf(item, resolved, 'loaded', 0, isChanged),
+  })
+}
+
 /** Level 3 for an item of the open list, as loaded, first page. */
 export function openItem(io: NavIo, id: string): Promise<void> {
   return retried(async () => {
@@ -405,20 +509,35 @@ export function openItem(io: NavIo, id: string): Promise<void> {
     if (typeof found === 'string') {
       return found
     }
-    const { item, set } = found
-    if (item.loaded === null && item.disk === null) {
+
+    return opened(io, base, list, found.set, found.item)
+  })
+}
+
+/**
+ * The next item that opens (`delta` 1) or the previous one (-1), in the
+ * list's order, across its pages: n and p at the end of an item. The order
+ * comes from a fresh build at the press, not from the stored place, which a
+ * measurement since may have made stale. Nothing at the list's end.
+ */
+export function stepItem(io: NavIo, delta: number): Promise<void> {
+  return retried(async () => {
+    const base = await io.view()
+    if (base.level !== 3) {
       return null
     }
-    const resolved = await resolveText(io, item, true)
-    const isChanged = isChangedOnDisk(item, resolved.loaded, resolved.disk)
+    const found = await findItem(io, base, base.list, base.item.id)
+    if (typeof found === 'string') {
+      return found
+    }
+    const place = placeOf(base.list.segment, found.set, base.list.sort, base.item.id)
+    const id = delta > 0 ? place?.next : place?.prev
+    const item = found.set.items.find(one => one.id === id)
+    if (item === undefined) {
+      return null
+    }
 
-    return commit(io, base, {
-      seq: base.seq,
-      gen: base.gen,
-      level: 3,
-      list: listOf(list.segment, set, list.sort, list.page),
-      item: contentOf(item, resolved, 'loaded', 0, isChanged),
-    })
+    return opened(io, base, base.list, found.set, item)
   })
 }
 
@@ -448,12 +567,12 @@ function reopen(
     const { source, page, format = base.item.format, share = 0, atEnd = false } = change(base.item)
     const resolved = await resolveText(io, found.item, isFresh || source === 'disk')
     const isChanged = isFresh ? isChangedOnDisk(found.item, resolved.loaded, resolved.disk) : base.item.isChanged
-    const list = listOf(base.list.segment, found.set, base.list.sort, base.list.page)
+    const held = heldBy(base.list.segment, found.set, base.list.sort, base.item.id, base.list.page)
     // A switch of view on the same source keeps the place, not the page number.
     const from = source === base.item.source ? { format: base.item.format, page: base.item.page, share } : undefined
     const item = { ...contentOf(found.item, resolved, source, page, isChanged, format, from), atEnd }
 
-    return commit(io, base, { ...base, list, item })
+    return commit(io, base, { ...base, ...held, item })
   })
 }
 

@@ -2,11 +2,12 @@
 // share (hotkey mark, name, length bar, figures) and the length bar's cells.
 // One layout serves every row of a level, so the columns line up.
 
-import type { ContextBreakdownDeferred, ContextBreakdownServer } from '../types'
+import type { ContextBreakdownDeferred, ContextBreakdownSegment, ContextBreakdownServer, ContextBreakdownSnapshot } from '../types'
 import { FILLED, TEXTURE, TEXTURED } from './bar'
 import { formatCount, formatShare, formatTokens } from './format'
+import { segmentDef } from './segments'
 import { cellWidth, shortenPath } from './text'
-import { fit } from './view'
+import { fit, isLowFree } from './view'
 
 /** Cells a hotkey's mark ("1: ") takes before a plain Button's label. */
 export const HOTKEY_CELLS = 3
@@ -45,7 +46,14 @@ export type Table = {
   /** The length bar after the name and its space; 0 when it is dropped. */
   bar: number
   share: boolean
+  /** Level 1's column `added` after the share, ADDED_CELLS wide; set only by `withAdded`. */
+  added?: true
 }
+
+/** Cells of the column `added`: two spaces and the widest figure, "+4.6k". */
+export const ADDED_CELLS = 7
+/** The column's name in the header line, and the word the note below the table defines. */
+export const ADDED_NAME = 'added'
 
 function figureCells(share: boolean): number {
   return 1 + AMOUNT_CELLS + (share ? 1 + SHARE_CELLS : 0)
@@ -82,9 +90,28 @@ export function tableLayout(columns: number, widestName: number, swatch = true):
   return { mark, lead, name: Math.min(widest, name), bar: 0, share }
 }
 
+/**
+ * The table with the column `added` where it has room: ADDED_CELLS more
+ * inside TABLE_MAX_COLUMNS and the pane's spare cell, after a share column.
+ * The other columns keep their cells: the column never narrows the names or
+ * the bar, so in a narrow pane it does not show.
+ */
+export function withAdded(table: Table, columns: number): Table {
+  const room = Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)
+
+  return table.share && rowCells(table) + ADDED_CELLS <= room ? { ...table, added: true } : table
+}
+
 /** Cells of a whole row, mark included. */
 export function rowCells(table: Table): number {
-  return table.mark + table.lead + table.name + (table.bar > 0 ? 1 + table.bar : 0) + figureCells(table.share)
+  return (
+    table.mark +
+    table.lead +
+    table.name +
+    (table.bar > 0 ? 1 + table.bar : 0) +
+    figureCells(table.share) +
+    (table.added === true ? ADDED_CELLS : 0)
+  )
 }
 
 /** The cells between the mark and the figures: swatch, name and bar. */
@@ -134,24 +161,29 @@ export function lengthBar(tokens: number, largest: number, cells: number, id = '
 /**
  * A row's figures: " 9.5k  4.6%", the share of `of`; a blank share column
  * when `of` is null (Free space, Reserve, Not loaded), so the tokens line up.
+ * With the column `added`, the tokens the row gained since the person's last
+ * prompt follow ("  +14k"), or blanks: on the terminal the blanks keep the
+ * highlight band of a lit row as wide as the table.
  */
-export function figuresText(table: Table, tokens: number, of: number | null): string {
+export function figuresText(table: Table, tokens: number, of: number | null, added?: number): string {
   const amount = ` ${formatTokens(tokens).padStart(AMOUNT_CELLS)}`
   if (!table.share) {
     return amount
   }
+  const share = `${amount} ${(of === null ? '' : formatShare(tokens, of)).padStart(SHARE_CELLS)}`
+  if (table.added !== true) {
+    return share
+  }
 
-  return `${amount} ${(of === null ? '' : formatShare(tokens, of)).padStart(SHARE_CELLS)}`
+  return `${share}${(added !== undefined && added > 0 ? `+${formatTokens(added)}` : '').padStart(ADDED_CELLS)}`
 }
 
-/** The most server rows under MCP tools in Not loaded; one more row sums the rest. */
-export const MAX_SERVER_ROWS = 8
-/** Cells a server row is indented by, under its category's name. */
-export const SERVER_INDENT = 2
-/** The fewest cells a server's name keeps before the count drops its word "tools". */
-const SERVER_NAME_MIN_CELLS = 8
+/** "1 server", "1,230 tools": a count, grouped, and its word. */
+export function countOf(n: number, word: string): string {
+  return `${formatCount(n)} ${word}${n === 1 ? '' : 's'}`
+}
 
-/** One row of Not loaded: a category, and under MCP tools its servers. */
+/** One row of Not loaded: a category, and on the MCP tools one all its servers. */
 export type NotLoadedRow = {
   name: string
   /** Null: no figure to show, the token cell stays empty. */
@@ -161,61 +193,122 @@ export type NotLoadedRow = {
 
 /**
  * The rows of Not loaded: each category above zero, and the MCP tools one
- * with its servers. The servers keep MCP tools in the list even with no
+ * with every server. The servers keep MCP tools in the block even with no
  * figure of its own; with no such category at all they get a row named so.
- * Past MAX_SERVER_ROWS, the rest of the servers sum into one row
- * ("3 more servers"), so none is left out unsaid.
+ * Without a category figure the row shows the servers' sum, the figure their
+ * list shows (`segmentTotal`), where it is above zero.
  */
 export function notLoadedRows(
   deferred: readonly ContextBreakdownDeferred[],
   servers: readonly ContextBreakdownServer[],
   isMcp: (name: string) => boolean,
 ): NotLoadedRow[] {
-  const shown: ContextBreakdownServer[] = servers.slice(0, MAX_SERVER_ROWS)
-  const rest = servers.slice(MAX_SERVER_ROWS)
-  if (rest.length > 0) {
-    shown.push({
-      name: `${formatCount(rest.length)} more server${rest.length === 1 ? '' : 's'}`,
-      tools: rest.reduce((sum, server) => sum + server.tools, 0),
-      tokens: rest.reduce((sum, server) => sum + server.tokens, 0),
-    })
-  }
-  let placed = shown.length === 0
+  let placed = servers.length === 0
+  const sum = servers.reduce((total, server) => total + server.tokens, 0)
+  const serversFigure = sum > 0 ? sum : null
   const rows: NotLoadedRow[] = []
   for (const category of deferred) {
     const takes = !placed && isMcp(category.name)
     if (category.tokens > 0 || takes) {
-      rows.push({ name: category.name, tokens: category.tokens > 0 ? category.tokens : null, servers: takes ? shown : [] })
+      rows.push({
+        name: category.name,
+        tokens: category.tokens > 0 ? category.tokens : takes ? serversFigure : null,
+        servers: takes ? [...servers] : [],
+      })
       placed ||= takes
     }
   }
   if (!placed) {
-    rows.push({ name: 'MCP tools', tokens: null, servers: shown })
+    rows.push({ name: 'MCP tools', tokens: serversFigure, servers: [...servers] })
   }
 
   return rows
 }
 
+/** The cells a row's text may take where it has no length bar: the name and the bar columns. */
+export function textCells(table: Table): number {
+  return nameAndBarCells(table) - table.lead
+}
+
+/** The longest of `forms` that fits `cells`; the last one, cut, when none does. */
+function longestFit(forms: readonly string[], cells: number): string {
+  return fit(forms.find(form => cellWidth(form) <= cells) ?? forms[forms.length - 1] ?? '', cells)
+}
+
 /**
- * The cells between a server row's mark and its figures: the name indented
- * under its category's, the tool count ending where the length bar's column
- * ends, so the counts line up. The row takes the name and bar columns (it
- * has no bar), so it is as wide as every other row. The count says "tools"
- * while the names keep SERVER_NAME_MIN_CELLS; a narrower pane shows the
- * number alone, the same form on every row.
+ * A group heading's text in the name and bar columns: "Baseline · before
+ * your first prompt" when it fits there, else the name alone. A heading has
+ * no bar, so it may use the bar's cells.
  */
-export function serverTexts(table: Table, servers: readonly ContextBreakdownServer[]): string[] {
-  const room = nameAndBarCells(table) - table.lead
-  const long = (n: number) => `${formatCount(n)} tool${n === 1 ? '' : 's'}`
-  const widest = (form: (n: number) => string) => Math.max(0, ...servers.map(server => cellWidth(form(server.tools))))
-  const form = room - SERVER_INDENT - 1 - widest(long) >= SERVER_NAME_MIN_CELLS ? long : formatCount
+export function headingText(table: Table, name: string, long: string): string {
+  return longestFit([long, name], textCells(table))
+}
+
+/**
+ * The MCP tools row of Not loaded, in the name and bar columns: "MCP tools ·
+ * 30 servers, 696 tools", then without the tools, then the name alone.
+ */
+export function serversRowText(table: Table, name: string, servers: readonly ContextBreakdownServer[]): string {
+  const tools = servers.reduce((sum, server) => sum + server.tools, 0)
+  const counted = `${name} · ${countOf(servers.length, 'server')}`
+
+  return longestFit([`${counted}, ${countOf(tools, 'tool')}`, counted, name], textCells(table))
+}
+
+/**
+ * The heading of the Not loaded block, as wide as a row past the mark and the
+ * lead: "Not loaded · outside the window", or "Not loaded" when that does not fit.
+ */
+export function notLoadedHeading(table: Table, name: string, long: string): string {
+  return longestFit([long, name], rowCells(table) - table.mark - table.lead).trimEnd()
+}
+
+/**
+ * Level 2's facts and the column name on one row: the facts on the left, the
+ * name ending where the share column ends, at least two cells apart. Null
+ * when they do not fit in the row's cells, or there is no share column: the
+ * column name then gets a row of its own.
+ */
+export function factsRow(table: Table, facts: string, column: string): string | null {
+  const cells = rowCells(table)
+  if (!table.share || cellWidth(facts) + 2 + cellWidth(column) > cells) {
+    return null
+  }
+
+  return `${facts}${' '.repeat(cells - cellWidth(facts) - cellWidth(column))}${column}`
+}
+
+/** The fewest cells a server's name keeps before the count drops its word "tools". */
+const SERVER_NAME_MIN_CELLS = 8
+/** The fewest cells a server's name keeps beside the count: one character and the ellipsis. */
+const SERVER_NAME_CUT_CELLS = 2
+
+/**
+ * The rows of the servers that are not loaded, in the name column: the name
+ * on the left, cut where it must, and the tool count (`detail`, "265 tools")
+ * ending at the column's end, so the counts line up. The count says "tools"
+ * while the names keep SERVER_NAME_MIN_CELLS, or all of the widest name
+ * when it is shorter; a narrower pane shows the number alone, the same form
+ * on every row. Where even the number would leave a name fewer than
+ * SERVER_NAME_CUT_CELLS, each row shows its name alone, cut to the column.
+ */
+export function serverNames(table: Table, rows: readonly { title: string; detail: string }[]): { title: string; detail: string }[] {
+  const room = table.name
+  const number = (detail: string) => detail.split(' ')[0] ?? detail
+  const widest = (form: (detail: string) => string) => Math.max(0, ...rows.map(row => cellWidth(form(row.detail))))
+  const long = (detail: string) => detail
+  const names = Math.max(0, ...rows.map(row => cellWidth(row.title)))
+  const form = room - 2 - widest(long) >= Math.min(SERVER_NAME_MIN_CELLS, names) ? long : number
   const countCells = widest(form)
-  const nameCells = Math.max(0, room - SERVER_INDENT - 1 - countCells)
+  const nameCells = room - 2 - countCells
+  if (nameCells < Math.min(SERVER_NAME_CUT_CELLS, names)) {
+    return rows.map(row => ({ title: fit(row.title, room), detail: '' }))
+  }
 
-  return servers.map(server => {
-    const line = `${' '.repeat(SERVER_INDENT)}${fit(server.name, nameCells)} ${form(server.tools).padStart(countCells)}`
+  return rows.map(row => {
+    const line = fit(`${fit(row.title, nameCells)}  ${form(row.detail).padStart(countCells)}`, room)
 
-    return ' '.repeat(table.lead) + fit(line, room)
+    return { title: line.slice(0, line.length - countCells - 2), detail: line.slice(line.length - countCells - 2) }
   })
 }
 
@@ -228,15 +321,42 @@ export function nameText(table: Table, name: string, short?: string): string {
 
 /**
  * The dim line over the figures that says once what the share column is:
- * `left` in the name's place, `right` ending at the share column's end.
+ * `left` in the name's place, `right` ending at the share column's end, and
+ * ADDED_NAME over the column `added` when the table has it.
  */
 export function columnHeader(table: Table, left: string, right: string): string {
   const head = fit(left, nameAndBarCells(table))
   if (!table.share) {
     return head.trimEnd()
   }
+  const added = table.added === true ? ADDED_NAME.padStart(ADDED_CELLS) : ''
 
-  return `${head}${right.padStart(figureCells(true))}`.trimEnd()
+  return `${head}${right.padStart(figureCells(true))}${added}`.trimEnd()
+}
+
+/**
+ * Level 1's column header on the left: "1M window". While free space is low
+ * it also names the largest segment and its share of what is used, "1M
+ * window · largest: Tool results 61%", with the short name where the full one
+ * does not fit the name and bar columns. Where neither fits, the window alone.
+ * The share has the share column's format, so it matches the bold row.
+ */
+export function windowText(
+  table: Table,
+  snapshot: ContextBreakdownSnapshot,
+  largest: ContextBreakdownSegment | null,
+  used: number,
+): string {
+  const window = `${formatTokens(snapshot.window)} window`
+  if (largest === null || !isLowFree(snapshot)) {
+    return window
+  }
+  const def = segmentDef(largest.id)
+  // Marked as the heading is: the share comes from the same estimate.
+  const share = `${snapshot.isEstimate ? '~' : ''}${formatShare(largest.tokens, used)}`
+  const forms = [def.label, def.short].map(name => `${window} · largest: ${name} ${share}`)
+
+  return forms.find(form => cellWidth(form) <= nameAndBarCells(table)) ?? window
 }
 
 /**
@@ -313,6 +433,28 @@ export function crumbFor(
   }
 
   return { trail: '', name: fit(short, Math.max(1, room - SWATCH_CELLS)).trimEnd(), figures: '' }
+}
+
+/**
+ * The first line of the list of servers that are not loaded, longest form
+ * that fits, as `crumbFor` shortens: "Context › Not loaded › MCP tools  414k
+ * once loaded", then without the root, then without the block, then the
+ * figure alone; the last form cut. No swatch: the list is in no segment, so
+ * it has no colour. `tokens` null: no figure.
+ */
+export function serversCrumb(root: string, block: string, name: string, tokens: number | null, columns: number): Crumb {
+  const amount = tokens === null ? '' : formatTokens(tokens)
+  const figures = tokens === null ? '' : `${amount} once loaded`
+  const room = Math.floor(columns) - 1
+  const forms: Crumb[] = [
+    { trail: `${root} › ${block} › `, name, figures },
+    { trail: `${block} › `, name, figures },
+    { trail: '', name, figures },
+    { trail: '', name, figures: amount },
+  ]
+  const width = (c: Crumb) => cellWidth(c.trail) + cellWidth(c.name) + (c.figures === '' ? 0 : 2 + cellWidth(c.figures))
+
+  return forms.find(c => width(c) <= room) ?? { trail: '', name: fit(name, Math.max(1, room)).trimEnd(), figures: '' }
 }
 
 /**

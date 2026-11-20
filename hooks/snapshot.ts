@@ -2,7 +2,9 @@
 // breakdown and the conversation's messages.
 
 import type {
+  ContextBreakdownBase,
   ContextBreakdownSegment,
+  ContextBreakdownSegmentId,
   ContextBreakdownSnapshot,
 } from '../types'
 import { apportion, notLoadedServers, splitCategories } from './categories'
@@ -63,7 +65,7 @@ export function splitConversation(
     SPLIT_IDS.map(id => chars[id]),
   )
 
-  return SPLIT_IDS.map((id, index) => ({ id, tokens: parts[index] ?? 0 }))
+  return SPLIT_IDS.map((id, index) => ({ id, tokens: parts[index] ?? 0, chars: chars[id] }))
 }
 
 /** Estimates conversation tokens from characters with a known ratio. */
@@ -73,7 +75,7 @@ export function estimateConversation(
 ): ContextBreakdownSegment[] {
   const ratio = charsPerToken > 0 ? charsPerToken : DEFAULT_CHARS_PER_TOKEN
 
-  return SPLIT_IDS.map(id => ({ id, tokens: Math.round(chars[id] / ratio) }))
+  return SPLIT_IDS.map(id => ({ id, tokens: Math.round(chars[id] / ratio), chars: chars[id] }))
 }
 
 /**
@@ -156,4 +158,64 @@ export function usedTokens(snapshot: ContextBreakdownSnapshot): number {
 /** Free space: what the used content and the reserve leave of the window. */
 export function freeTokens(snapshot: ContextBreakdownSnapshot): number {
   return Math.max(0, snapshot.window - usedTokens(snapshot) - snapshot.reserve)
+}
+
+/**
+ * The base for level 1's column `added`: the tokens per segment of the
+ * measurement at the person's prompt. None from an estimate, whose figures
+ * were not measured, and none before the first measurement. None from a
+ * measurement taken before `since`, the end of the last compaction or
+ * `/clear`: its content is gone.
+ */
+export function baseOf(snapshot: ContextBreakdownSnapshot | null, since: number | null = null): ContextBreakdownBase | null {
+  if (snapshot === null || snapshot.isEstimate || (since !== null && snapshot.measuredAt < since)) {
+    return null
+  }
+
+  return {
+    segments: [...snapshot.baseline, ...snapshot.conversation].map(({ id, tokens, chars }) =>
+      chars === undefined ? { id, tokens } : { id, tokens, chars },
+    ),
+  }
+}
+
+/** The tokens each segment gained since the base; a segment that did not grow is not in it. */
+export type Added = Partial<Record<ContextBreakdownSegmentId, number>>
+
+/**
+ * What each segment of `snapshot` gained since `base`, above zero only; a
+ * segment the base does not hold counts from zero. Null when there is no
+ * column to show: no base, an estimate, nothing grew, or fewer tokens in use
+ * than at the base (a compaction or a rewind that raised no event, after
+ * which the base no longer holds). Null too when one side has the
+ * conversation as one segment and the other has it split: their segments
+ * do not compare.
+ *
+ * The split conversation segments share the measured tokens by characters,
+ * so a segment's tokens move when another segment grows. Such a segment
+ * counts only when its own characters grew too.
+ */
+export function addedSince(base: ContextBreakdownBase | null, snapshot: ContextBreakdownSnapshot): Added | null {
+  if (base === null || snapshot.isEstimate || usedTokens(snapshot) < sumTokens(base.segments)) {
+    return null
+  }
+  const now = [...snapshot.baseline, ...snapshot.conversation]
+  const isWhole = (segments: readonly ContextBreakdownSegment[]) => segments.some(segment => segment.id === 'conversation')
+  if (isWhole(base.segments) !== isWhole(now)) {
+    return null
+  }
+  const before = new Map(base.segments.map(segment => [segment.id, segment]))
+  const added: Added = {}
+  let grew = false
+  for (const segment of now) {
+    const old = before.get(segment.id)
+    const gain = segment.tokens - (old?.tokens ?? 0)
+    const hasGrown = segment.chars === undefined || segment.chars > (old?.chars ?? 0)
+    if (gain > 0 && hasGrown) {
+      added[segment.id] = gain
+      grew = true
+    }
+  }
+
+  return grew ? added : null
 }

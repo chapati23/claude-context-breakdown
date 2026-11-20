@@ -3,8 +3,20 @@
 This repository is a Claude Code mod. The repository root is the mod folder. The marketplace installs the mod from `main`.
 
 - Checks, and how to get the API declarations: see "Development" in [README.md](README.md).
+- Product record: [PRODUCT.md](PRODUCT.md). It states the users, the purpose and the constraints that bind a design.
 - Project terms: [CONTEXT.md](CONTEXT.md). Use them in code, comments and prose.
 - Decision records: [docs/adr](docs/adr).
+
+## Reviews on pull requests
+
+Two reviewers read each pull request. Both are advisory: the branch rule on `main` requires only the version check.
+
+- **Claude** (`.github/workflows/claude-review.yml`). It reviews a pull request once: when the pull request opens, leaves draft, or is reopened. It does not review a later push. To get another review of the current head, add the label `re-review`; the job removes the label when it starts. Add the label once per head, after a push that fixes a [P1] or [P2] finding or that changes behaviour beyond what the last review saw. Do not add it for a [P3] fix, a docs change, or a merge of the base branch. Add it also when the first review failed or was cancelled: a push that arrives while the review starts makes the job fail, because the job reviews only the head that started it.
+- **Codex** (the `chatgpt-codex-connector` app). It reviews each push by itself.
+
+The Claude review posts inline comments and one summary comment with a numbered list of every finding. Answer each finding on its own surface. Start the reply to a finding that you decline with `Won't fix:`.
+
+The prompt of the Claude review is `.github/claude/review-prompt.md`. The job reads it from the base commit, so a pull request that edits the prompt is reviewed with the prompt on its base. GitHub runs the workflow file itself from the pull request, so this does not hold for a pull request that edits the workflow file. The job runs on a GitHub-hosted runner, skips pull requests from forks and from bots, and needs the repository secret `CLAUDE_CODE_OAUTH_TOKEN`. The reviewer can read the checkout and post comments; it cannot run commands, so it does not run the checks. Of the comments on a pull request, it reads only those by the repository owner and by the two review bots.
 
 ## Releases
 

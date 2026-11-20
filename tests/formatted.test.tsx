@@ -46,7 +46,7 @@ test('a Markdown memory file opens formatted; f switches to raw and back', async
     expect(await ui.find({ type: 'Text', text: /tokens · formatted · as loaded$/ })).toBeDefined()
     const format = await ui.find({ key: 'format' })
     expect(format?.props.hotkey).toBe('f')
-    expect(format?.props.label).toBe('Raw text')
+    expect(format?.props.label).toBe('Raw')
 
     await ui.press({ key: 'format' })
     const code = await ui.find({ type: 'Code' })

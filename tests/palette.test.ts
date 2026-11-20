@@ -100,6 +100,19 @@ for (const palette of [DARK, LIGHT]) describe(`the ${palette.name} palette`, () 
     }
   })
 
+  test('draws the bars of the servers not loaded in a neutral that is no segment’s colour, at 3:1', () => {
+    const segments = [...BASELINE_IDS, ...CONVERSATION_IDS].map(id => colorOf(palette, id))
+    expect(palette.notLoaded).toMatch(/^#[0-9A-F]{6}$/)
+    expect(segments).not.toContain(palette.notLoaded)
+    expect([palette.free, palette.reserve]).not.toContain(palette.notLoaded)
+    // A grey: no hue that could be read as a baseline or a conversation segment.
+    const [, a, b] = hexToLab(palette.notLoaded)
+    expect(Math.hypot(a, b)).toBeLessThan(2)
+    for (const background of palette.backgrounds) {
+      expect(contrast(palette.notLoaded, background)).toBeGreaterThanOrEqual(MIN_CONTRAST)
+    }
+  })
+
   test('steps lightness between segments next to each other in bar order', () => {
     // The summary is drawn in a texture, which sets it apart by itself; and
     // most sessions have none, so the segments either side of it meet.

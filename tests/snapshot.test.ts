@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'claude-code/testing'
 
+import type { ContextBreakdownSegment, ContextBreakdownSnapshot } from '../types'
+import { emptyChars } from '../hooks/classify'
 import type { MessageLike } from '../hooks/classify'
 import {
+  addedSince,
+  baseOf,
   freeTokens,
   isStale,
   MAX_API_MESSAGES,
   nextSnapshot,
+  splitConversation,
   sumTokens,
   usedTokens,
   windowOf,
@@ -257,5 +262,81 @@ describe('view', () => {
     expect(bandModel(snapshot, 12).label).toBe('21k/200k')
     expect(bandModel(snapshot, 8).label).toBe('21k')
     expect(bandModel(snapshot, 3).label).toBe('')
+  })
+})
+
+describe('the column added', () => {
+  const SYSTEM = { id: 'system', tokens: 20_000 } as const
+  const snap = (conversation: ContextBreakdownSegment[], over: Partial<ContextBreakdownSnapshot> = {}): ContextBreakdownSnapshot => ({
+    window: 200_000,
+    reserve: 33_000,
+    baseline: [SYSTEM],
+    conversation,
+    deferred: [],
+    notLoadedServers: [],
+    isEstimate: false,
+    staleTokens: null,
+    charsPerToken: 1,
+    measuredAt: 0,
+    ...over,
+  })
+  const before = snap([
+    { id: 'tool-results', tokens: 30_000 },
+    { id: 'prompts', tokens: 2000 },
+    { id: 'claude-output', tokens: 8000 },
+  ])
+
+  test('the base holds every segment of a measurement, and none of an estimate or of nothing', () => {
+    expect(baseOf(before)).toEqual({ segments: [SYSTEM, ...before.conversation] })
+    expect(baseOf(snap(before.conversation, { isEstimate: true }))).toBeNull()
+    expect(baseOf(null)).toBeNull()
+  })
+
+  test('counts what each segment gained since the base, growth only', () => {
+    const after = snap([
+      { id: 'tool-results', tokens: 44_000 },
+      { id: 'prompts', tokens: 1900 },
+      { id: 'claude-output', tokens: 8000 },
+      { id: 'task-reports', tokens: 300 },
+    ])
+    // Prompts shrank and Claude output stayed: neither is in it. Task reports were not in the base: from zero.
+    expect(addedSince(baseOf(before), after)).toEqual({ 'tool-results': 14_000, 'task-reports': 300 })
+  })
+
+  test('a split conversation segment counts only when its own characters grew', () => {
+    const chars = { ...emptyChars(), 'compaction-summary': 40_000, 'tool-results': 320_000, 'claude-output': 40_000 }
+    const base = snap(splitConversation(100_000, chars))
+    // 60k more tool-result characters, measured at fewer characters a token:
+    // the shares of the other segments grow too, but their content did not.
+    const after = snap(splitConversation(130_000, { ...chars, 'tool-results': 380_000 }))
+    expect(after.conversation.find(segment => segment.id === 'compaction-summary')!.tokens).toBeGreaterThan(10_000)
+    const added = addedSince(baseOf(base), after)!
+    expect(Object.keys(added)).toEqual(['tool-results'])
+    expect(added['tool-results']).toBe(after.conversation.find(segment => segment.id === 'tool-results')!.tokens - 80_000)
+    // The base keeps the characters of each split segment, and a baseline segment has none.
+    expect(baseOf(base)!.segments.find(segment => segment.id === 'tool-results')?.chars).toBe(320_000)
+    expect(baseOf(base)!.segments.find(segment => segment.id === 'system')?.chars).toBeUndefined()
+  })
+
+  test('no column without a base, from an estimate, or when nothing grew', () => {
+    const grown = snap([{ id: 'tool-results', tokens: 44_000 }, ...before.conversation.slice(1)])
+    expect(addedSince(baseOf(before), grown)).toEqual({ 'tool-results': 14_000 })
+    expect(addedSince(null, grown)).toBeNull()
+    expect(addedSince(baseOf(before), { ...grown, isEstimate: true })).toBeNull()
+    expect(addedSince(baseOf(before), before)).toBeNull()
+  })
+
+  test('no column while less is in use than at the base, as after a compaction that raised no event', () => {
+    // The summary is new, so it grew; but 32k is in use against the base's 60k.
+    const compacted = snap([{ id: 'compaction-summary', tokens: 2000 }, { id: 'prompts', tokens: 10_000 }])
+    expect(usedTokens(compacted)).toBeLessThan(sumTokens(baseOf(before)!.segments))
+    expect(addedSince(baseOf(before), compacted)).toBeNull()
+  })
+
+  test('no column when one side has the conversation as one segment and the other has it split', () => {
+    const whole = snap([{ id: 'conversation', tokens: 40_000 }])
+    expect(addedSince(baseOf(whole), snap([{ id: 'tool-results', tokens: 50_000 }]))).toBeNull()
+    expect(addedSince(baseOf(before), snap([{ id: 'conversation', tokens: 60_000 }]))).toBeNull()
+    expect(addedSince(baseOf(whole), snap([{ id: 'conversation', tokens: 41_000 }]))).toEqual({ conversation: 1000 })
   })
 })

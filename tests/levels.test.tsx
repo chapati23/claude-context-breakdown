@@ -3,7 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
-import { BAND, CHAT, FOCUSED_PANE, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
+import { cellWidth } from '../hooks/text'
+import { flatten } from './e2e/helpers'
+import { BAND, CHAT, FOCUSED_PANE, NOTES, OPENING, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
 const GLOBAL_MD = '/home/user/.claude/CLAUDE.md'
@@ -35,16 +37,26 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
     expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
-    expect(await ui.find({ type: 'Text', text: '⏎ or 1-9: Open' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '⏎ 1-9 0: Open' })).toBeDefined()
 
     await ui.press({ key: 'row-tool-results' })
     expect(await itemKeys(ui)).toEqual(['item-r:tu2', 'item-r:tu1'])
     expect((await ui.find({ key: 'item-r:tu2' }))?.props.hotkey).toBe('1')
     expect((await ui.find({ key: 'item-r:tu1' }))?.props.hotkey).toBe('2')
-    expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(/Read +~\/project\/notes\.txt/)
-    expect(await ui.find({ type: 'Text', text: /^2 items · largest first$/ })).toBeDefined()
+    // The terminal's row Button holds the whole row; a desktop's holds the name
+    // alone (desktop.test.tsx draws the figures and detail beside it).
+    expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(
+      surface === 'terminal' ? /Read +~\/project\/notes\.txt/ : /^Read$/,
+    )
+    expect(await ui.find({ type: 'Text', text: /^2 items · largest first +% of segment$/ })).toBeDefined()
     expect((await ui.find({ key: 'back' }))?.props.hotkey).toBe('b')
     expect((await ui.find({ key: 'sort' }))?.props.hotkey).toBe('s')
+    // Without the keyboard the terminal drops the hotkeys; a desktop keeps
+    // them, drawn as key caps, and a hotkey presses only with the keyboard.
+    await ui.redraw({ ...PANE.props })
+    const kept = surface === 'terminal' ? [undefined, undefined, undefined] : ['1', '2', 'b']
+    expect(await Promise.all(['item-r:tu2', 'item-r:tu1', 'back'].map(async key => (await ui.find({ key }))?.props.hotkey))).toEqual(kept)
+    await ui.redraw({ ...FOCUSED_PANE.props })
 
     await ui.press({ key: 'item-r:tu1' })
     const code = await ui.find({ type: 'Code' })
@@ -63,19 +75,40 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
   }
 })
 
-test('a baseline segment lists its items; its sort key is there but does nothing', async ($, on) => {
+test('a baseline segment lists its items; it has one order, so s leaves the line', async ($, on) => {
   await chatWorld($, on)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'row-mcp' })
-    expect(isOff(await ui.find({ key: 'sort' }))).toBe(true)
-    await ui.press({ key: 'sort' })
+    expect(await ui.find({ key: 'sort' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /largest first|newest first/ })).toBeUndefined()
-    // Tool schemas have no text: rows, not buttons.
+    // Tool schemas have no text: rows, not buttons. The conversation holds no
+    // reminder, so no row opens, and the titles stay at full strength: a dim
+    // title would mark nothing.
     expect(await itemKeys(ui)).toEqual([])
+    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
+    expect(title).toBeDefined()
+    expect(title?.props.dimColor).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /mcp__notes__search +notes/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /MCP server instructions/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('beside a row that opens, a row that does not open has a dim title', async ($, on) => {
+  await chatWorld($, on, OPENING)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'row-mcp' })
+    // The conversation holds the MCP reminder: its instructions open.
+    const opens = await itemKeys(ui)
+    expect(opens).toHaveLength(1)
+    expect((await ui.find({ key: opens[0]! }))?.props.label).toBe('MCP server instructions')
+    const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
+    expect(title?.props.dimColor).toBe(true)
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
@@ -92,16 +125,16 @@ test('the sort toggle and the pages', async ($, on) => {
     expect(keys[0]).toBe('item-r:b1')
     expect(await ui.find({ type: 'Text', text: /^25 more items, .*, on other pages$/ })).toBeDefined()
     // p on the first page is still a control, so the key stays in the pane; it does nothing.
-    expect(isOff(await ui.find({ key: 'prev' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(true)
     expect((await ui.find({ key: 'prev' }))?.props.hotkey).toBe('p')
     await ui.press({ key: 'prev' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b1')
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(false)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(false)
 
     await ui.press({ key: 'sort' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b45')
     expect(await ui.find({ type: 'Text', text: /newest first · page 1 of 3$/ })).toBeDefined()
-    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Sort by size')
+    expect((await ui.find({ key: 'sort' }))?.props.label).toBe('Largest first')
 
     await ui.press({ key: 'next' })
     expect((await itemKeys(ui))[0]).toBe('item-r:b25')
@@ -109,7 +142,7 @@ test('the sort toggle and the pages', async ($, on) => {
     await ui.press({ key: 'next' })
     keys = await itemKeys(ui)
     expect(keys).toHaveLength(5)
-    expect(isOff(await ui.find({ key: 'next' }))).toBe(true)
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(true)
     await ui.press({ key: 'next' })
     expect(await itemKeys(ui)).toHaveLength(5)
     expect(await ui.find({ type: 'Text', text: /^40 more items/ })).toBeDefined()
@@ -146,10 +179,220 @@ test('a long item pages with n and p, and the facts line says which lines it sho
     await ui.press({ key: 'format' })
     expect(await ui.find({ type: 'Text', text: /· formatted · as loaded · lines [\d,]+-1,230 of 1,230$/ })).toBeDefined()
     await ui.press({ key: 'format' })
-    while (!isOff(await ui.find({ key: 'prev' }))) {
+    while (!isOff(await ui.find({ key: 'prev' }), surface)) {
       await ui.press({ key: 'prev' })
     }
     expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(1)
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('n and p at the end of an item step to the next and previous item of the list, in its order, across its pages', async ($, on) => {
+  await chatWorld($, on, manyResults(45))
+  const facts = async (ui: { find: (q: { type: string; text: RegExp }) => Promise<{ text?: string } | undefined> }) =>
+    (await ui.find({ type: 'Text', text: / tokens · / }))?.text
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    // The last row of the first page; the item has one page, so n names the next item.
+    await ui.press({ key: 'item-r:b20' })
+    expect(await facts(ui)).toMatch(/^item 20 of 45 · \S+ tokens · raw · as loaded\b/)
+    expect((await ui.find({ key: 'next' }))?.props).toMatchObject({ label: 'Next item', hotkey: 'n' })
+    expect(isOff(await ui.find({ key: 'next' }), surface)).toBe(false)
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step 21$/ })).toBeDefined()
+    expect(await facts(ui)).toMatch(/^item 21 of 45 · /)
+    expect((await ui.find({ key: 'prev' }))?.props.label).toBe('Prev item')
+    // b opens the page that holds the item, with the ring on its row.
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 2 of 3/ })).toBeDefined()
+    expect((await ui.find({ key: 'item-r:b21' }))?.props.autoFocus).toBe(true)
+    // p goes back across the page: the previous item, at its first page.
+    await ui.press({ key: 'item-r:b21' })
+    await ui.press({ key: 'prev' })
+    expect(await facts(ui)).toMatch(/^item 20 of 45 · /)
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 1 of 3/ })).toBeDefined()
+
+    // Newest first: the step follows that order. The first item has no item before it.
+    await ui.press({ key: 'sort' })
+    await ui.press({ key: 'item-r:b45' })
+    expect(await facts(ui)).toMatch(/^item 1 of 45 · /)
+    expect(isOff(await ui.find({ key: 'prev' }), surface)).toBe(true)
+    await ui.press({ key: 'prev' })
+    expect(await facts(ui)).toMatch(/^item 1 of 45 · /)
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step 44$/ })).toBeDefined()
+    expect(await facts(ui)).toMatch(/^item 2 of 45 · /)
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'sort' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('p onto a long item opens it at its first page', async ($, on) => {
+  const long = Array.from({ length: 1230 }, (_, i) => `row ${i + 1}`).join('\n')
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'big', name: 'Bash', input: { command: 'seq' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'big', content: long }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'small', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'small', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    // Largest first: the short item comes second, so p steps back onto the long one.
+    await ui.press({ key: 'item-r:small' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · / })).toBeDefined()
+    await ui.press({ key: 'prev' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · lines 1-500 of 1,230$/ })).toBeDefined()
+    expect((await ui.find({ type: 'Code' }))?.props.startLine).toBe(1)
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('n onto another item opens it in its own default view, as loaded, not in the view shown', async ($, on) => {
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'ls' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: 'a.txt\nb.txt\nc.txt\nd.txt' }] },
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'two', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'two', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:one' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · raw · as loaded/ })).toBeDefined()
+    // f switches this item to formatted; the next item opens raw, its own default.
+    await ui.press({ key: 'format' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · formatted · as loaded/ })).toBeDefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · .* · raw · as loaded/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+/** A Bash call and its result of `size` characters. */
+function bashStep(id: string, size: number): unknown[] {
+  return [
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: `step ${id}` } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'o'.repeat(size) }] },
+  ]
+}
+
+test('n steps in the list as it is now: an item that joined since, with no rebuild, is the next one', async ($, on) => {
+  const before = [...bashStep('big', 3000), ...bashStep('small', 1000)]
+  const w = await chatWorld($, on, before)
+
+  for (const surface of SURFACES) {
+    w.messages = before
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:big' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · / })).toBeDefined()
+    // A result between the two in size joins; no measurement rebuilt the
+    // stored view, whose place still names the small one as next.
+    w.messages = [...before, ...bashStep('mid', 2000)]
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Bash {2}step mid$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 3 · / })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('n onto another file opens it as loaded, though the item before was shown on disk', async ($, on) => {
+  const TODO = '/home/user/project/todo.txt'
+  const readOf = (id: string, path: string, lines: string[]) => [
+    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: path } }] },
+    {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: id, content: `${lines.map((line, i) => `     ${i + 1}\t${line}`).join('\n')}\n` }],
+    },
+  ]
+  const w = await chatWorld($, on, [...readOf('first', NOTES, ['alpha', 'beta', 'gamma', 'delta']), ...readOf('second', TODO, ['one'])])
+  w.files[TODO] = 'one\n'
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:first' })
+    await ui.press({ key: 'view' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 2 · .* · on disk$/ })).toBeDefined()
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /› Read {2}~\/project\/todo\.txt$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^item 2 of 2 · .* · as loaded$/ })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('a page or view change of the open item counts its place and its list page as they are now', async ($, on) => {
+  const long = [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'long', name: 'Bash', input: { command: 'seq' } }] },
+    {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 'long', content: Array.from({ length: 1230 }, (_, i) => `row ${i + 1}`).join('\n') }],
+    },
+  ]
+  /** `n` results larger than the long one, which go before it, largest first. */
+  const larger = (n: number) => Array.from({ length: n }, (_, k) => bashStep(`l${k}`, 12_000)).flat()
+  const w = await chatWorld($, on, long)
+
+  for (const surface of SURFACES) {
+    w.messages = long
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:long' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 1 · / })).toBeDefined()
+    // 25 larger results join, with no rebuild: the item moves to the 26th
+    // place, on the second page of the list. The next page of its text says so.
+    w.messages = [...larger(25), ...long]
+    await ui.press({ key: 'next' })
+    expect(await ui.find({ type: 'Text', text: /^item 26 of 26 · .* · lines 501-1,000 of 1,230$/ })).toBeDefined()
+    // b opens the page that holds it, with the ring on its row.
+    await ui.press({ key: 'back' })
+    expect(await ui.find({ type: 'Text', text: /largest first · page 2 of 2/ })).toBeDefined()
+    expect((await ui.find({ key: 'item-r:long' }))?.props.autoFocus).toBe(true)
+    // One more joins: a switch of view counts it.
+    await ui.press({ key: 'item-r:long' })
+    w.messages = [...larger(26), ...long]
+    await ui.press({ key: 'format' })
+    expect(await ui.find({ type: 'Text', text: /^item 27 of 27 · .* · formatted · / })).toBeDefined()
+    await ui.press({ key: 'back' })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('an item of one page that is the only one of its list that opens: p and n leave the line', async ($, on) => {
+  await chatWorld($, on, [
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'one', name: 'Bash', input: { command: 'date' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'one', content: 'Thu Nov 19' }] },
+  ])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
+    await ui.press({ key: 'row-tool-results' })
+    await ui.press({ key: 'item-r:one' })
+    expect(await ui.find({ type: 'Text', text: /^item 1 of 1 · / })).toBeDefined()
+    expect(await ui.find({ key: 'prev' })).toBeUndefined()
+    expect(await ui.find({ key: 'next' })).toBeUndefined()
+    // The terminal still takes the two letters, drawing nothing.
+    const taken = (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith('taken-'))
+    expect(taken.filter(key => key === 'taken-p' || key === 'taken-n')).toEqual(surface === 'terminal' ? ['taken-p', 'taken-n'] : [])
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -202,7 +445,8 @@ test('an instruction file shows its as-loaded text, and the file when the remind
     await ui.press({ key: global! })
     expect((await ui.find({ type: 'Markdown' }))?.props.text).toBe('Be brief.')
     expect(await ui.find({ type: 'Text', text: /shown from disk/ })).toBeDefined()
-    expect(isOff(await ui.find({ key: 'view' }))).toBe(true)
+    // No as-loaded text to switch to: v leaves the line.
+    expect(await ui.find({ key: 'view' })).toBeUndefined()
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -231,11 +475,15 @@ test('c copies the path and m mentions it; for an item without a path they do no
     await ui.press({ key: 'back' })
 
     await ui.press({ key: 'item-r:tu2' })
-    // Still controls with their keys, so v, c and m stay in the pane.
-    for (const key of ['copy', 'mention', 'view']) {
-      expect(isOff(await ui.find({ key }))).toBe(true)
-      expect((await ui.find({ key }))?.props.hotkey).toBeDefined()
-      await ui.press({ key })
+    // No file: v, c and m leave the line. The terminal still takes their
+    // keys with nothing drawn, and a press of one does nothing.
+    for (const [key, letter] of [['copy', 'c'], ['mention', 'm'], ['view', 'v']] as const) {
+      expect(await ui.find({ key })).toBeUndefined()
+      const hidden = await ui.find({ key: `taken-${letter}` })
+      expect(hidden?.props.hotkey).toBe(surface === 'terminal' ? letter : undefined)
+      if (hidden !== undefined) {
+        await ui.press({ key: `taken-${letter}` })
+      }
     }
     // No copy, no mention: no answer line.
     expect(await ui.find({ type: 'Text', text: /the path|Copied/ })).toBeUndefined()
@@ -323,7 +571,8 @@ test('a bar segment opens its items; a merged cell opens level 1', async ($, on)
 
   // Wide enough that the legend leaves the bar room for Claude output's cell.
   const wide = { ...BAND, props: { ...BAND.props, bodyColumns: 100 } }
-  for (const surface of SURFACES) {
+  // On the desktop the bar is one picture; its total opens level 1 (band.test.tsx).
+  for (const surface of ['terminal'] as const) {
     const band = await $.ui.mount({ ...wide, surface })
     await band.press({ key: 'seg-claude-output' })
     await band.unmount()
@@ -490,12 +739,16 @@ test('level 3: the controls stand between the facts line and the text, and the f
     await ui.press({ key: 'row-tool-results' })
     await ui.press({ key: 'item-r:big' })
     const order = drawnOrder(await ui.drawn())
-    expect(order.indexOf('facts')).toBeLessThan(order.indexOf('scroll-down'))
+    // The first control: Down on the terminal; elsewhere Back, as level 3
+    // there draws no Down and Up (the app scrolls the text).
+    const first = surface === 'terminal' ? 'scroll-down' : 'back'
+    expect(order.indexOf('facts')).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf('facts')).toBeLessThan(order.indexOf(first))
     expect(order.indexOf('refresh')).toBeLessThan(order.indexOf('Code'))
     // A page with a next one ends with a control to it, under the text.
     expect(order.at(-1)).toBe('next-below')
     const ringed = (await ui.findAll({ type: 'Button' })).filter(button => button.props.autoFocus === true)
-    expect(ringed.map(button => button.key)).toEqual(['scroll-down'])
+    expect(ringed.map(button => button.key)).toEqual([first])
     await ui.press({ key: 'next-below' })
     expect(await ui.find({ type: 'Text', text: /lines 501-1,000 of 1,230$/ })).toBeDefined()
 
@@ -511,45 +764,155 @@ test('level 3: the controls stand between the facts line and the text, and the f
   }
 })
 
-test('every letter key of a level is a control there, in one order, readable at 45 columns', async ($, on) => {
+type Part = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+
+/** The parts of one group, as the engine draws them: the words, and each plain control as `hotkey: label`. */
+function groupParts(group: Part): string[] {
+  return (group.children ?? []).flatMap(child => {
+    const part = child as Part
+    if (part.type === 'Text') {
+      return [(part.children ?? []).filter(text => typeof text === 'string').join('')]
+    }
+    if (part.type === 'Button') {
+      const label = String(part.props?.label ?? '')
+
+      return [part.props?.hotkey === undefined ? label : `${String(part.props.hotkey)}: ${label}`]
+    }
+
+    return []
+  })
+}
+
+/**
+ * The groups of the drawn key line: the wrapping row whose children are all
+ * wrapping rows of words and controls (a group can hold words only).
+ */
+function keyGroupsOf(node: unknown): string[][] | null {
+  if (node === null || typeof node !== 'object') {
+    return null
+  }
+  const { type, props = {}, children = [] } = node as Part & { props?: Record<string, unknown>; children?: unknown[] }
+  const isGroup = (child: unknown) => {
+    const part = child as Part
+    const inner = part?.children ?? []
+
+    return (
+      part?.type === 'Box' &&
+      part.props?.flexWrap === 'wrap' &&
+      inner.length > 0 &&
+      inner.every(one => (one as Part)?.type === 'Button' || (one as Part)?.type === 'Text')
+    )
+  }
+  if (type === 'Box' && props.flexWrap === 'wrap' && children.length > 0 && children.every(isGroup)) {
+    return children.map(child => groupParts(child as Part))
+  }
+  for (const child of children) {
+    const found = keyGroupsOf(child)
+    if (found !== null) {
+      return found
+    }
+  }
+
+  return null
+}
+
+test('the keys stand in fixed groups, in one order; a control that cannot apply here leaves the line', async ($, on) => {
   await chatWorld($, on)
-  const keyLine = async (ui: { findAll: (q: { type: string }) => Promise<{ key: string | undefined }[]> }) =>
-    (await ui.findAll({ type: 'Button' }))
-      .map(button => button.key ?? '')
-      .filter(key => !/^(row|item)-/.test(key) && key !== 'next-below')
+  type Buttons = { findAll: (q: { type: string }) => Promise<{ key: string | undefined; props: Record<string, unknown> }[]> }
+  const controls = async (ui: Buttons) =>
+    (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => !/^(row|item)-/.test(key) && key !== 'next-below')
+  // The controls drawn in the line, and the keys the pane takes with nothing drawn.
+  const keyLine = async (ui: Buttons) => (await controls(ui)).filter(key => !key.startsWith('taken-'))
+  const taken = async (ui: Buttons) =>
+    (await ui.findAll({ type: 'Button' })).filter(button => (button.key ?? '').startsWith('taken-')).map(button => button.props.hotkey)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 45 } })
-    // b at level 1 does nothing, but keeps the key in the pane.
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'close', 'refresh'])
-    expect(isOff(await ui.find({ key: 'back' }))).toBe(true)
-    await ui.press({ key: 'back' })
-    expect(await ui.find({ key: 'row-system' })).toBeDefined()
-
-    await ui.press({ key: 'row-tool-results' })
-    expect(await keyLine(ui)).toEqual(['list-down', 'list-up', 'back', 'sort', 'prev', 'next', 'close', 'refresh'])
-    await ui.press({ key: 'item-r:tu2' })
-    expect(await keyLine(ui)).toEqual([
-      'scroll-down',
-      'scroll-up',
-      'back',
-      'prev',
-      'next',
-      'format',
-      'view',
-      'copy',
-      'mention',
-      'close',
-      'refresh',
+    // Only the terminal draws Down and Up (j and k): elsewhere Tab moves the
+    // ring along the rows and the app scrolls the text.
+    const steps = (down: string, up: string) => (surface === 'terminal' ? [down, up] : [])
+    // Only the terminal was seen to keep the key of a hidden Button.
+    const keeps = (...keys: string[]) => (surface === 'terminal' ? keys : [])
+    // Level 1: move [open words, j, k], pane [r, x]. No Back: there is no
+    // level to go back to. The terminal takes b all the same, drawing nothing.
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('b'))
+    // The words name Enter and the digits; the arrows and Tab go unnamed.
+    const words = (await ui.findAll({ type: 'Text', text: /: Open$/ })).map(text => text.text)
+    expect(words).toEqual(['⏎ 1-9 0: Open'])
+    expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
+    const groups1 = keyGroupsOf(await ui.drawn())!
+    expect(groups1).toEqual([
+      ['⏎ 1-9 0: Open', ...steps('j: ↓', 'k: ↑')],
+      ['r: Refresh', 'x: Close'],
     ])
-    // Each control fits a 45-column pane whole; the line wraps between them.
-    for (const button of await ui.findAll({ type: 'Button' })) {
-      expect(button.text.length + 3).toBeLessThan(45)
+    // The drawn line, as the groups wrap at the pane's 45 columns: on the
+    // desktop both groups fit on one row.
+    const lines1 = flatten(await ui.drawn(), { surface, columns: 45 })
+    const keys1 = lines1.slice(lines1.findIndex(line => line.startsWith('⏎ ')))
+    expect(keys1).toEqual(
+      surface === 'terminal' ? ['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'] : ['⏎ 1-9 0: Open  r: Refresh  x: Close'],
+    )
+    expect(keys1.every(line => cellWidth(line) <= 45)).toBe(true)
+    if (surface === 'terminal') {
+      expect((await ui.find({ key: 'list-down' }))?.props).toMatchObject({ hotkey: 'j', label: '↓' })
+      expect((await ui.find({ key: 'list-up' }))?.props).toMatchObject({ hotkey: 'k', label: '↑' })
+      // A press of the taken b does nothing: level 1 stays.
+      await ui.press({ key: 'taken-b' })
+      expect(await ui.find({ key: 'row-system' })).toBeDefined()
     }
+
+    // Level 2 of one page: move [open words, j, k, b], pane [s, r, x]. p and n leave together.
+    await ui.press({ key: 'row-tool-results' })
+    expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'back', 'sort', 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('p', 'n'))
+    expect(keyGroupsOf(await ui.drawn())!.at(-1)).toEqual(['s: Newest first', 'r: Refresh', 'x: Close'])
+
+    // Level 3 of a Bash result: no file, so v, c and m leave the line. It
+    // has one page, and the list has another item that opens: p and n step
+    // between the items.
+    await ui.press({ key: 'item-r:tu2' })
+    expect(await keyLine(ui)).toEqual([...steps('scroll-down', 'scroll-up'), 'back', 'prev', 'next', 'format', 'refresh', 'close'])
+    expect(await taken(ui)).toEqual(keeps('v', 'c', 'm'))
+    expect(keyGroupsOf(await ui.drawn())).toEqual([
+      [...steps('j: ↓', 'k: ↑'), 'b: Back', 'p: Prev item', 'n: Next item'],
+      ['f: Formatted'],
+      ['r: Refresh', 'x: Close'],
+    ])
+    // On the terminal the move group is wider than 45 columns: it wraps
+    // inside itself, and the next groups start a row of their own.
+    const lines3 = flatten(await ui.drawn(), { surface, columns: 45 })
+    const at3 = lines3.findIndex(line => /^[jb]: /.test(line))
+    const keys3 =
+      surface === 'terminal'
+        ? ['j: ↓  k: ↑  b: Back  p: Prev item', 'n: Next item', 'f: Formatted  r: Refresh  x: Close']
+        : ['b: Back  p: Prev item  n: Next item', 'f: Formatted  r: Refresh  x: Close']
+    const drawn3 = lines3.slice(at3, at3 + keys3.length + 1)
+    expect(drawn3).toEqual([...keys3, ''])
+    expect(drawn3.every(line => cellWidth(line) <= 45)).toBe(true)
     await ui.press({ key: 'back' })
     await ui.press({ key: 'back' })
     await ui.unmount()
   }
+})
+
+test('the key line breaks only between groups; a group wider than the pane wraps inside itself', async ($, on) => {
+  await chatWorld($, on)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: { ...FOCUSED_PANE.props, bodyColumns: 40 } })
+  const tail = async (n: number) => flatten(await ui.drawn(), { columns: 40 }).slice(-n)
+  // "r: Refresh" would fit beside k at 40 columns, but it is of the next group.
+  expect(await tail(2)).toEqual(['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'])
+  // Level 3: the move group is wider than 40 columns and wraps inside
+  // itself; the next groups start a row of their own, and share it where
+  // they fit there whole.
+  await ui.press({ key: 'row-tool-results' })
+  await ui.press({ key: 'item-r:tu2' })
+  const lines = flatten(await ui.drawn(), { columns: 40 })
+  const at = lines.findIndex(line => line.startsWith('j: ↓'))
+  expect(lines.slice(at, at + 3)).toEqual(['j: ↓  k: ↑  b: Back  p: Prev item', 'n: Next item', 'f: Formatted  r: Refresh  x: Close'])
+  await ui.press({ key: 'back' })
+  await ui.press({ key: 'back' })
+  await ui.unmount()
 })
 
 

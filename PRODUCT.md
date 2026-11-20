@@ -74,7 +74,7 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 
 - Names: the mod is `context-breakdown`, the repository is `claude-context-breakdown`, and the command is `/ctx`.
 - Voice: plain and exact. Short sentences, active voice, one term per thing, British spelling. The interface states limits and uncertainty directly, for example "All numbers are estimates."
-- Icon: `.claude-plugin/icon.png`, drawn from `docs/img/icon.svg`. It is the bar across a dark tile: one baseline segment, two conversation segments, then the free space with two dots. The maintainer asked for it on 2026-11-20. It is drawn for 34 px, the size at which the plugin directory lists an icon, so it has three colours and not every colour of the bar.
+- Icon: `.claude-plugin/icon.png`, drawn from `docs/img/icon.svg`. It is the bar across a dark tile: one baseline segment, two conversation segments, then the free space with two dots. The maintainer asked for it on 2026-11-20. It is drawn for 34 px: the lists of the directory at claude.ai/directory drew their icons at that size on 2026-11-20 (one measurement). So it has three colours and not every colour of the bar.
 - The mod has no other visual identity apart from the bar. Do not invent one without a decision from the maintainer.
 
 ## Evidence on Hand

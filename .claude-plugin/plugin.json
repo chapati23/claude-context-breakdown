@@ -7,5 +7,6 @@
   "repository": "https://github.com/chapati23/claude-context-breakdown",
   "license": "MIT",
   "keywords": ["context", "context-window", "tokens", "mod"],
+  "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts"
 }

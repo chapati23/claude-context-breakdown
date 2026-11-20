@@ -458,7 +458,7 @@ function segmentsGrid(
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {partRow('Free space', freeTokens(snapshot), palette.free, 'dotted')}
-        {partRow(cellWidth(RESERVE_NAME) <= Math.min(table.name, plainRoom - 1) ? RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
+        {partRow(cellWidth(RESERVE_NAME) <= plainRoom - 1 ?RESERVE_NAME : 'Reserve', snapshot.reserve, palette.reserve, 'shaded')}
       </Box>
       {deferred.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
@@ -568,9 +568,11 @@ export function fittedPath(text: string, cells: number): string {
  * An item's title in a column `cells` wide, for a Button's label: a native
  * button does not shrink, so a title that does not fit is cut to fit. A path
  * takes its short form (`fittedPath`): its head is cut and the end of its
- * file name stays. Any other title is cut in its middle, so both ends stay:
- * two tools of one server keep different labels. Cells count a monospaced
- * face: the surface's own face is narrower for most text.
+ * file name stays. Any other title is cut in its middle, so both ends of the
+ * title stay. This usually keeps the labels of two tools of one server
+ * apart, but a column of fewer than about 10 cells can still give two long
+ * names the same label. Cells count a monospaced face: the surface's own
+ * face is narrower for most text.
  */
 export function fittedTitle(text: string, cells: number, isPath: boolean): string {
   if (cellWidth(text) <= cells) {
@@ -588,8 +590,9 @@ export function fittedTitle(text: string, cells: number, isPath: boolean): strin
 }
 
 /**
- * An item's dim detail in the `cells` the row leaves it. The surface cuts an
- * over-long text at its end, whatever `wrap` says: a command loses its tail,
+ * An item's dim detail in the `cells` the row leaves it. The desktop app and
+ * the editor cut an over-long text at its end, whatever `wrap` says (a phone
+ * cuts `truncate-middle` in its middle): a command loses its tail,
  * which is fine, but a path would lose its file name. So a path that does
  * not fit takes its short form (`fittedPath`): its head is cut and the end of
  * its file name stays. Any other detail is given in full.

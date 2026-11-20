@@ -130,7 +130,7 @@ line per check:
 - [ ] Look at a segment's row at level 1: the swatch, then the native button with the name and no key cap.
 - [ ] Look at the rows of a long list, the tenth and the eleventh included: every name starts in the same column, and the length bars and each figure column line up from row to row.
 - [ ] Look at the segments: the picture of the bar fills the grid's width under the heading, and the column names stand over their figures.
-- [ ] Point at each segment of the bar: the other segments turn dim, and the segment's name, or its short name, and its tokens take the place of the legend, with nothing cut at the right edge.
+- [ ] Point at each segment of the bar: the other segments turn dim, and a name with its tokens takes the place of the legend: the full name where it fits, else the short name, else the short name cut with an ellipsis. A cut with an ellipsis is correct. Nothing is cut at the right edge. Where the legend's place is very narrow, no name shows.
 - [ ] Click a segment of the bar: the pane opens its items. Click the total, then the legend: the pane opens the segments. Point at the total and at the legend: no segment turns dim.
 - [ ] Look at the segments in a session with less than 10% of the window free: the free part of the heading is in the theme's warning colour and bold, in the dark and the light theme.
 - [ ] Make the band as wide as the bar row needs, or a little narrower: the total and the legend show whole, with nothing cut at the right. Point at the largest segment: its name and tokens show whole in the legend's place.

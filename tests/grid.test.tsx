@@ -240,8 +240,12 @@ test('level 1: where the long forms do not fit, Reserve takes its short name and
   }
   const wide = await formsAt(100)
   expect([wide.reserve, wide.heading]).toEqual([RESERVE_NAME, BASELINE_HEADING])
+  // Reserve's long name is checked against the grid's own room, not the terminal's name column:
+  // it shows from 39 columns up, where the terminal's table still takes the short name.
   const narrow = await formsAt(40)
-  expect([narrow.reserve, narrow.heading]).toEqual(['Reserve', 'Baseline'])
+  expect([narrow.reserve, narrow.heading]).toEqual([RESERVE_NAME, 'Baseline'])
+  const narrower = await formsAt(38)
+  expect(narrower.reserve).toBe('Reserve')
   // The long heading does not fit there. In every scene tried (40 to 100 columns, a share of "<0.1%"), the
   // terminal's table picks the title before the grid's own check does, so this line does not catch a
   // removal of that check: only the Reserve's line catches a removal of its own.

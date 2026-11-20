@@ -573,8 +573,11 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
         const name = use?.name ?? 'Tool result'
         const path = use === undefined ? null : toolPath(use.input)
         // A Read that gave an image or a PDF holds no text: the file is not
-        // text either, so it gets no level 3 and no disk view.
+        // text either, so it gets no level 3 and no disk view. A Read that
+        // failed (a missing file, a file too large) holds an error, not the
+        // file's text: it keeps the disk view, but is drawn as other text.
         const isTextRead = name === 'Read' && text !== null
+        const isFileText = isTextRead && block.is_error !== true
         push(
           {
             id: `r:${typeof block.tool_use_id === 'string' ? block.tool_use_id : hashText(text ?? '')}`,
@@ -582,8 +585,8 @@ function conversationItems(segment: SplitId, data: ItemData): ItemSet {
             detail: use === undefined ? '' : callSummary(name, use.input),
             path,
             disk: isTextRead && path !== null ? 'read' : null,
-            isNumbered: isTextRead,
-            markup: isTextRead ? 'file' : OUTPUT_TOOLS.has(name) ? 'output' : 'text',
+            isNumbered: isFileText,
+            markup: isFileText ? 'file' : OUTPUT_TOOLS.has(name) ? 'output' : 'text',
             loaded: text === null ? null : () => text,
           },
           blockChars(block),

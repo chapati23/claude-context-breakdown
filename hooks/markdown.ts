@@ -11,7 +11,8 @@ import { PAGE_CHARS, PAGE_LINES, safeCut } from './text'
  * - `prose`: Markdown by its kind (a skill body, a prompt, Claude's reply,
  *   the compaction summary). It opens formatted.
  * - `file`: a file's own text (a memory file, a Read result): Markdown when
- *   the path ends in `.md`, else code fenced in the file's language.
+ *   the path ends in `.md`, else code fenced in the file's language. A
+ *   Markdown file opens formatted; another file opens raw.
  * - `output`: terminal output (Bash, Grep, Glob), fenced as plain text.
  * - `text`: anything else (other tool results, task reports, injected
  *   text): Markdown with tags escaped. It opens raw.
@@ -26,16 +27,17 @@ export function isMarkdownPath(path: string | null): boolean {
 }
 
 /**
- * The view an item opens in: formatted for Markdown by kind and for a memory
- * file in Markdown; raw for the rest. A Read result opens raw even for a .md
- * file: its text carries line numbers, and raw is what the model read.
+ * The view an item opens in: formatted for Markdown by kind and for a file
+ * in Markdown (a memory file, a Read result); raw for the rest. The formatted
+ * view of a Read result leaves out its line numbers; the raw view has the
+ * text as the model read it.
  */
 export function defaultFormat(item: MarkupOf): ContextBreakdownFormat {
   if (item.markup === 'prose') {
     return 'formatted'
   }
 
-  return item.markup === 'file' && !item.isNumbered && isMarkdownPath(item.path) ? 'formatted' : 'raw'
+  return item.markup === 'file' && isMarkdownPath(item.path) ? 'formatted' : 'raw'
 }
 
 /** A Read result without its line-number prefixes; lines after them stay. */

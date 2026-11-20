@@ -18,6 +18,7 @@ import {
   toolPath,
 } from '../hooks/items'
 import type { ItemData } from '../hooks/items'
+import { defaultFormat } from '../hooks/markdown'
 import {
   GONE_NOTE,
   ITEMS_GONE_NOTE,
@@ -494,6 +495,19 @@ describe('review fixes', () => {
     const set = buildItems('tool-results', { ...DATA, messages })
     expect(set.items[0]).toMatchObject({ path: '/srv/pic.png', disk: null, isNumbered: false, loaded: null })
     expect(listOf('tool-results', set, 'size', 0).rows[0]!.isOpenable).toBe(false)
+  })
+
+  test('a Read that failed opens raw as text, and keeps its disk view', () => {
+    const messages = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'err', name: 'Read', input: { file_path: '/srv/gone.md' } }] },
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'err', is_error: true, content: 'File does not exist. Note: *maybe* a typo' }],
+      },
+    ] as MessageLike[]
+    const [item] = buildItems('tool-results', { ...DATA, messages }).items
+    expect(item).toMatchObject({ path: '/srv/gone.md', disk: 'read', isNumbered: false, markup: 'text' })
+    expect(defaultFormat(item!)).toBe('raw')
   })
 
   test('the level-2 total is the level-1 figure, not a sum of rounded items', () => {

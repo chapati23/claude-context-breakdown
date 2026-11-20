@@ -67,7 +67,7 @@ The text right of the bar's total that names the largest conversation segment an
 _Avoid_: Key, caption
 
 **Swatch**:
-A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The swatch of free space, the reserve or the compaction summary shows its texture. The legend has one, and so does each row of the pane off the terminal. In the terminal, the swatch is two block glyphs: before a row's name while the table has no length bar, and in the titles of levels 2 and 3.
+A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The legend has one. Off the terminal the swatch is a picture 10 by 10 pixels. There it stands before the name of each segment's row at level 1, of free space and of the reserve, and in the titles of levels 2 and 3; the list of servers that are not loaded has none. The swatch of free space, the reserve or the compaction summary shows its texture there. In the terminal, a segment's swatch is two full blocks `██` in its colour, also for the compaction summary. It stands before a row's name while the table has no length bar, and in the titles of levels 2 and 3; the list of servers has none. Free space shows `··` and the reserve `▒▒`, the bar's own glyphs: in the swatch's place while the table has no length bar, else at the start of the length bar's column.
 _Avoid_: Dot, icon, colour key
 
 **Added**:

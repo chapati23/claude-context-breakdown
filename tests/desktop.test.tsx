@@ -114,10 +114,18 @@ test('the desktop band is one Client with the terminal row’s text, split into 
   // Free space and reserve open nothing.
   expect(runs.find(run => run.color === DARK.free)?.target).toBeNull()
   expect(runs.find(run => run.color === DARK.reserve)?.target).toBeNull()
-  // The total opens level 1; its text is the terminal's total, dim.
+  // The space after the bar and the total open level 1; the total's text is
+  // the terminal's total, dim.
   const total = runs.filter(run => run.target === 'total')
-  expect(total.map(run => run.text.trim())).toEqual(['66k/200k 33%'])
-  expect(total[0]?.dimColor).toBe(true)
+  expect(total.map(run => run.text)).toEqual([' ', '66k/200k 33%'])
+  expect(total[1]?.dimColor).toBe(true)
+  // The bar's cells, the space after them and the legend's swatch are cells
+  // of the code font; the total, the join and the legend's words are text in
+  // the app's face.
+  const isBarCell = (run: BarRun) => typeof run.target === 'number' || run.color === DARK.free || run.color === DARK.reserve
+  expect(runs.filter(isBarCell).every(run => run.mono === true)).toBe(true)
+  expect(total.map(run => run.mono === true)).toEqual([true, false])
+  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', ' · ', ' Tool results 45%'])
   // The legend's swatch and words are marked as legend, so a hover can replace them.
   expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' Tool results 45%'])
   expect(runs.find(run => run.isLegend === true)?.color).toBe(DARK.segments['tool-results'])
@@ -134,12 +142,15 @@ test('the desktop band’s hover texts name the segments and never outgrow the l
     const ui = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns } })
     const { runs, hovers } = (await clientOf(ui)).props
     const legend = runs.filter(run => run.isLegend === true)
-    const room = legend.reduce((sum, run) => sum + cellWidth(run.text), 0)
+    // The text takes the legend's place, in the app's face, where a count of
+    // cells does not bound the drawn width: it gets no more cells than the
+    // legend's words, and the swatch and the space stay as a margin.
+    const words = legend.find(run => run.mono !== true)
+    const room = cellWidth(words?.text.trim() ?? '')
 
     expect(legend.length).toBeGreaterThan(0)
     expect(Object.keys(hovers).length).toBeGreaterThan(0)
     for (const [index, text] of Object.entries(hovers)) {
-      // The text takes the legend's place: it must fit the cells the legend frees.
       expect(cellWidth(text)).toBeLessThanOrEqual(room)
       expect(runs.some(run => run.target === Number(index))).toBe(true)
     }
@@ -171,9 +182,15 @@ test('the Client module draws the runs, swaps the legend for a name under the po
 
   expect(await drawnText()).toBe(runs.map(run => run.text).join(''))
   expect(await drawnText()).toContain('Tool results 45%')
+  // A code-font run is drawn mono; any other run in the app's face, with tabular digits.
+  const faces = (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => ({ mono: text.props.mono, tabular: text.props.tabular }))
+  expect(faces).toEqual(runs.map(run => (run.mono === true ? { mono: true, tabular: undefined } : { mono: undefined, tabular: true })))
 
   await ui.pointer({ type: 'move', x: column(claude), y: 0 })
   const hovered = await drawnText()
+  // The name is in the app's face, as the words it replaces.
+  const name = await ui.find({ type: 'Text', in: CLIENT, text: hovers[String(claude)]! })
+  expect({ mono: name?.props.mono, tabular: name?.props.tabular }).toEqual({ mono: undefined, tabular: true })
   expect(hovered).toContain(hovers[String(claude)]!)
   expect(hovered).not.toContain('Tool results 45%')
   // The total stays while a name shows.
@@ -267,30 +284,98 @@ test('a click on a merged cell opens level 1, not one member’s items', async (
   await band.unmount()
 })
 
-test('targetAt maps a column to the target of the run that covers it', () => {
+test('targetAt maps a bar column to its run, and every column from the total on to the total', () => {
   const runs: BarRun[] = [
-    { text: '███', target: 0 },
-    { text: '▉', target: 0 },
-    { text: '▉', target: 1 },
-    { text: '··', target: null },
-    { text: ' 9k/20k', target: 'total' },
-    { text: ' · ', target: null, isLegend: true },
+    { text: '███', target: 0, mono: true },
+    { text: '▉', target: 0, mono: true },
+    { text: '▉', target: 1, mono: true },
+    { text: '··', target: null, mono: true },
+    { text: ' ', target: 'total', mono: true },
+    { text: '9k/20k', target: 'total' },
+    { text: ' · ', target: null },
+    { text: '▉', target: null, isLegend: true, mono: true },
+    { text: ' System 45%', target: null, isLegend: true },
   ]
 
   expect([0, 2, 3].map(x => targetAt(runs, x))).toEqual([0, 0, 0])
   expect(targetAt(runs, 4)).toBe(1)
   expect(targetAt(runs, 5)).toBeNull()
   expect(targetAt(runs, 6)).toBeNull()
-  // The total's text starts at column 7 and is 7 cells wide.
+  // The space after the bar at column 7, the total's text from column 8.
   expect(targetAt(runs, 7)).toBe('total')
+  expect(targetAt(runs, 8)).toBe('total')
   expect(targetAt(runs, 13)).toBe('total')
-  expect(targetAt(runs, 14)).toBeNull()
-  // Past the last run, and before the first, nothing.
-  expect(targetAt(runs, 17)).toBeNull()
+  // The join, the swatch and the words follow text in the app's face, of a
+  // width no column measures: they open the total too, as a column past them does.
+  expect([14, 17, 18, 28, 200].map(x => targetAt(runs, x))).toEqual(['total', 'total', 'total', 'total', 'total'])
+  // Before the first run, and with no runs, nothing.
   expect(targetAt(runs, -1)).toBeNull()
   expect(targetAt([], 0)).toBeNull()
-  // A character is a cell, a surrogate pair too.
+  // With no bar, the total starts at column 0.
+  expect(targetAt([{ text: '9k', target: 'total' }], 0)).toBe('total')
+  expect(targetAt([{ text: '9k', target: 'total' }], 40)).toBe('total')
+  // A character of the bar is a cell, a surrogate pair too.
   expect(targetAt([{ text: '😀a', target: 3 }, { text: 'b', target: 4 }], 1)).toBe(3)
+})
+
+/** The column where run `index` starts: every run before it one cell a character. */
+function startOf(runs: readonly BarRun[], index: number): number {
+  return runs.slice(0, index).reduce((sum, run) => sum + [...run.text].length, 0)
+}
+
+test('a click on the total’s last character or on the legend opens level 1; a click on a bar cell does as before', async ($, on) => {
+  const w = await measured($, on)
+  const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const { runs } = (await clientOf(band)).props
+  const keysOf = async (ui: { findAll: (q: { type: string }) => Promise<{ key?: string }[]> }, prefix: string) =>
+    (await ui.findAll({ type: 'Button' })).map(button => button.key ?? '').filter(key => key.startsWith(prefix))
+  /** A left press at column `x`: whether it opened the pane, and the level shown after it. */
+  const clickAt = async (x: number) => {
+    const before = w.opened.length
+    await band.pointer({ type: 'down', x, y: 0, button: 'left' })
+    await band.pointer({ type: 'up', x, y: 0, button: 'left' })
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
+    const level = (await keysOf(ui, 'item-')).length > 0 ? 2 : (await keysOf(ui, 'row-')).length > 0 ? 1 : 0
+    await ui.unmount()
+
+    return { opened: w.opened.length > before, level }
+  }
+  const label = runs.findIndex(run => run.target === 'total' && run.mono !== true)
+  const words = runs.findIndex(run => run.isLegend === true && run.mono !== true)
+  const end = startOf(runs, runs.length)
+  const segment = (id: keyof typeof DARK.segments) => columnOf(runs, targetOfColor(runs, DARK.segments[id]))
+  const free = startOf(runs, runs.findIndex(run => run.color === DARK.free))
+  const reserve = startOf(runs, runs.findIndex(run => run.color === DARK.reserve))
+
+  // A segment of its own opens its items; then the total's last character opens level 1.
+  expect(await clickAt(segment('claude-output'))).toEqual({ opened: true, level: 2 })
+  expect(await clickAt(startOf(runs, label) + runs[label]!.text.length - 1)).toEqual({ opened: true, level: 1 })
+  // The legend's words, and a column past the drawn text, open level 1 too.
+  expect(await clickAt(segment('claude-output'))).toEqual({ opened: true, level: 2 })
+  expect(await clickAt(startOf(runs, words) + 3)).toEqual({ opened: true, level: 1 })
+  expect(await clickAt(segment('claude-output'))).toEqual({ opened: true, level: 2 })
+  expect(await clickAt(end + 10)).toEqual({ opened: true, level: 1 })
+  // A merged cell opens level 1; free space and reserve open nothing.
+  expect(await clickAt(segment('claude-output'))).toEqual({ opened: true, level: 2 })
+  expect(await clickAt(segment('tool-results'))).toEqual({ opened: true, level: 1 })
+  expect(await clickAt(free)).toEqual({ opened: false, level: 1 })
+  expect(await clickAt(reserve)).toEqual({ opened: false, level: 1 })
+  await band.unmount()
+})
+
+test('the pointer on the total or the legend fades no segment and names none', async ($, on) => {
+  await measured($, on)
+  const ui = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const { runs } = (await clientOf(ui)).props
+  const words = runs.findIndex(run => run.isLegend === true && run.mono !== true)
+
+  for (const x of [startOf(runs, runs.findIndex(run => run.target === 'total')), startOf(runs, words) + 3]) {
+    await ui.pointer({ type: 'move', x, y: 0 })
+    const drawn = await ui.findAll({ type: 'Text', in: CLIENT })
+    expect(drawn.map(text => text.text)).toEqual(runs.map(run => run.text))
+    expect(drawn.some(text => text.props.dimColor === true && typeof runs[drawn.indexOf(text)]?.target === 'number')).toBe(false)
+  }
+  await ui.unmount()
 })
 
 test('hoveredPart reads the segment under a column from the runs it is given; isFaded dims the other segments', () => {

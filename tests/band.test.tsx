@@ -453,14 +453,21 @@ test('the legend names the largest conversation segment after a swatch of its co
   }
 })
 
-test('the widget seat’s glance draws the legend as a swatch picture in the segment colour, then dim words', async ($, on) => {
+test('the widget seat’s glance draws the legend as a swatch picture in the segment colour, then dim words in the app’s face', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, placement: 'widget', bodyColumns: 100 } })
   const words = await ui.find({ type: 'Text', text: 'Tool results 45%' })
-  expect(words?.props).toMatchObject({ mono: true, dimColor: true })
+  // The total, the dot and the words are text in the app's face, with tabular digits.
+  expect(words?.props).toMatchObject({ tabular: true, dimColor: true })
+  expect(words?.props.mono).toBeUndefined()
+  for (const text of [/^66k\/200k 33%$/, /^·$/]) {
+    const found = await ui.find({ type: 'Text', text })
+    expect(found?.props).toMatchObject({ tabular: true, dimColor: true })
+    expect(found?.props.mono).toBeUndefined()
+  }
   const swatch = (await ui.findAll({ type: 'Svg' }))[1]
   // The Claude Code theme's palette, as the bar's: not the page's light or dark scheme.
   expect(String(swatch?.props.source)).toContain(`fill:${DARK.segments['tool-results']}`)
@@ -550,7 +557,11 @@ test('the mobile app, which has no Client, draws the bar as a picture and the to
   const ui = await $.ui.mount({ ...WIDE, surface: 'mobile' })
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThan(0)
-  expect((await ui.find({ type: 'Text', text: /\/200k/ }))?.text.trim()).toBe('66k/200k 33%')
+  const total = await ui.find({ type: 'Text', text: /\/200k/ })
+  expect(total?.text.trim()).toBe('66k/200k 33%')
+  // In the app's face, not the code font, with tabular digits.
+  expect(total?.props.mono).toBeUndefined()
+  expect(total?.props.tabular).toBe(true)
   await ui.press({ key: 'context-total' })
   await ui.unmount()
 

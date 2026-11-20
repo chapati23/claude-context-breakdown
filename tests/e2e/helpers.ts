@@ -36,7 +36,10 @@ export type FlattenOptions = {
    * plain Button with hotkey h. 'desktop' prints the label alone, as the
    * native button shows it, after `h: ` for a Button with hotkey h: the
    * native button draws the hotkey as a key cap before the label, about
-   * three cells wide with its gap, so `h: ` stands for the cap.
+   * three cells wide with its gap, so `h: ` stands for the cap. On
+   * 'desktop' a numeric width pads a line but does not cut it: the surface
+   * wraps a long text, and an Svg, printed `<svg>`, is wider here than the
+   * cells it takes there.
    */
   surface?: 'terminal' | 'desktop'
   /**
@@ -297,7 +300,8 @@ function layout(drawn: RenderNode, style: Style, walk: Walk, room: Room): Block 
           : beside(blocks, gap)
       if (typeof props.width === 'number') {
         const width = num(props.width)
-        block = block.map(line => fit(line, width))
+        const cuts = walk.opts.surface !== 'desktop'
+        block = block.map(line => (cuts || lineWidth(line) <= width ? fit(line, width) : line))
       }
 
       return frame(block, props)
@@ -401,7 +405,8 @@ function serialize(line: Span[], opts: FlattenOptions): string {
  *
  * A Box with flexDirection row (the default) joins its children left to
  * right, each padded to its widest line; a column Box stacks them. Gap,
- * margin and padding add space; a numeric width pads or cuts. With
+ * margin and padding add space; a numeric width pads or cuts (on 'desktop'
+ * it only pads). With
  * `columns`, a row Box with flexWrap 'wrap' breaks onto new lines. A Box with
  * position absolute goes to `overlay`. Text joins its children; Code prints
  * its source, Markdown its text, Svg `<svg>`, a Client the text of its runs.

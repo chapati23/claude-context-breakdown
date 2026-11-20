@@ -104,8 +104,9 @@ async function arrow($: Engine, by: 1 | -1): Promise<void> {
 
 /** The page the level-2 facts line states, as "page 1 of 3". */
 async function pageOf(ui: PaneUi): Promise<string | undefined> {
+  // Off the terminal the column's name always follows the facts on their line.
   return flatten(await ui.drawn())
-    .map(line => /page \d+ of \d+$/.exec(line)?.[0])
+    .map(line => /page \d+ of \d+(?=$| +% of )/.exec(line)?.[0])
     .find(page => page !== undefined)
 }
 
@@ -242,7 +243,7 @@ test('J6 terminal: j, k and the arrows move the ring at levels 1 and 2; Enter op
   await ui.unmount()
 })
 
-test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; Enter and the digits open, b comes back', async ($, on) => {
+test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; Enter opens, no digit does, b comes back', async ($, on) => {
   const { seen, ring } = await listWorld($, on)
   const ui = await mountPane($, 'desktop', { columns: 88, isFocused: true, rows: WINDOW.bodyRows })
   /** No Down or Up control and no j or k key cap at this level. */
@@ -269,12 +270,12 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
    */
   const keysWritten = () => ring.filter(key => key !== 'null')
 
-  // Level 1: the ring starts on the first row; the key words name Enter and the digits only.
+  // Level 1: the ring starts on the first row; the key words name Enter only: the rows take no digit.
   const rows = await rowsOf(ui)
   expect(rows.length).toBeGreaterThan(5)
   expect(await ringOf(ui)).toBe(rows[0])
   await noSteps('level 1')
-  expect(flatten(await ui.drawn()).some(line => line.startsWith('⏎ 1-9') && !line.includes('Move'))).toBe(true)
+  expect(flatten(await ui.drawn()).some(line => line.startsWith('⏎: Open') && !line.includes('Move'))).toBe(true)
   ring.length = 0
   expect(await hotkey(ui, 'j')).toBe(false)
   expect(await pressDown()).toContain('no Button')
@@ -297,11 +298,12 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   // The tree still asks for the ring on the first row, its autoFocus key.
   expect(await ringOf(ui)).toBe(rows[0])
 
-  // The digit of Tool results opens its items.
+  // No digit opens Tool results; Enter on its row (a press) does.
   const tools = rows.indexOf('row-tool-results')
   expect(tools).toBeGreaterThanOrEqual(0)
   expect(tools).toBeLessThan(9)
-  expect(await hotkey(ui, String(tools + 1))).toBe(true)
+  expect(await hotkey(ui, String(tools + 1))).toBe(false)
+  await ui.press({ key: 'row-tool-results' })
   expect(await pageOf(ui)).toBe('page 1 of 3')
 
   // Level 2: the same rule.
@@ -321,8 +323,9 @@ test('J6 desktop: no Down, Up, j or k in the lists; the arrows go to the app; En
   await noSteps('level 3')
   expect(await hotkey(ui, 'b')).toBe(true)
   expect(await ringOf(ui)).toBe(page1[2])
-  // The digit 3 opens the same row.
-  expect(await hotkey(ui, '3')).toBe(true)
+  // The digit 3 opens nothing; Enter opens the same row again.
+  expect(await hotkey(ui, '3')).toBe(false)
+  await ui.press({ key: page1[2]! })
   expect(flatten(await ui.drawn()).some(line => / · lines [\d,]+-[\d,]+ of [\d,]+$|tokens/.test(line))).toBe(true)
   expect(await hotkey(ui, 'b')).toBe(true)
   expect(await hotkey(ui, 'b')).toBe(true)

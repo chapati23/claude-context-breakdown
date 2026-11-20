@@ -1,5 +1,6 @@
 // The desktop surface: the band is one Client (barclient.tsx), and a pane row
-// is a Button holding the name, with its figures in Texts beside it.
+// is a Button holding the name, with its pictures and figures in columns
+// beside it (grid.tsx).
 
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
@@ -8,14 +9,14 @@ import type { Engine } from 'claude-code/testing'
 import { bandTree } from '../hooks/band'
 import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
 import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
-import { desktopHotkeyOf } from '../hooks/pane'
-import { HOTKEY_CELLS, TABLE_MAX_COLUMNS } from '../hooks/table'
+import { BAR_CELLS, FIGURE_CELLS, GRID_MAX_CELLS, LEAD_CELLS } from '../hooks/grid'
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
 import { BAND, CHAT, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
 import type { World } from './fixtures'
 import { flatten, mountPane } from './e2e/helpers'
+import { gridRowWith, gridRowsOf, isNode, nodesOf, rightColumns, rowLine } from './grid'
 import { level2 } from './e2e/journeys'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
@@ -23,7 +24,6 @@ const WIDE = { ...BAND, props: { ...BAND.props, bodyColumns: 100 } } as const
 const CLIENT = 'context-bar'
 
 type Node = { type: string; props?: Record<string, unknown>; children?: unknown[] }
-const isNode = (x: unknown): x is Node => typeof x === 'object' && x !== null && 'type' in x
 const textOf = (x: unknown): string =>
   typeof x === 'string' ? x : isNode(x) ? (x.children ?? []).map(textOf).join('') : ''
 
@@ -441,73 +441,55 @@ test('with no room for a name, the pointer on a segment still dims the other seg
   await ui.unmount()
 })
 
-/** A desktop row: the Box that holds the Button keyed `key`. */
-function rowBoxOf(tree: unknown, key: string): Node | undefined {
-  if (!isNode(tree)) {
-    return undefined
-  }
-  const kids = (tree.children ?? []).filter(isNode)
-  if (tree.type === 'Box' && kids.some(kid => kid.type === 'Box' && (kid.children ?? []).some(c => isNode(c) && c.props?.key === key))) {
-    return tree
-  }
-  for (const kid of kids) {
-    const found = rowBoxOf(kid, key)
-    if (found !== undefined) {
-      return found
-    }
-  }
+/** Whether `node` or anything under it asks for the monospaced face. */
+const anyMono = (tree: unknown) => nodesOf(tree).some(node => node.props?.mono === true)
 
-  return undefined
-}
-
-test('a desktop pane row is the name in a Button, then a mono bar and figures beside it', async ($, on) => {
+test('a desktop pane row: a swatch, the name in a Button with no hotkey, a length bar picture, figures in columns of their own', async ($, on) => {
   await measured($, on)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop' })
   const tree = await ui.drawn()
 
   const button = await ui.find({ key: 'row-tool-results' })
-  // The Button carries the name and its hotkey, and nothing else: a desktop
-  // draws a Button as its label alone.
+  // The Button carries the name and nothing else: no hotkey, so the native
+  // button draws no key cap, and no child.
   expect(button?.props.label).toBe('Tool results')
-  expect(button?.props.hotkey).toBe('4')
+  expect(button?.props.hotkey).toBeUndefined()
   expect(button?.props.plain).toBe(true)
   expect(button?.children).toEqual([])
 
-  const row = rowBoxOf(tree, 'row-tool-results')!
-  expect(row.props?.flexDirection).toBe('row')
-  const parts = (row.children ?? []).filter(isNode)
-  const bar = parts[parts.length - 1]!
-  // The last part is a mono Text of the bar and the figures.
-  expect(bar.type).toBe('Text')
-  expect(bar.props?.mono).toBe(true)
-  expect(textOf(bar)).toMatch(/^ █+ +30k +45%$/)
-  const runs = (bar.children ?? []).filter(isNode)
-  // The bar keeps the segment colour (whole blocks on their own colour), and
-  // swaps nothing: no hover overrides to un-invert it.
-  const fill = runs.find(run => /^█+$/.test(textOf(run)))!
-  expect(fill.props).toMatchObject({ mono: true, color: DARK.segments['tool-results'], backgroundColor: DARK.segments['tool-results'] })
-  expect(runs.every(run => (run as { hover?: unknown }).hover === undefined)).toBe(true)
-  // The figures stand in their own tabular Text.
-  expect(runs.find(run => /30k/.test(textOf(run)))?.props).toMatchObject({ mono: true, tabular: true })
-  // The mod draws no digit of its own: the native button draws the hotkey
-  // as a key cap before the label, in the cells the name's Box adds for it.
-  expect(textOf(row)).not.toMatch(/\d: /)
-  const nameBox = parts.find(holdsButton)!
-  expect((nameBox.children ?? []).filter(isNode).map(part => part.type)).toEqual(['Button'])
-  expect(nameBox.props?.width).toBeGreaterThanOrEqual(HOTKEY_CELLS + cellWidth('Tool results'))
+  const row = gridRowWith(tree, 'row-tool-results')!
+  expect(rowLine(row)).toBe('Tool results ▬ 30k 45%')
+  // Left: the lead holds the swatch picture, then the name's Box holds the Button alone.
+  const [leadBox, nameBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+  expect(leadBox?.props).toMatchObject({ width: LEAD_CELLS, flexShrink: 0 })
+  expect((leadBox?.children ?? []).filter(isNode).map(part => part.type)).toEqual(['Svg'])
+  expect((nameBox?.children ?? []).filter(isNode).map(part => part.type)).toEqual(['Button'])
+  // Right: the length bar in a Box of whole cells, then the tokens and the share, right-aligned.
+  const [bar, tokens, share] = rightColumns(row)
+  expect(bar?.props).toMatchObject({ width: BAR_CELLS, flexShrink: 0 })
+  const picture = (bar?.children ?? []).filter(isNode)[0]!
+  // No width of its own: it takes the markup's width up to its Box (grid.tsx).
+  expect(picture.props).toMatchObject({ alt: 'Tool results: 30k', height: 6 })
+  expect(picture.props?.width).toBeUndefined()
+  expect(String(picture.props?.source)).toContain(DARK.segments['tool-results'])
+  for (const column of [tokens, share]) {
+    expect(column?.props).toMatchObject({ width: FIGURE_CELLS, flexShrink: 0, justifyContent: 'flex-end' })
+  }
+  expect((tokens?.children ?? []).filter(isNode)[0]?.props).toEqual({ tabular: true })
+  expect((share?.children ?? []).filter(isNode)[0]?.props).toEqual({ tabular: true, dimColor: true })
+  // No part of the pane asks for the monospaced face, and no text holds a run of spaces.
+  expect(anyMono(tree)).toBe(false)
+  expect(nodesOf(tree).filter(node => node.type === 'Text').some(text => / {2}/.test(textOf(text)))).toBe(false)
 
-  // The key line lists the hotkeys while the pane has the keyboard.
-  expect(await ui.find({ type: 'Text', text: '⏎ 1-9: Open' })).toBeDefined()
+  // The key words name Enter alone.
+  expect(await ui.find({ type: 'Text', text: '⏎: Open' })).toBeDefined()
   const focusedRow = withoutHandles(row)
   await ui.unmount()
 
-  // Without the keyboard the row keeps its hotkey, so the key cap stays; a
-  // hotkey presses only while the pane holds the keys. The row is the same.
+  // Without the keyboard the row is the same, the ring apart.
   const idle = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const idleButton = await idle.find({ key: 'row-tool-results' })
-  expect(idleButton?.props.hotkey).toBe('4')
-  expect(idleButton?.props.label).toBe('Tool results')
-  expect(withoutHandles(rowBoxOf(await idle.drawn(), 'row-tool-results')!)).toEqual(focusedRow)
+  expect((await idle.find({ key: 'row-tool-results' }))?.props.hotkey).toBeUndefined()
+  expect(withoutHandles(gridRowWith(await idle.drawn(), 'row-tool-results')!)).toEqual(focusedRow)
   await idle.unmount()
 })
 
@@ -517,19 +499,15 @@ test('desktop segment rows keep their names whole in a narrow pane, figures besi
 
   expect((await ui.find({ key: 'row-system' }))?.props.label).toBe('System')
   expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe('Skills/agents')
-  const row = rowBoxOf(await ui.drawn(), 'row-system')!
-  // The Button names it; the swatch and figures stand in the row beside the Button.
-  expect(textOf(row)).toMatch(/20k$/)
-  expect(textOf(row)).not.toContain('System')
-  // Too narrow for hotkeys (table.ts): no key cap and no cells kept for one.
+  // Too narrow for a length bar and a share: the swatch, the name and the tokens.
+  const row = gridRowWith(await ui.drawn(), 'row-system')!
+  expect(rowLine(row)).toBe('System 20k')
+  expect(rightColumns(row).map(part => part.props?.width)).toEqual([FIGURE_CELLS])
   expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBeUndefined()
-  const nameBox = (row.children ?? []).filter(isNode).find(holdsButton)!
-  expect((nameBox.children ?? []).filter(isNode).map(part => part.type)).toEqual(['Button'])
-  expect(textOf(row)).not.toMatch(/^ {3}/)
   await ui.unmount()
 })
 
-test('desktop item rows: the Button holds the title; the detail, bar and figures stand beside it', async ($, on) => {
+test('desktop item rows: the Button holds the title in a column as wide as the longest; the detail, bar and figures follow', async ($, on) => {
   const w = world(on)
   const real = realSession()
   w.usage = real.usage
@@ -541,26 +519,26 @@ test('desktop item rows: the Button holds the title; the detail, bar and figures
 
   const item = await ui.find({ key: 'item-r:real0' })
   expect(item?.props.label).toBe('Read')
-  expect(item?.props.hotkey).toBe('1')
+  expect(item?.props.hotkey).toBeUndefined()
   expect(item?.children).toEqual([])
 
-  const row = rowBoxOf(await ui.drawn(), 'item-r:real0')!
-  // No digit of the mod's: the key cap is the native button's.
-  expect(textOf(row)).toMatch(/^ *~\/project\/src\/module-1\.ts +█+ +31k +27%$/)
-  expect(textOf(row)).not.toContain('Read')
-  const parts = (row.children ?? []).filter(isNode)
-  const rest = (parts[parts.length - 1]!.children ?? []).filter(isNode)
-  // The detail is dim; the bar is in the segment's colour; the figures are tabular.
-  expect(rest.find(run => textOf(run).includes('module-1.ts'))?.props?.dimColor).toBe(true)
-  expect(rest.find(run => /^█+$/.test(textOf(run)))?.props?.color).toBe(DARK.segments['tool-results'])
-  expect(rest.find(run => /31k/.test(textOf(run)))?.props?.tabular).toBe(true)
+  const tree = await ui.drawn()
+  const row = gridRowWith(tree, 'item-r:real0')!
+  expect(rowLine(row)).toBe('Read ~/project/src/module-1.ts ▬ 31k 27%')
+  const [titleBox, detailBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+  // "Read" and "Bash": four cells, and one for the native button's padding.
+  expect(titleBox?.props).toMatchObject({ width: cellWidth('Read') + 1, flexShrink: 0 })
+  const detail = (detailBox?.children ?? []).filter(isNode)[0]!
+  expect(detail.props?.dimColor).toBe(true)
+  expect(textOf(detail)).toBe('~/project/src/module-1.ts')
 
-  // A row with no detail (a Bash call's command is its detail) still names itself by its title.
-  expect((await ui.find({ key: 'item-r:real2' }))?.props.label).toBe('Bash')
-  // The tenth item has 0; the eleventh has no hotkey: blank cells in the cap's place, inside the name's Box.
-  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBe('0')
-  expect((await ui.find({ key: 'item-r:real10' }))?.props.hotkey).toBeUndefined()
-  expect(textOf(rowBoxOf(await ui.drawn(), 'item-r:real10')!)).toMatch(/^ {3}/)
+  // The tenth and the eleventh rows are drawn like the first: no hotkey, the title column as wide.
+  for (const key of ['item-r:real9', 'item-r:real10']) {
+    expect((await ui.find({ key }))?.props.hotkey).toBeUndefined()
+    const other = gridRowWith(tree, key)!
+    expect(((other.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]?.props?.width).toBe(cellWidth('Read') + 1)
+    expect(rightColumns(other).map(part => part.props?.width)).toEqual(rightColumns(row).map(part => part.props?.width))
+  }
 
   await ui.press({ key: 'item-r:real0' })
   expect(await ui.find({ type: 'Code' })).toBeDefined()
@@ -580,11 +558,6 @@ test('the widget seat still shows a glance with no Button and no Client', async 
   await ui.unmount()
 })
 
-/** Cells a desktop row part takes: a Box its width, a Text its text. */
-function cellsOf(part: Node): number {
-  return typeof part.props?.width === 'number' ? part.props.width : cellWidth(textOf(part))
-}
-
 /** A drawn tree without the press handles, which each drawing numbers anew. */
 function withoutHandles(tree: unknown): unknown {
   return JSON.parse(JSON.stringify(tree, (key, value: unknown) => (key === 'press' ? undefined : value)))
@@ -595,28 +568,8 @@ function withoutRing(tree: unknown): unknown {
   return JSON.parse(JSON.stringify(tree, (key, value: unknown) => (key === 'press' || key === 'autoFocus' ? undefined : value)))
 }
 
-/** Whether `part` is the Box that holds a row's Button. */
-const holdsButton = (part: Node) => part.type === 'Box' && (part.children ?? []).some(c => isNode(c) && c.type === 'Button')
-
-/**
- * Where a desktop row's parts stand: the cells before the name's Box, that
- * Box's width, and the column where the bar and figures start. Also checks
- * that every part outside the Button asks for the code font itself.
- */
-function columnsOf(row: Node) {
-  const parts = (row.children ?? []).filter(isNode)
-  const at = parts.findIndex(holdsButton)
-  expect(at).toBeGreaterThanOrEqual(0)
-  for (const part of parts.filter((_, index) => index !== at)) {
-    const texts = part.type === 'Text' ? [part] : (part.children ?? []).filter(isNode)
-    expect(texts.length).toBeGreaterThan(0)
-    expect(texts.every(text => text.type === 'Text' && text.props?.mono === true)).toBe(true)
-  }
-  const before = parts.slice(0, at).reduce((sum, part) => sum + cellsOf(part), 0)
-  const name = parts[at]!.props?.width as number
-
-  return { kinds: parts.map(part => part.type), before, name, rest: before + name }
-}
+/** The widths of a grid row's fixed columns, right of its names. */
+const widthsOf = (row: { children?: unknown[] }) => rightColumns(row as never).map(part => part.props?.width)
 
 test('desktop rows keep their parts and columns when Esc takes the keys and a click gives them back', async ($, on) => {
   const w = world(on)
@@ -626,82 +579,48 @@ test('desktop rows keep their parts and columns when Esc takes the keys and a cl
   await $.session.start(START)
   await w.clock.advance(0)
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
-  const columns = async (keys: readonly string[]) => {
-    const tree = await ui.drawn()
-
-    return keys.map(key => columnsOf(rowBoxOf(tree, key)!))
-  }
   const states = async (keys: readonly string[]) => {
-    const focused = await columns(keys)
     const firstTree = await ui.drawn()
-    const focusedRows = keys.map(key => withoutRing(rowBoxOf(firstTree, key)!))
+    const focusedRows = keys.map(key => withoutRing(gridRowWith(firstTree, key)!))
     await ui.redraw({ ...PANE.props, bodyColumns: 88 })
-    const idle = await columns(keys)
     // Each row's drawn tree is the same in both states, the ring apart.
     const idleTree = await ui.drawn()
-    expect(keys.map(key => withoutRing(rowBoxOf(idleTree, key)!))).toEqual(focusedRows)
+    expect(keys.map(key => withoutRing(gridRowWith(idleTree, key)!))).toEqual(focusedRows)
     await ui.redraw({ ...FOCUSED_PANE.props, bodyColumns: 88 })
-    const again = await columns(keys)
-    // The same parts in the same columns in both states, and the same tree after a click.
-    expect(idle).toEqual(focused)
-    expect(again).toEqual(focused)
+    // The same tree after a click.
     expect(withoutHandles(await ui.drawn())).toEqual(withoutHandles(firstTree))
 
-    return focused
+    return keys.map(key => gridRowWith(firstTree, key)!)
   }
 
-  // Level 1: the name's Box (key cap and name), then the bar and figures;
-  // every row in the same columns.
+  // Level 1: every segment row has the same columns: the bar, the tokens, the share.
   const segments = await states(['row-system', 'row-tool-results', 'row-claude-output'])
-  expect(new Set(segments.map(row => JSON.stringify(row))).size).toBe(1)
-  expect(segments[0]!.before).toBe(0)
+  expect(new Set(segments.map(row => JSON.stringify(widthsOf(row)))).size).toBe(1)
+  expect(widthsOf(segments[0]!)).toEqual([BAR_CELLS, FIGURE_CELLS, FIGURE_CELLS])
 
-  // Level 2: a row with a key cap and the eleventh row, which has none, keep
-  // their name's Box as wide: the eleventh fills the cap's cells with blanks.
+  // Level 2: the first, the tenth and the eleventh row keep one title column and the same columns after it.
   await ui.press({ key: 'row-tool-results' })
   const items = await states(['item-r:real0', 'item-r:real9', 'item-r:real10'])
-  expect(items.map(row => row.before)).toEqual([0, 0, 0])
-  expect(new Set(items.map(row => row.name)).size).toBe(1)
-  expect((await ui.find({ key: 'item-r:real10' }))?.props.hotkey).toBeUndefined()
-  expect((await ui.find({ key: 'item-r:real9' }))?.props.hotkey).toBe('0')
-  const tree = await ui.drawn()
-  const inner = (key: string) => ((rowBoxOf(tree, key)!.children ?? []).filter(isNode).find(holdsButton)!.children ?? []).filter(isNode)
-  expect(inner('item-r:real9').map(part => part.type)).toEqual(['Button'])
-  expect(inner('item-r:real10').map(part => part.type)).toEqual(['Text', 'Button'])
-  expect(textOf(inner('item-r:real10')[0])).toBe(' '.repeat(HOTKEY_CELLS))
-  // The bar starts where the title and its dim detail end: one column for every row.
-  const barStart = (key: string) => {
-    const parts = (rowBoxOf(tree, key)!.children ?? []).filter(isNode)
-    const rest = (parts[parts.length - 1]!.children ?? []).filter(isNode)
-    const detail = cellWidth(textOf(rest[0]))
-
-    return columnsOf(rowBoxOf(tree, key)!).rest + detail
-  }
-  expect(new Set(['item-r:real0', 'item-r:real9', 'item-r:real10'].map(barStart)).size).toBe(1)
+  const titleWidth = (row: { children?: unknown[] }) =>
+    (((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]?.props?.width as number | undefined) ?? -1
+  expect(new Set(items.map(titleWidth)).size).toBe(1)
+  expect(new Set(items.map(row => JSON.stringify(widthsOf(row)))).size).toBe(1)
   await ui.press({ key: 'back' })
   await ui.unmount()
 })
 
-test('a desktop row in a narrow pane keeps its swatch in one place in both states', async ($, on) => {
+test('a desktop row in a narrow pane keeps its swatch first, in one place in both states', async ($, on) => {
   await measured($, on)
-  // 32 columns: hotkeys, and a swatch where there is no room for a length bar.
-  // The swatch comes first; the key cap is inside the name's Box after it.
+  // 32 columns: the swatch leads, and the grid has no room for a length bar.
   const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 32 } })
-  const focused = columnsOf(rowBoxOf(await ui.drawn(), 'row-system')!)
-  expect(focused.kinds).toEqual(['Text', 'Text', 'Box', 'Text'])
-  expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
+  const row = gridRowWith(await ui.drawn(), 'row-system')!
+  const left = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
+  expect(left.map(part => part.props?.width ?? null)).toEqual([LEAD_CELLS, null])
+  expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBeUndefined()
+  const focused = withoutRing(row)
   await ui.redraw({ ...PANE.props, bodyColumns: 32 })
-  expect(columnsOf(rowBoxOf(await ui.drawn(), 'row-system')!)).toEqual(focused)
+  expect(withoutRing(gridRowWith(await ui.drawn(), 'row-system')!)).toEqual(focused)
   await ui.unmount()
-})
-
-test('desktopHotkeyOf: the first nine rows that open get 1-9 and the tenth 0, in a pane wide enough for hotkeys', () => {
-  expect([0, 3, 8, 9].map(index => desktopHotkeyOf(HOTKEY_CELLS, index))).toEqual(['1', '4', '9', '0'])
-  // The eleventh row, and a row that does not open, get none.
-  expect(desktopHotkeyOf(HOTKEY_CELLS, 10)).toBeUndefined()
-  expect(desktopHotkeyOf(HOTKEY_CELLS, null)).toBeUndefined()
-  // Too narrow for hotkeys: none.
-  expect(desktopHotkeyOf(0, 0)).toBeUndefined()
 })
 
 test('the desktop key line keeps one set of controls in one order when Esc takes the keys', async ($, on) => {
@@ -740,18 +659,19 @@ test('the desktop key line keeps one set of controls in one order when Esc takes
   // that cannot apply here leaves the line; off the terminal nothing takes
   // its key. Close is last.
   expect(await check()).toEqual(['refresh', 'close'])
-  expect(await words()).toEqual(['⏎ 1-9 0: Open'])
+  // The rows take no digit: the words name Enter alone.
+  expect(await words()).toEqual(['⏎: Open'])
   await ui.press({ key: 'row-tool-results' })
   // One page: p and n leave together.
   expect(await check()).toEqual(['back', 'sort', 'refresh', 'close'])
-  expect(await words()).toEqual(['⏎ 1-9: Open'])
+  expect(await words()).toEqual(['⏎: Open'])
   // A Bash result has no file: v, c and m leave; p and n stay at level 3.
   await ui.press({ key: 'item-r:tu2' })
   expect(await check()).toEqual(['back', 'prev', 'next', 'format', 'refresh', 'close'])
   await ui.unmount()
 })
 
-test('desktop plain lines line up with the rows, and the table stops at its cap', async ($, on) => {
+test('desktop plain lines stand in the rows’ columns, and the grid stops at its cap', async ($, on) => {
   const w = await measured($, on)
   // One MCP server whose tool is not loaded: a server line under MCP tools.
   const base = usage(66_000)
@@ -761,63 +681,43 @@ test('desktop plain lines line up with the rows, and the table stops at its cap'
   await first.press({ key: 'refresh' })
   await w.clock.advance(0)
   await first.unmount()
-  /** The cells of `line` before `text` starts, and up to where it ends. */
-  const span = (line: string, text: string) => {
-    const at = line.indexOf(text)
-    expect(at, `${text} in ${JSON.stringify(line)}`).toBeGreaterThanOrEqual(0)
-
-    return { start: cellWidth(line.slice(0, at)), end: cellWidth(line.slice(0, at + text.length)) }
-  }
-  const rowsAt: Record<number, string> = {}
-  // At 32 columns a swatch leads each row and the key cap follows it.
+  const trees: Record<number, unknown> = {}
   for (const columns of [32, 45, 64, 88, 140]) {
-    const ui = await mountPane($, 'desktop', { columns })
-    // The flattened desktop text draws a key cap as "4: " before the label.
-    const lines = flatten(await ui.drawn(), { surface: 'desktop' }).map(line => line.replace(/[⟦⟧⟪⟫⟨⟩]/g, ''))
-    const line = (pattern: RegExp) => lines.find(text => pattern.test(text)) ?? ''
-    const row = line(/Tool results .*30k/)
-    rowsAt[columns] = row
-    const name = span(row, 'Tool results').start
-    const tokens = span(row, '30k').end
-    // Where the row's colour starts: the swatch in a narrow pane, else the length bar.
-    const color = cellWidth(row.slice(0, row.search(/[█▉▊▋▌▍▎▏]/)))
-    const share = cellWidth(row.trimEnd())
     const where = `${columns} columns`
-    // Group headings: the name in the rows' column, the share at the rows' end.
-    for (const heading of ['Baseline', 'Conversation']) {
-      const text = line(new RegExp(`^ *${heading} `))
-      expect({ where, heading, at: span(text, heading).start, end: cellWidth(text.trimEnd()) }).toEqual({ where, heading, at: name, end: share })
+    const ui = await mountPane($, 'desktop', { columns })
+    const tree = await ui.drawn()
+    trees[columns] = withoutHandles(tree)
+    const rows = gridRowsOf(tree)
+    const lines = rows.map(rowLine)
+    // Every row ends in the same figure columns, each of whole cells and
+    // right-aligned: headings, segments, Free space, Reserve, Not loaded.
+    const figures = (row: (typeof rows)[number]) => rightColumns(row).filter(part => !nodesOf(part).some(node => node.type === 'Svg'))
+    const shape = JSON.stringify(figures(rows[0]!).map(part => part.props))
+    for (const row of rows) {
+      expect({ where, line: rowLine(row), shape: JSON.stringify(figures(row).map(part => part.props)) }).toEqual({ where, line: rowLine(row), shape })
     }
-    // Free space, Reserve and the Not loaded lines: the name in the rows'
-    // column, the tokens at the rows' tokens column.
+    expect({ where, shape: figures(rows[0]!).every(part => part.props?.width === FIGURE_CELLS && part.props?.justifyContent === 'flex-end') }).toEqual({ where, shape: true })
     for (const [label, figure] of [
       ['Free space', '101k'],
       ['Reserve', '33k'],
       ['MCP tools', '9k'],
     ] as const) {
-      // In a narrow pane Free space and Reserve show their glyph in the swatch's place.
-      const text = line(new RegExp(`(^|\\s)${label} `))
-      expect({ where, label, at: span(text, label).start, end: span(text, figure).end }).toEqual({ where, label, at: name, end: tokens })
+      const line = lines.find(text => text.startsWith(label)) ?? ''
+      expect({ where, label, figure: line.split(' ').includes(figure) }).toEqual({ where, label, figure: true })
     }
-    // Free space and Reserve draw the bar's own glyph where a row's colour starts.
-    for (const [label, glyph] of [
-      ['Free space', '··'],
-      ['Reserve', '▒▒'],
-    ] as const) {
-      expect({ where, label, glyph: span(line(new RegExp(`(^|\\s)${label} `)), glyph).start }).toEqual({ where, label, glyph: color })
-    }
-    expect({ where, at: span(line(/^ *Not loaded( · outside the window)?$/), 'Not loaded').start }).toEqual({ where, at: name })
+    // Free space, Reserve and the Not loaded rows have no length bar.
+    expect({ where, bars: lines.filter(text => /^(Free space|Reserve|MCP tools|Baseline|Conversation)/.test(text) && text.includes('▬')) }).toEqual({ where, bars: [] })
     // With a server, MCP tools is a row that opens: a Button with its name and counts, no line per server.
     const label = String((await ui.find({ key: 'row-not-loaded' }))?.props.label)
     expect({ where, label: /^MCP tools( · 1 server(, 1 tool)?)?$/.test(label) }).toEqual({ where, label: true })
-    expect({ where, server: line(/tickets/) }).toEqual({ where, server: '' })
-    // The row never reaches the pane's edge, and stops at the cap.
-    expect({ where, fits: cellWidth(row.trimEnd()) < columns }).toEqual({ where, fits: true })
-    expect({ where, capped: cellWidth(row.trimEnd()) <= TABLE_MAX_COLUMNS }).toEqual({ where, capped: true })
+    expect({ where, server: lines.filter(text => text.includes('tickets')) }).toEqual({ where, server: [] })
+    // The grid is two cells narrower than the pane, at most GRID_MAX_CELLS.
+    const grid = nodesOf(tree).find(node => node.type === 'Box' && typeof node.props?.width === 'number' && node.props.width > LEAD_CELLS)
+    expect({ where, grid: grid?.props?.width }).toEqual({ where, grid: Math.min(GRID_MAX_CELLS, columns - 2) })
     await ui.unmount()
   }
-  // A wide pane draws the same row as one at the cap.
-  expect(rowsAt[140]).toBe(rowsAt[88])
+  // A wide pane draws the same tree as one at the cap.
+  expect(trees[140]).toEqual(trees[88])
 })
 
 test('a rebuild that puts a new item first keeps the autoFocus key on the row that had it', async ($, on) => {
@@ -1015,8 +915,8 @@ test('/ctx on an open level-3 pane off the terminal pushes no measure or place t
 })
 
 // The mobile app has no keyboard: like the terminal, it offers keys only
-// while the pane holds them. The desktop and VS Code draw a hotkey as a key
-// cap and keep the caps and the key words in both states.
+// while the pane holds them. The desktop and VS Code draw a control's hotkey
+// as a key cap and keep the caps and the key words in both states.
 test('the mobile app draws key words and key caps only while the pane holds the keys; VS Code keeps them', async ($, on) => {
   await measured($, on)
   for (const surface of ['mobile', 'vscode'] as const) {
@@ -1034,7 +934,8 @@ test('the mobile app draws key words and key caps only while the pane holds the 
         if (level === 3) {
           await ui.press({ key: (await ui.findAll({ type: 'Button' })).find(button => button.key?.startsWith('item-'))!.key! })
         }
-        const want = level === 3 ? ['x', 'b'] : ['1', 'x']
+        // The controls' hotkeys; the rows have none on these surfaces.
+        const want = level === 3 ? ['x', 'b'] : ['r', 'x']
         if (offers) {
           expect(await caps(), `${state}, level ${level}`).toEqual(expect.arrayContaining(want))
         } else {

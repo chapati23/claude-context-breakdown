@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { ContextBreakdownList, ContextBreakdownSnapshot, ContextBreakdownView } from '../types'
 import { CLICK_HINT, KEYS_HINT, describedText, keysHint, openWords, pastHidden, ringKey } from '../hooks/pane'
 import { flatten } from './e2e/helpers'
+import { gridLines } from './grid'
 import { DARK } from '../hooks/palette'
 import { TABLE_MAX_COLUMNS } from '../hooks/table'
 import { cellWidth } from '../hooks/text'
@@ -76,13 +77,26 @@ test('the pane lists every segment by group, merged ones too', async ($, on) => 
       expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/Tool results +█+ +30k +45%$/)
       expect((await ui.find({ key: 'row-task-reports' }))?.text).toMatch(/Task reports +▏ +100 +0\.2%$/)
     }
-    // Where the table has room the headings say what each group holds.
-    expect(await ui.find({ type: 'Text', text: /Baseline · before your first prompt +26k +39%$/ })).toBeDefined()
-    // 26k and 40k of 66k: 39.4% and 60.6%, rounded to the nearest they add up.
-    expect(await ui.find({ type: 'Text', text: /Conversation · since the session started +40k +61%$/ })).toBeDefined()
-    // Free space and Reserve have no share of what is used.
-    expect(await ui.find({ type: 'Text', text: /Free space +·· +101k$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /Reserve for compaction +▒▒ +33k$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      // Where the table has room the headings say what each group holds.
+      expect(await ui.find({ type: 'Text', text: /Baseline · before your first prompt +26k +39%$/ })).toBeDefined()
+      // 26k and 40k of 66k: 39.4% and 60.6%, rounded to the nearest they add up.
+      expect(await ui.find({ type: 'Text', text: /Conversation · since the session started +40k +61%$/ })).toBeDefined()
+      // Free space and Reserve have no share of what is used.
+      expect(await ui.find({ type: 'Text', text: /Free space +·· +101k$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Reserve for compaction +▒▒ +33k$/ })).toBeDefined()
+    } else {
+      // The same words and figures, each figure in a column of its own (grid.tsx).
+      const lines = gridLines(await ui.drawn())
+      expect(lines).toEqual(expect.arrayContaining([
+        'Baseline · before your first prompt 26k 39%',
+        'Conversation · since the session started 40k 61%',
+        'Tool results ▬ 30k 45%',
+        'Task reports ▬ 100 0.2%',
+        'Free space 101k',
+        'Reserve for compaction 33k',
+      ]))
+    }
     expect(await ui.find({ type: 'Text', text: /^ *Not loaded · outside the window$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /deferred/i })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'All numbers are estimates.' })).toBeDefined()
@@ -129,7 +143,12 @@ test('at 24 columns every name reads whole, in its short form where needed', asy
     const system = await ui.find({ key: 'row-system' })
     expect(system?.props.label).toBe(surface === 'terminal' ? 'System prompt and built-in tools' : 'System')
     expect((await ui.find({ key: 'row-skills-agents' }))?.props.label).toBe(surface === 'terminal' ? 'Skills list and custom agents' : 'Skills/agents')
-    expect(await ui.find({ type: 'Text', text: /Conversation +40k$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /Conversation +40k$/ })).toBeDefined()
+    } else {
+      // No length bar and no share at 24 columns: the name and the tokens.
+      expect(gridLines(await ui.drawn())).toEqual(expect.arrayContaining(['Conversation 40k', 'System 20k', 'Skills/agents 2k']))
+    }
     // The key hint is wider than 24 cells: it wraps rather than losing its end.
     expect((await ui.find({ type: 'Text', text: keysHint(surface) }))?.props.wrap).toBe('wrap')
     await ui.unmount()
@@ -212,7 +231,13 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
     expect(await ui.find({ type: 'Text', text: '283k used · 684k free before compaction' })).toBeDefined()
     // 68% free is not low: no warning, and the column header names the window alone.
     expect((await ui.findAll({ type: 'Text' })).filter(text => text.props.color === 'warning')).toHaveLength(0)
-    expect(await ui.find({ type: 'Text', text: /^ +1M window +% of used$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /^ +1M window +% of used$/ })).toBeDefined()
+    } else {
+      // The window and the column's name are Texts of their own on one line.
+      expect(await ui.find({ type: 'Text', text: '1M window' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '% of used' })).toBeDefined()
+    }
     if (surface === 'terminal') {
       // A desktop's row Button holds the name alone: see desktop.test.tsx.
       expect((await ui.find({ key: 'row-tool-results' }))?.text).toMatch(/^Tool results +████████████ +114k +40%$/)
@@ -224,8 +249,15 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
       expect((await ui.find({ key: 'row-prompts' }))?.text).toMatch(/ 2\.9k +1\.0%$/)
     }
     // 48k and 235k of 283k: 16.9% and 83.1%, which add up once rounded to the nearest.
-    expect(await ui.find({ type: 'Text', text: /^ +Baseline · before your first prompt +48k +17%$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^ +Conversation · since the session started +235k +83%$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /^ +Baseline · before your first prompt +48k +17%$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^ +Conversation · since the session started +235k +83%$/ })).toBeDefined()
+    } else {
+      const lines = gridLines(await ui.drawn())
+      expect(lines).toContain('Baseline · before your first prompt 48k 17%')
+      expect(lines).toContain('Conversation · since the session started 235k 83%')
+      expect(lines).toContain('Tool results ▬ 114k 40%')
+    }
 
     // The largest segment's name alone is bold; the group headings are dim.
     const bold = (await ui.findAll({ type: 'Text' })).filter(text => text.props.weight === 'bold')
@@ -233,7 +265,7 @@ test('level 1 answers what fills the window: heading, shares of used, the larges
     expect(bold.map(text => text.text.trim())).toEqual(
       surface === 'terminal' ? ['283k used · 684k free before compaction', 'Tool results'] : ['283k used · 684k free before compaction'],
     )
-    expect((await ui.find({ type: 'Text', text: /^ +Baseline/ }))?.props.dimColor).toBe(true)
+    expect((await ui.find({ type: 'Text', text: surface === 'terminal' ? /^ +Baseline/ : /^Baseline/ }))?.props.dimColor).toBe(true)
     // One estimate note.
     expect(await ui.findAll({ type: 'Text', text: /estimate/ })).toHaveLength(1)
     await ui.unmount()
@@ -257,7 +289,13 @@ test('while free space is low, the heading draws the free part in the warning co
     // The run takes the heading's bold; a weight of its own would add a bold Text.
     expect(warned[0]?.props.weight).toBeUndefined()
     // Tool results: 75% of the conversation's 130k, 97.5k of 156k used.
-    expect(await ui.find({ type: 'Text', text: /^ +200k window · largest: Tool results 63% +% of used$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /^ +200k window · largest: Tool results 63% +% of used$/ })).toBeDefined()
+    } else {
+      // The column's name shares the line, in a Text of its own.
+      expect(await ui.find({ type: 'Text', text: '200k window · largest: Tool results 63%' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '% of used' })).toBeDefined()
+    }
     await ui.unmount()
 
     // A narrow pane keeps the free figure, still in the warning colour.
@@ -653,7 +691,7 @@ test('after a compaction the heading marks its figures with ~, and one note says
   }
 })
 
-test('without the keyboard the key line says how to get it; the terminal dims the marks, a desktop keeps its key caps', async ($, on) => {
+test('without the keyboard the key line says how to get it; the terminal dims the marks, a desktop keeps its controls’ key caps', async ($, on) => {
   await realWorld($, on)
 
   for (const surface of SURFACES) {
@@ -664,12 +702,17 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     expect(hint.props.dimColor).toBe(true)
     expect(hint.props.wrap).toBe('wrap')
     // The terminal drops the key words; a desktop keeps them, so Esc adds only the hint's row there.
-    expect((await ui.find({ type: 'Text', text: /1-9/ })) === undefined).toBe(surface === 'terminal')
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /1-9/ })).toBeUndefined()
+    } else {
+      // A desktop's words name Enter alone: its rows have no digit.
+      expect(await ui.find({ type: 'Text', text: '⏎: Open' })).toBeDefined()
+    }
     const row = (await ui.find({ key: 'row-system' }))!
     // The terminal's Button draws a dim mark in its text and has no hotkey. A
-    // desktop's Button keeps its hotkey, drawn as a key cap, and the mod draws
-    // no mark of its own.
-    expect(row.props.hotkey).toBe(surface === 'terminal' ? undefined : '1')
+    // desktop's row has no hotkey in either state, and the mod draws no mark
+    // of its own.
+    expect(row.props.hotkey).toBeUndefined()
     expect(row.text.startsWith('1: ')).toBe(surface === 'terminal')
     const marks = await ui.findAll({ type: 'Text', text: '1: ' })
     expect(marks.length > 0).toBe(surface === 'terminal')
@@ -681,9 +724,10 @@ test('without the keyboard the key line says how to get it; the terminal dims th
     await ui.redraw({ ...PANE.props, isFocused: true })
     expect(await ui.find({ type: 'Text', text: keysHint(surface) })).toBeUndefined()
     // The words name Enter and the digits, 0 for the tenth row; the arrows and Tab go unnamed.
+    // A desktop's rows take no digit: its words name Enter alone.
     expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: '⏎ 1-9 0: Open' })).toBeDefined()
-    expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '⏎ 1-9 0: Open' : '⏎: Open' })).toBeDefined()
+    expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe(surface === 'terminal' ? '1' : undefined)
     expect((await ui.find({ key: 'row-system' }))?.text.startsWith('1: ')).toBe(false)
     // Both surfaces leave the digit to the Button.
     expect(await ui.findAll({ type: 'Text', text: '1: ' })).toEqual([])
@@ -760,13 +804,16 @@ test('the open words for each state', () => {
   expect(openWords(0, 88, true)).toEqual([])
 })
 
-test('the tenth row takes 0; rows after it: Tab reaches them from the first row, which takes the ring', async ($, on) => {
+test('the tenth row takes 0 on the terminal; rows after it: Tab reaches them from the first row, which takes the ring', async ($, on) => {
   await realWorld($, on)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 88 } })
     const rows = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('row-'))
-    expect(rows.map(row => row.props.hotkey ?? null)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'])
+    // A desktop's rows take no digit: the native button would draw a key cap.
+    expect(rows.map(row => row.props.hotkey ?? null)).toEqual(
+      surface === 'terminal' ? ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] : Array.from({ length: 10 }, () => null),
+    )
     expect(rows.filter(row => row.props.autoFocus === true).map(row => row.key)).toEqual(['row-system'])
     // The tenth row is a Button: Tab walks onto it and Enter presses it.
     await ui.press({ key: 'row-claude-output' })
@@ -777,7 +824,7 @@ test('the tenth row takes 0; rows after it: Tab reaches them from the first row,
     const items = (await ui.findAll({ type: 'Button' })).filter(button => button.key?.startsWith('item-'))
     // The page keeps its twenty rows: all twelve items on one page.
     expect(items).toHaveLength(12)
-    expect(items.slice(9).map(item => item.props.hotkey)).toEqual(['0', undefined, undefined])
+    expect(items.slice(9).map(item => item.props.hotkey)).toEqual(surface === 'terminal' ? ['0', undefined, undefined] : [undefined, undefined, undefined])
     expect(items.filter(item => item.props.autoFocus === true).map(item => item.key)).toEqual(['item-r:real0'])
     await ui.press({ key: 'back' })
     // b put the ring back on Tool results; leave the view as the next surface expects it.
@@ -883,10 +930,11 @@ test('a level 2 list with no rows wraps its definition and its note at the pane�
 type Found = { type: string; text: string; props: Record<string, unknown>; children: readonly unknown[] }
 const isFound = (x: unknown): x is Found => typeof x === 'object' && x !== null && 'type' in x
 
-test('every part of a table row asks for the monospaced face, so the columns line up off the terminal', async ($, on) => {
+test('on the terminal every part of a table row asks for the monospaced face', async ($, on) => {
   await realWorld($, on)
 
-  for (const surface of SURFACES) {
+  // Off the terminal no column counts on the face: see grid.test.tsx.
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: 88 } })
     const parts = async (key: string) => ((await ui.find({ key }))?.children ?? []).filter(child => child !== '')
     for (const key of ['row-tool-results', 'row-system', 'row-claude-output']) {

@@ -60,18 +60,29 @@ export type Level2 = {
   header: string
   /** The item rows, in order. */
   rows: string[]
-  /** The controls: the last block of lines, which wraps at a narrow pane, joined. */
+  /** The controls, joined: the last block of lines, which wraps at a narrow pane; off the terminal the block above the facts. */
   keys: string
 }
 
-/** Reads a flattened level 2. Throws with the lines when the shape is not there. */
+/**
+ * Reads a flattened level 2. Throws with the lines when the shape is not there.
+ *
+ * The terminal draws the title (two blocks in the segment's colour), the
+ * definition, the facts, the rows, the notes and then the controls. Off the
+ * terminal (grid.tsx) the swatch is a picture, `<svg>`, the figures follow
+ * the name after one space, and the controls stand between the definition and
+ * the facts, a blank line before and after them.
+ */
 export function level2(lines: readonly string[]): Level2 {
-  const crumb = /^Context › █+ (.+?) {2}(\S+) · (\S+) of used$/.exec(lines[0] ?? '')
+  const crumb = /^Context › (?:█+|<svg>) (.+?)(?: {2}| )(\S+) · (\S+) of used$/.exec(lines[0] ?? '')
   // The definition takes the lines up to the facts: more than one where the terminal wraps it.
   const factsAt = Math.max(2, lines.findIndex((line, k) => k > 0 && /^\d+ items?\b/.test(line)))
-  const definition = lines.slice(1, factsAt).join(' ')
+  // Off the terminal the definition ends at the blank line before the controls.
+  const blank = lines.slice(1, factsAt).indexOf('')
+  const definition = lines.slice(1, blank < 0 ? factsAt : blank + 1).join(' ')
+  const controls = blank < 0 ? null : lines.slice(blank + 2, factsAt).filter(line => line !== '')
   // The column name stands beside the facts where both fit on one row.
-  const facts = (lines[factsAt] ?? '').replace(/ {2,}% of segment$/, '')
+  const facts = (lines[factsAt] ?? '').replace(/ +% of segment$/, '')
   const count = /^(\d+) items?\b/.exec(facts)
   const headerAt = lines.findIndex((line, k) => k >= factsAt && /% of segment$/.test(line))
   if (crumb === null || count === null || headerAt < 0) {
@@ -97,7 +108,7 @@ export function level2(lines: readonly string[]): Level2 {
     count: Number(count[1]),
     header: lines[headerAt]!,
     rows,
-    keys: lines.slice(lines.lastIndexOf('') + 1).join(' '),
+    keys: controls === null ? lines.slice(lines.lastIndexOf('') + 1).join(' ') : controls.join(' '),
   }
 }
 
@@ -173,7 +184,8 @@ type Loose = { type?: string; props?: Record<string, unknown>; children?: readon
 
 /**
  * Every colour a drawing names (`color` or `backgroundColor`), including
- * those inside a Client's runs. A test reads which palette was used by it.
+ * those inside a Client's runs and the hex colours in an Svg's markup. A
+ * test reads which palette was used by it.
  */
 export function colorsIn(tree: RenderNode): Set<string> {
   const out = new Set<string>()
@@ -186,6 +198,11 @@ export function colorsIn(tree: RenderNode): Set<string> {
       const value = loose.props?.[key]
       if (typeof value === 'string') {
         out.add(value)
+      }
+    }
+    if (loose.type === 'Svg' && typeof loose.props?.source === 'string') {
+      for (const match of loose.props.source.matchAll(/#[0-9A-Fa-f]{6}\b/g)) {
+        out.add(match[0])
       }
     }
     const runs = (loose.props?.props as { runs?: { color?: unknown }[] } | undefined)?.runs

@@ -33,7 +33,9 @@ import {
   toggleSource,
 } from './navigate'
 import type { NavIo } from './navigate'
+import { gridTree } from './grid'
 import { hiddenKey, paneTree, pastHidden, ringKey } from './pane'
+import type { PaneActions } from './pane'
 import { paletteFor } from './palette'
 import { createRefresher } from './refresh'
 import { arrowStep, createRingMoves, notesRing, pagesOf, ringTarget, rowKeys } from './ring'
@@ -1166,7 +1168,7 @@ export const register: Register = on => {
     // refused while the pane does not hold the keys; that is fine.
     const thenTop = (work: () => Promise<unknown>) => thenTopOf($, e.surface, work)
 
-    const tree = paneTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, {
+    const actions: PaneActions = {
       close: () =>
         quietly(
           (async () => {
@@ -1232,8 +1234,16 @@ export const register: Register = on => {
             await notice(nav, filled.isFilled ? 'Put the path in the prompt.' : `The prompt did not take the path${why}.`)
           })(),
         ),
-    }, palette, e.props.isFocused === true, e.surface, keepsPlace || (e.surface !== 'terminal' && staysOnControl && view.level === 2), ringNow, base)
+    }
+    const isFocused = e.props.isFocused === true
+    // Off the terminal the pane is drawn in a grid of its own (grid.tsx);
+    // the terminal's drawing stays in pane.tsx.
+    if (e.surface !== 'terminal') {
+      const holds = keepsPlace || (staysOnControl && view.level === 2)
 
-    return tree
+      return gridTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, holds, base)
+    }
+
+    return paneTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, keepsPlace, ringNow, base)
   })
 }

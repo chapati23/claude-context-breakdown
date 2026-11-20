@@ -88,7 +88,8 @@ for (const surface of SURFACES) {
       const lines = await tap(ui, key, opts)
       const three = level3(lines)
       const facts = factsOf(three.facts)
-      expect(three.crumb, kind.name).toMatch(kind.crumb)
+      // Off the terminal the swatch is a picture, which flatten prints as <svg>.
+      expect(three.crumb.replace(/^<svg> /, '██ '), kind.name).toMatch(kind.crumb)
       expect(facts, `${kind.name}: ${three.facts}`).toMatchObject({ tokens: size, form: kind.form, source: kind.source })
       expect(three.notes, kind.name).toEqual(kind.note === undefined ? [] : [kind.note])
       expect(three.controls.join(' '), kind.name).toContain('Back')

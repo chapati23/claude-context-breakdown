@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import { ITEMS_GONE_NOTE } from '../hooks/navigate'
 import { cellWidth } from '../hooks/text'
 import { flatten } from './e2e/helpers'
+import { gridLines } from './grid'
 import { BAND, CHAT, FOCUSED_PANE, NOTES, OPENING, PANE, PROJECT_MD, PROJECT_TEXT, SUMMARY, SURFACES, TRANSCRIPT, isOff, manyResults, richUsage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
@@ -36,25 +37,33 @@ test('level 1 to 2 to 3 and back, with hotkeys on the rows', async ($, on) => {
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface })
-    expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe('1')
-    expect(await ui.find({ type: 'Text', text: '⏎ 1-9 0: Open' })).toBeDefined()
+    // Off the terminal a row has no hotkey: a click or Enter opens it.
+    const digit = (key: string) => (surface === 'terminal' ? key : undefined)
+    expect((await ui.find({ key: 'row-system' }))?.props.hotkey).toBe(digit('1'))
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? '⏎ 1-9 0: Open' : '⏎: Open' })).toBeDefined()
 
     await ui.press({ key: 'row-tool-results' })
     expect(await itemKeys(ui)).toEqual(['item-r:tu2', 'item-r:tu1'])
-    expect((await ui.find({ key: 'item-r:tu2' }))?.props.hotkey).toBe('1')
-    expect((await ui.find({ key: 'item-r:tu1' }))?.props.hotkey).toBe('2')
+    expect((await ui.find({ key: 'item-r:tu2' }))?.props.hotkey).toBe(digit('1'))
+    expect((await ui.find({ key: 'item-r:tu1' }))?.props.hotkey).toBe(digit('2'))
     // The terminal's row Button holds the whole row; a desktop's holds the name
-    // alone (desktop.test.tsx draws the figures and detail beside it).
+    // alone (grid.test.tsx draws the figures and detail beside it).
     expect((await ui.find({ key: 'item-r:tu1' }))?.text).toMatch(
       surface === 'terminal' ? /Read +~\/project\/notes\.txt/ : /^Read$/,
     )
-    expect(await ui.find({ type: 'Text', text: /^2 items · largest first +% of segment$/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /^2 items · largest first +% of segment$/ })).toBeDefined()
+    } else {
+      expect(await ui.find({ type: 'Text', text: '2 items · largest first' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '% of segment' })).toBeDefined()
+    }
     expect((await ui.find({ key: 'back' }))?.props.hotkey).toBe('b')
     expect((await ui.find({ key: 'sort' }))?.props.hotkey).toBe('s')
     // Without the keyboard the terminal drops the hotkeys; a desktop keeps
-    // them, drawn as key caps, and a hotkey presses only with the keyboard.
+    // its controls' hotkeys, drawn as key caps, and a hotkey presses only with
+    // the keyboard.
     await ui.redraw({ ...PANE.props })
-    const kept = surface === 'terminal' ? [undefined, undefined, undefined] : ['1', '2', 'b']
+    const kept = surface === 'terminal' ? [undefined, undefined, undefined] : [undefined, undefined, 'b']
     expect(await Promise.all(['item-r:tu2', 'item-r:tu1', 'back'].map(async key => (await ui.find({ key }))?.props.hotkey))).toEqual(kept)
     await ui.redraw({ ...FOCUSED_PANE.props })
 
@@ -90,7 +99,12 @@ test('a baseline segment lists its items; it has one order, so s leaves the line
     const title = (await ui.findAll({ type: 'Text' })).find(text => text.text === 'mcp__notes__search')
     expect(title).toBeDefined()
     expect(title?.props.dimColor).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /mcp__notes__search +notes/ })).toBeDefined()
+    if (surface === 'terminal') {
+      expect(await ui.find({ type: 'Text', text: /mcp__notes__search +notes/ })).toBeDefined()
+    } else {
+      // The title and its dim detail stand in columns of their own.
+      expect(gridLines(await ui.drawn()).some(line => line.startsWith('mcp__notes__search notes ▬ '))).toBe(true)
+    }
     expect(await ui.find({ type: 'Text', text: /MCP server instructions/ })).toBeDefined()
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -838,12 +852,14 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
     expect(await keyLine(ui)).toEqual([...steps('list-down', 'list-up'), 'refresh', 'close'])
     expect(await taken(ui)).toEqual(keeps('b'))
     // The words name Enter and the digits; the arrows and Tab go unnamed.
+    // Off the terminal the rows take no digit: the words name Enter alone.
+    const open = surface === 'terminal' ? '⏎ 1-9 0: Open' : '⏎: Open'
     const words = (await ui.findAll({ type: 'Text', text: /: Open$/ })).map(text => text.text)
-    expect(words).toEqual(['⏎ 1-9 0: Open'])
+    expect(words).toEqual([open])
     expect(await ui.find({ type: 'Text', text: /Move/ })).toBeUndefined()
     const groups1 = keyGroupsOf(await ui.drawn())!
     expect(groups1).toEqual([
-      ['⏎ 1-9 0: Open', ...steps('j: ↓', 'k: ↑')],
+      [open, ...steps('j: ↓', 'k: ↑')],
       ['r: Refresh', 'x: Close'],
     ])
     // The drawn line, as the groups wrap at the pane's 45 columns: on the
@@ -851,7 +867,7 @@ test('the keys stand in fixed groups, in one order; a control that cannot apply 
     const lines1 = flatten(await ui.drawn(), { surface, columns: 45 })
     const keys1 = lines1.slice(lines1.findIndex(line => line.startsWith('⏎ ')))
     expect(keys1).toEqual(
-      surface === 'terminal' ? ['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'] : ['⏎ 1-9 0: Open  r: Refresh  x: Close'],
+      surface === 'terminal' ? ['⏎ 1-9 0: Open  j: ↓  k: ↑', 'r: Refresh  x: Close'] : ['⏎: Open  r: Refresh  x: Close'],
     )
     expect(keys1.every(line => cellWidth(line) <= 45)).toBe(true)
     if (surface === 'terminal') {

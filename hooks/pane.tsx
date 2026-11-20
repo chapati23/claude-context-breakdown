@@ -1,6 +1,8 @@
 // The pane: the segments (level 1), the items of one segment or the servers
 // that are not loaded (level 2), and the text of one item (level 3). It draws
-// from state alone; each press hands the move to an action.
+// from state alone; each press hands the move to an action. This file draws
+// the terminal's pane and holds what every surface shares: the other
+// surfaces draw their own (grid.tsx).
 
 import type { RenderElement, RenderSurface } from 'claude-code'
 
@@ -23,6 +25,7 @@ import type { Palette } from './palette'
 import { levelOneLists, rowKeys } from './ring'
 import { LIST_DOWN, LIST_UP, SCROLL_DOWN, SCROLL_UP } from './scroll'
 import { NOT_LOADED, NOT_LOADED_DEF, isSegmentList, segmentDef, sentence } from './segments'
+import type { SegmentDef } from './segments'
 import { addedSince, freeTokens, sumTokens, usedTokens } from './snapshot'
 import type { Added } from './snapshot'
 import { PANE_TITLE } from './state'
@@ -89,8 +92,6 @@ type Rows = {
    * way round for the swap would stay that way there.
    */
   swaps: boolean
-  /** Whether a desktop row draws its hotkey as a key cap now (`showsKeys`). */
-  caps: boolean
 }
 
 /**
@@ -119,57 +120,6 @@ function lookOf(rows: Rows, key: string): RowLook {
  */
 export function rowDigit(index: number): string | undefined {
   return index < 9 ? String(index + 1) : index === 9 ? '0' : undefined
-}
-
-/**
- * The hotkey of a desktop row: its digit (`rowDigit`) for the row at `index`
- * among the rows that open (null for a row that does not open). None in a
- * narrow pane (`cells` 0). The desktop and VS Code give the row its hotkey in
- * both focus states (`showsKeys`): they draw it as a key cap inside the
- * native button, and a hotkey presses only while the pane holds the keys.
- */
-export function desktopHotkeyOf(cells: number, index: number | null): string | undefined {
-  return cells > 0 && index !== null ? rowDigit(index) : undefined
-}
-
-/**
- * A row on a desktop: only the name is the Button, in a Box as wide as the
- * name's column plus the mark's cells, and the parts with a colour of their
- * own (the swatch, the length bar, the figures) stand outside it. A desktop
- * draws a Button's children as plain text, dropping colour and the code
- * font, so inside it the bar would turn black and the columns would drift.
- * The Button's text is the name. The native button draws the row's hotkey
- * as a key cap before the label, in the mark's cells; a row without a
- * hotkey has blank cells there, so every name starts in the same column.
- * The row keeps its place with and without the keys.
- */
-function desktopRow(
-  rows: Rows,
-  button: { key: string; autoFocus?: true; onPress: () => void },
-  parts: { index: number | null; lead: unknown; name: string; rest: unknown[] },
-) {
-  const { Box, Button, Text } = rows.el
-  const label = parts.name.trimEnd()
-  const cells = rows.table.mark
-  const digit = rows.caps ? desktopHotkeyOf(cells, parts.index) : undefined
-
-  return (
-    <Box flexDirection="row">
-      {parts.lead as RenderElement}
-      <Box width={cells + cellWidth(parts.name)} flexShrink={0}>
-        {digit === undefined && cells > 0 ? <Text mono>{' '.repeat(cells)}</Text> : ''}
-        <Button
-          key={button.key}
-          label={label}
-          plain
-          {...(digit === undefined ? {} : { hotkey: digit })}
-          {...(button.autoFocus === undefined ? {} : { autoFocus: true as const })}
-          onPress={button.onPress}
-        />
-      </Box>
-      <Text mono>{parts.rest as RenderElement[]}</Text>
-    </Box>
-  )
 }
 
 /** Blank cells that hold a column's place. */
@@ -317,8 +267,6 @@ function plainRow(
   const { table } = rows
   // Free space and Reserve show the bar's own glyph where a row's colour
   // goes: in the swatch's place, or at the start of the length bar's column.
-  // On the desktop the mark's cells follow the swatch, as in a row, where the
-  // native button draws the key cap after the swatch.
   const lead = glyph === null ? ' '.repeat(table.lead) : leadPart(rows, glyph.color, glyph.text)
   const bar = glyph === null ? null : { full: '', rest: glyph.text, pad: ' '.repeat(Math.max(0, table.bar - cellWidth(glyph.text))) }
 
@@ -378,22 +326,6 @@ function groupRows(
       const isLargest = stats.largest?.id === segment.id
       const bar = lengthBarParts(segment.tokens, stats.largest?.tokens ?? 0, table.bar, segment.id)
 
-      if (!rows.swaps) {
-        return desktopRow(
-          rows,
-          {
-            key,
-            ...(rows.ring === key ? { autoFocus: true as const } : {}),
-            onPress: () => void actions.openSegment(segment.id),
-          },
-          {
-            index: first + index,
-            lead: leadPart(rows, color),
-            name,
-            rest: [barPart(rows, color, bar), figuresPart(rows, segment.tokens, stats.used, undefined, stats.added[segment.id])],
-          },
-        )
-      }
       const { hotkey, mark } = markOf(rows, first + index, look)
 
       return (
@@ -459,7 +391,7 @@ export function withoutDeferred(name: string): string {
 }
 
 /** Whether a deferred category is the MCP tools one, which holds the servers (`notLoadedRows`). */
-function isMcp(name: string): boolean {
+export function isMcp(name: string): boolean {
   return baselineOf(name) === 'mcp'
 }
 
@@ -481,13 +413,6 @@ function serversRow(rows: Rows, row: NotLoadedRow, index: number, actions: PaneA
   const text = serversRowText(table, name, row.servers)
   const look = lookOf(rows, SERVERS_ROW)
   const onPress = () => void actions.openSegment(NOT_LOADED)
-  if (!rows.swaps) {
-    return desktopRow(
-      rows,
-      { key: SERVERS_ROW, ...(rows.ring === SERVERS_ROW ? { autoFocus: true as const } : {}), onPress },
-      { index, lead: gap(rows, table.lead), name: text, rest: [row.tokens === null ? '' : figuresPart(rows, row.tokens, null)] },
-    )
-  }
   const { hotkey, mark } = markOf(rows, index, look)
 
   return (
@@ -550,7 +475,7 @@ function describeLine(rows: Rows) {
  * the only signal. The run sets no weight: it takes the heading's bold.
  * Otherwise the heading is one plain text.
  */
-function levelOneHeading(el: Ui, snapshot: ContextBreakdownSnapshot, columns: number) {
+export function levelOneHeading(el: Ui, snapshot: ContextBreakdownSnapshot, columns: number) {
   const { Text } = el
   const heading = paneHeading(snapshot, columns)
   if (!isLowFree(snapshot)) {
@@ -565,20 +490,21 @@ function levelOneHeading(el: Ui, snapshot: ContextBreakdownSnapshot, columns: nu
   )
 }
 
-function segmentsBody(
-  el: Ui,
-  snapshot: ContextBreakdownSnapshot,
-  columns: number,
-  isFocused: boolean,
-  actions: PaneActions,
-  palette: Palette,
-  ring: string | null,
-  lit: string | null,
-  swaps: boolean,
-  caps: boolean,
-  base: ContextBreakdownBase | null,
-) {
-  const { Box, Text } = el
+/** What level 1 lays out, worked out once for every surface. */
+export type LevelOne = {
+  /** The rows of Not loaded (`notLoadedRows`). */
+  deferred: NotLoadedRow[]
+  /** The segments above zero, baseline first: the rows that open, in order. */
+  shown: ContextBreakdownSegment[]
+  /** How many of `shown` are baseline segments. */
+  baselineRows: number
+  /** The terminal's table; its names, forms and columns also choose the texts elsewhere. */
+  table: Table
+  stats: { used: number; largest: ContextBreakdownSegment | null; added: Added }
+}
+
+/** Level 1's rows and table for a pane `columns` wide; `base` gives the column `added`. */
+export function levelOne(snapshot: ContextBreakdownSnapshot, columns: number, base: ContextBreakdownBase | null): LevelOne {
   const servers = snapshot.notLoadedServers
   const deferred = notLoadedRows(snapshot.deferred, servers, isMcp)
   const shown = [...snapshot.baseline, ...snapshot.conversation].filter(segment => segment.tokens > 0)
@@ -598,9 +524,27 @@ function segmentsBody(
   const added = addedSince(base, snapshot)
   const layout = tableLayout(columns, Math.max(...names.map(cellWidth)))
   const table = added === null ? layout : withAdded(layout, columns)
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   const used = usedTokens(snapshot)
-  const stats = { used, largest: largestOf(shown), added: added ?? {} }
+
+  return { deferred, shown, baselineRows, table, stats: { used, largest: largestOf(shown), added: added ?? {} } }
+}
+
+function segmentsBody(
+  el: Ui,
+  snapshot: ContextBreakdownSnapshot,
+  columns: number,
+  isFocused: boolean,
+  actions: PaneActions,
+  palette: Palette,
+  ring: string | null,
+  lit: string | null,
+  swaps: boolean,
+  base: ContextBreakdownBase | null,
+) {
+  const { Box, Text } = el
+  const { deferred, shown, baselineRows, table, stats } = levelOne(snapshot, columns, base)
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  const { used } = stats
   const groupAdded = (segments: readonly ContextBreakdownSegment[]) =>
     segments.reduce((sum, segment) => sum + (stats.added[segment.id] ?? 0), 0)
   const mark = snapshot.isEstimate ? '~' : ''
@@ -673,7 +617,7 @@ function segmentsBody(
 
 // Level 2.
 
-function plural(n: number, word: string): string {
+export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
@@ -732,27 +676,36 @@ function crumbLine(
 }
 
 /** The order the facts line names. */
-function orderWords(sort: ContextBreakdownSort): string {
+export function orderWords(sort: ContextBreakdownSort): string {
   return sort === 'size' ? 'largest first' : sort === 'newest' ? 'newest first' : 'most tools first'
 }
 
-function listBody(
-  el: Ui,
-  list: ContextBreakdownList,
-  snapshot: ContextBreakdownSnapshot | null,
-  columns: number,
-  isFocused: boolean,
-  actions: PaneActions,
-  palette: Palette,
-  ring: string | null,
-  lit: string | null,
-  swaps: boolean,
-  caps: boolean,
-) {
-  const { Box, Button, Text } = el
+/** What level 2 lays out, worked out once for every surface. */
+export type LevelTwo = {
+  /** The segment's definition; null for the servers that are not loaded. */
+  def: SegmentDef | null
+  /** Whether the rows have token figures: the servers may have their tools only. */
+  hasTokens: boolean
+  /** The facts line (`listFacts`). */
+  facts: string
+  /** The terminal's table; its columns also choose what shows elsewhere. */
+  table: Table
+  /** The largest row's tokens on this page, which fills a length bar. */
+  largest: number
+  /** The figure the shares are of (`segmentTotal`). */
+  total: number
+  /** The name of the share column, or null when the list shows no share. */
+  column: string | null
+  /** The notes below the rows: the items on other pages, and how sizes are counted. */
+  hidden: string | null
+  sizes: string | null
+  /** Whether a dim title marks a row that does not open (`listBody`). */
+  marksClosed: boolean
+}
+
+/** Level 2's facts, table and notes for a pane `columns` wide. */
+export function levelTwo(list: ContextBreakdownList, snapshot: ContextBreakdownSnapshot | null, columns: number): LevelTwo {
   const def = isSegmentList(list.segment) ? segmentDef(list.segment) : null
-  // The servers that are not loaded have no segment's colour: a neutral grey.
-  const color = isSegmentList(list.segment) ? colorOf(palette, list.segment) : palette.notLoaded
   // Without a token figure for any server, the list shows their tools only.
   const hasTokens = def !== null || list.tokens > 0
   // The servers' order is always named: it can be by tools alone.
@@ -767,7 +720,6 @@ function listBody(
   const laid = tableLayout(columns, widest, false)
   // No figure, so no bar and no share: the token cell stays empty.
   const table = hasTokens ? laid : { ...laid, bar: 0, share: false }
-  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps, caps }
   // Scaled to the largest item on this page, as level 1 to its largest row.
   const largest = largestOf(list.rows)?.tokens ?? 0
   // Shares of the figure the breadcrumb shows, so "% of segment" means it.
@@ -775,15 +727,6 @@ function listBody(
   // shows it, which the column names.
   const total = segmentTotal(list, snapshot)
   const column = list.rows.length > 0 && table.share ? (def === null ? `% of ${formatTokens(total)}` : '% of segment') : null
-  // The facts and the column name share a row where they fit on one.
-  const joined = column === null ? null : factsRow(table, facts, column)
-  const servers = def === null ? serverNames(table, list.rows) : null
-  // On the terminal the definition wraps at the widest a table may be in this
-  // pane, whatever the rows: short names must not squeeze it into a column.
-  const textCells = swaps ? Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)) : null
-  // The text below the table keeps to the table's width. A list with no rows
-  // has no table: its notes wrap as the definition does.
-  const noteCells = swaps ? (list.rows.length > 0 ? rowCells(table) : textCells) : null
   const hidden =
     list.hiddenItems === 0
       ? null
@@ -797,6 +740,36 @@ function listBody(
   // row on the page opens (the servers, most skills lists), it would mark
   // nothing, so the titles stay at full strength.
   const marksClosed = list.rows.some(row => row.isOpenable)
+
+  return { def, hasTokens, facts, table, largest, total, column, hidden, sizes, marksClosed }
+}
+
+function listBody(
+  el: Ui,
+  list: ContextBreakdownList,
+  snapshot: ContextBreakdownSnapshot | null,
+  columns: number,
+  isFocused: boolean,
+  actions: PaneActions,
+  palette: Palette,
+  ring: string | null,
+  lit: string | null,
+  swaps: boolean,
+) {
+  const { Box, Button, Text } = el
+  const { def, hasTokens, facts, table, largest, total, column, hidden, sizes, marksClosed } = levelTwo(list, snapshot, columns)
+  // The servers that are not loaded have no segment's colour: a neutral grey.
+  const color = isSegmentList(list.segment) ? colorOf(palette, list.segment) : palette.notLoaded
+  const rows: Rows = { el, table, isFocused, palette, ring, lit, swaps }
+  // The facts and the column name share a row where they fit on one.
+  const joined = column === null ? null : factsRow(table, facts, column)
+  const servers = def === null ? serverNames(table, list.rows) : null
+  // On the terminal the definition wraps at the widest a table may be in this
+  // pane, whatever the rows: short names must not squeeze it into a column.
+  const textCells = swaps ? Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)) : null
+  // The text below the table keeps to the table's width. A list with no rows
+  // has no table: its notes wrap as the definition does.
+  const noteCells = swaps ? (list.rows.length > 0 ? rowCells(table) : textCells) : null
   let openable = 0
 
   return (
@@ -859,29 +832,6 @@ function listBody(
             return <Text mono>{inner}</Text>
           }
 
-          if (!rows.swaps) {
-            return desktopRow(
-              rows,
-              {
-                key,
-                ...(ring === key ? { autoFocus: true as const } : {}),
-                onPress: () => void actions.openItem(row.id),
-              },
-              {
-                index,
-                lead: '',
-                name: names.title,
-                rest: [
-                  <Text mono dimColor>
-                    {names.detail}
-                  </Text>,
-                  barPart(rows, color, lengthBarParts(row.tokens, largest, table.bar)),
-                  figuresPart(rows, row.tokens, total),
-                ],
-              },
-            )
-          }
-
           return (
             <Button
               key={key}
@@ -914,7 +864,7 @@ function listBody(
 export const NEXT_BELOW = 'next-below'
 
 /** The item's place in its list for the facts line, `item 2 of 9`; none in a view stored without one. */
-function placeFact(view: Extract<ContextBreakdownView, { level: 3 }>): string | null {
+export function placeFact(view: Extract<ContextBreakdownView, { level: 3 }>): string | null {
   return view.place === undefined ? null : `item ${view.place.index + 1} of ${view.list.items}`
 }
 
@@ -923,19 +873,11 @@ function placeFact(view: Extract<ContextBreakdownView, { level: 3 }>): string | 
  * text. The controls stand above the text so that the ring, which the engine
  * brings into view on every new tree, keeps the heading in view too.
  */
-function contentBody(
-  el: Ui,
-  segment: ContextBreakdownListId,
-  item: ContextBreakdownContent,
-  at: string | null,
-  palette: Palette,
-  keys: RenderElement,
-  actions: PaneActions,
-  ring: string | null,
-) {
-  const { Box, Button, Code, Markdown, Text } = el
-  // No server row opens, so this is a segment's item; the servers' names stand in all the same.
-  const def = isSegmentList(segment) ? segmentDef(segment) : { short: NOT_LOADED_DEF.label }
+/**
+ * Level 3's facts line, in parts, and the raw view's runs of Code (null for
+ * the formatted view or an empty text). `at` is the item's place (`placeFact`).
+ */
+export function contentFacts(item: ContextBreakdownContent, at: string | null): { facts: string[]; code: ReturnType<typeof codeRuns> | null } {
   // The place comes first: n and p step to the next and previous item, so
   // the person sees where in the list they are.
   const facts = [
@@ -957,13 +899,44 @@ function contentBody(
     facts.push('long lines split')
   }
 
+  return { facts, code }
+}
+
+/** The name level 3's title gives the item's list: the segment's short name, or the servers' name. */
+export function contentListName(segment: ContextBreakdownListId): string {
+  // No server row opens, so this is a segment's item; the servers' names stand in all the same.
+  return isSegmentList(segment) ? segmentDef(segment).short : NOT_LOADED_DEF.label
+}
+
+/** The terminal's title of level 3: two blocks in the list's colour, the list's name, the item's title. */
+function contentTitle(el: Ui, segment: ContextBreakdownListId, item: ContextBreakdownContent, palette: Palette) {
+  const { Text } = el
+
   // The title wraps: a cut would drop the file name at the end of a path.
   return (
+    <Text weight="bold" wrap="wrap">
+      <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>██</Text> {contentListName(segment)} ›{' '}
+      {item.title}
+    </Text>
+  )
+}
+
+/** Level 3 below its title (`title`, which each surface draws its own way). */
+export function contentBody(
+  el: Ui,
+  title: RenderElement,
+  item: ContextBreakdownContent,
+  at: string | null,
+  keys: RenderElement,
+  actions: PaneActions,
+  ring: string | null,
+) {
+  const { Box, Button, Code, Markdown, Text } = el
+  const { facts, code } = contentFacts(item, at)
+
+  return (
     <Box flexDirection="column">
-      <Text weight="bold" wrap="wrap">
-        <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>██</Text> {def.short} ›{' '}
-        {item.title}
-      </Text>
+      {title}
       <Text dimColor>{facts.join(' · ')}</Text>
       {item.isChanged && item.source === 'loaded' && (
         <Text color="warning" weight="bold" wrap="wrap">
@@ -1019,7 +992,7 @@ function contentBody(
  * in the line, drawn dimmer, and its press does nothing. A control that
  * cannot apply on the screen as it is never becomes one (`keyGroups`).
  */
-type Control = { key: string; label: string; hotkey: string; isOn: boolean; onPress: (surface: RenderSurface) => unknown }
+export type Control = { key: string; label: string; hotkey: string; isOn: boolean; onPress: (surface: RenderSurface) => unknown }
 
 /**
  * How a control stands on the screen as it is: `on`; `off`, which a move on
@@ -1052,7 +1025,7 @@ function hasSteps(isFocused: boolean, surface: RenderSurface): boolean {
  * states. The terminal, and the mobile app, which has no keyboard, offer them
  * only while the pane holds the keys.
  */
-function showsKeys(isFocused: boolean, surface: RenderSurface): boolean {
+export function showsKeys(isFocused: boolean, surface: RenderSurface): boolean {
   return isFocused || surface === 'desktop' || surface === 'vscode'
 }
 
@@ -1062,7 +1035,7 @@ function showsKeys(isFocused: boolean, surface: RenderSurface): boolean {
  * the keys that move the ring, the window or the level; `view` the keys
  * that change the text of level 3; `pane` the keys for the whole pane.
  */
-type KeyGroup = { key: 'move' | 'view' | 'pane'; words: string[]; controls: Control[] }
+export type KeyGroup = { key: 'move' | 'view' | 'pane'; words: string[]; controls: Control[] }
 
 /** The label of `s`: the order it switches to; the facts line names the one shown. */
 function sortLabel(list: ContextBreakdownList): string {
@@ -1074,7 +1047,7 @@ function sortLabel(list: ContextBreakdownList): string {
 }
 
 /** The keys line: its groups, and the keys of the controls that left it. */
-type KeyLine = { groups: KeyGroup[]; gone: string[] }
+export type KeyLine = { groups: KeyGroup[]; gone: string[] }
 
 /**
  * The groups of the keys line, in their order, and the controls in each:
@@ -1093,7 +1066,7 @@ type KeyLine = { groups: KeyGroup[]; gone: string[] }
  * opens. The controls that remain keep their order. A group
  * with nothing in it is left out.
  */
-function keyGroups(
+export function keyGroups(
   view: ContextBreakdownView,
   actions: PaneActions,
   isFocused: boolean,
@@ -1317,13 +1290,6 @@ function keysLine(
       onPress: (press: { surface: RenderSurface }) => void control.onPress(press.surface),
     }
 
-    // A desktop draws a native button that shows only its label and
-    // drops a child: a live control is drawn as it is, and one that
-    // does not apply is drawn dim.
-    if (surface !== 'terminal') {
-      return control.isOn ? <Button {...props} /> : <Button {...props} dimColor />
-    }
-
     // On the terminal a control that does not apply draws its label in
     // the theme's faint colour, a step below the others' dim. It is dim as
     // well, so its key letter is no brighter than a live control's.
@@ -1337,10 +1303,7 @@ function keysLine(
   }
 
   // The hint gets a row of its own: beside the label-only controls it would
-  // read as one phrase ("click the pane  Close"). The desktop and VS Code
-  // keep the key words and the controls' hotkeys (drawn as key caps) in both
-  // states, so Esc changes their line by the hint's row only (`showsKeys`).
-  // A hotkey presses only while the pane holds the keys.
+  // read as one phrase ("click the pane  Close").
   //
   // Each group is a Box of its own in a row that wraps: the line breaks
   // between groups, so keys that belong together stay together. A group
@@ -1374,7 +1337,7 @@ function keysLine(
 }
 
 /**
- * The pane's tree, `columns` wide: the level the view names, or a waiting
+ * The terminal's pane, `columns` wide: the level the view names, or a waiting
  * line before the first measurement. `isFocused` is whether the pane holds
  * the keyboard (`e.props.isFocused`); `surface` picks how the hint says to
  * get it. `keepsPlace`: `/ctx` only gave an open pane the keyboard, so no
@@ -1406,18 +1369,18 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, 0, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, view.list.segment, view.item, placeFact(view), palette, keys, actions, ring)
+    return contentBody(el, contentTitle(el, view.list.segment, view.item, palette), view.item, placeFact(view), keys, actions, ring)
   }
   let body: RenderElement
   // The rows that open on the page: Enter and the digits name them.
   let openRows = 0
   if (view.level === 2) {
-    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface))
+    body = listBody(el, view.list, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal')
     openRows = view.list.rows.filter(row => row.isOpenable).length
   } else if (snapshot === null) {
     body = <Text dimColor>Measuring the context window…</Text>
   } else {
-    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', showsKeys(isFocused, surface), base)
+    body = segmentsBody(el, snapshot, columns, isFocused, actions, palette, ring, lit, surface === 'terminal', base)
     openRows = levelOneLists(snapshot).length
     if (view.note !== undefined) {
       body = (

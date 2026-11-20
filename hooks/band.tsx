@@ -276,7 +276,10 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
   }
   runs.push({ text: model.label, dimColor: true, target: 'total' })
   if (legend !== null) {
-    runs.push({ text: LEGEND_JOIN, dimColor: true, target: null })
+    // The join and the space after the swatch are cells of the code font: a
+    // space in the app's face is about half as wide, and the total, the
+    // swatch and the words would stand too close.
+    runs.push({ text: LEGEND_JOIN, dimColor: true, target: null, mono: true })
     runs.push({
       text: segmentCells(legend.cell, 1),
       color: colorOf(palette, legend.cell),
@@ -284,7 +287,8 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
       isLegend: true,
       mono: true,
     })
-    runs.push({ text: ` ${legend.text}`, dimColor: true, target: null, isLegend: true })
+    runs.push({ text: ' ', target: null, isLegend: true, mono: true })
+    runs.push({ text: legend.text, dimColor: true, target: null, isLegend: true })
   }
 
   return { runs, hovers, parts }

@@ -4,8 +4,8 @@
 // button showing only its text, so the segments cannot be Buttons there;
 // here a click on a segment posts which segment it is, and the hooks module
 // opens it.
-// The bar's cells and the legend's swatch are drawn in the code font, whose
-// cells the pointer's column counts. The total, the join and the legend's
+// The bar's cells, the join and the legend's swatch are drawn in the code
+// font, whose cells the pointer's column counts. The total and the legend's
 // words are drawn in the app's own face, so their width in cells is not known.
 // While the pointer is on a segment, its name and tokens take the legend's
 // place, as the terminal's chip does.
@@ -24,8 +24,8 @@ export type BarRun = {
   isLegend?: boolean
   /**
    * Drawn in the code font, one cell a character: the bar's cells, the space
-   * after them and the legend's swatch. Any other run is text in the app's
-   * face, with tabular digits.
+   * after them, the join, the legend's swatch and the space after it. Any
+   * other run is text in the app's face, with tabular digits.
    */
   mono?: boolean
 }

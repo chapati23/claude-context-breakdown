@@ -72,9 +72,9 @@ import {
   windowBarPicture,
 } from './svgbar'
 import type { Texture, WindowPart } from './svgbar'
-import { ADDED_NAME, crumbFor, headingText, nameText, notLoadedHeading, serversCrumb, serversRowText, textCells, windowText } from './table'
+import { ADDED_NAME, crumbFor, headingText, notLoadedHeading, serversCrumb, serversRowText, textCells, windowText } from './table'
 import type { Table } from './table'
-import { cellWidth, shortenPath } from './text'
+import { cellWidth, headCells, shortenPath } from './text'
 import { fit, headingLine, paneHeading } from './view'
 
 /** The widest the grid grows, in cells: in a wider pane it does not stretch. */
@@ -286,7 +286,7 @@ function plainName(g: Grid, name: string, dim: boolean) {
 
   return (
     <Box flexDirection="row" paddingLeft={LABEL_PAD_CELLS} flexShrink={1} minWidth={0}>
-      <Text wrap="truncate" {...(dim ? { dimColor: true } : {})}>
+      <Text wrap="truncate" maxLines={1} {...(dim ? { dimColor: true } : {})}>
         {name}
       </Text>
     </Box>
@@ -403,7 +403,7 @@ function segmentsGrid(
     const tokens = sumTokens(segments)
     const text = headingText(table, title, long).trimEnd()
 
-    return gridRow(rows, [<Text dimColor wrap="truncate">{cellWidth(text) <= headingRoom ? text : title}</Text>], figures(
+    return gridRow(rows, [<Text dimColor wrap="truncate" maxLines={1}>{cellWidth(text) <= headingRoom ? text : title}</Text>], figures(
       rows,
       { text: formatTokens(tokens), dim: true },
       { text: formatShare(tokens, used), dim: true },
@@ -416,7 +416,7 @@ function segmentsGrid(
       .map(segment => {
         const def = segmentDef(segment.id)
         const color = colorOf(palette, def.id)
-        const name = fittedName(nameText(table, def.label, def.short).trimEnd(), def.short, nameRoom)
+        const name = fittedName(def.label, def.short, nameRoom)
 
         return gridRow(
           rows,
@@ -462,7 +462,7 @@ function segmentsGrid(
       </Box>
       {deferred.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor wrap="truncate">
+          <Text dimColor wrap="truncate" maxLines={1}>
             {notLoadedHeading(table, 'Not loaded', NOT_LOADED_HEADING)}
           </Text>
           {deferred.map(category => {
@@ -517,52 +517,82 @@ function titleRow(g: Grid, list: ContextBreakdownList, snapshot: ContextBreakdow
     <Box flexDirection="row" alignItems="center" justifyContent="space-between" columnGap={1}>
       <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
         {trail !== '' && (
-          <Text dimColor wrap="truncate">
+          <Text dimColor wrap="truncate" maxLines={1}>
             {trail}
           </Text>
         )}
         {segment !== null && swatch(g, colorOf(palette, segment), segmentTexture(segment))}
-        <Text weight="bold" wrap="truncate">
+        <Text weight="bold" wrap="truncate" maxLines={1}>
           {crumb.name}
         </Text>
       </Box>
-      {crumb.figures !== '' && <Text dimColor>{crumb.figures}</Text>}
+      {crumb.figures !== '' && (
+        <Box flexShrink={0}>
+          <Text dimColor>{crumb.figures}</Text>
+        </Box>
+      )}
     </Box>
   )
 }
 
+/** The longest tail of a text that fits in `cells` cells; never splits a character. */
+function tailCells(text: string, cells: number): string {
+  const chars = [...text]
+  let used = 0
+  let start = chars.length
+  while (start > 0 && used + cellWidth(chars[start - 1]!) <= cells) {
+    used += cellWidth(chars[start - 1]!)
+    start -= 1
+  }
+
+  return chars.slice(start).join('')
+}
+
 /**
- * A path in `cells`: the mod's short form (`shortenPath`), never shorter
- * than "…/" and the whole file name. The mod never cuts into the file name.
- * Where even that form does not fit, the surface cuts a detail, which is a
- * Text, at its end; a title that is a Button's label shows whole.
+ * A path in `cells`, at least 2: the mod's short form (`shortenPath`). Where
+ * that form is still wider than its cells (wide characters), its head is cut
+ * further. The end of the file name always stays, and the result is never
+ * wider than its cells, as in the terminal's rows (`itemNames`).
  */
 export function fittedPath(text: string, cells: number): string {
-  const name = text.split(/[/\\]/).pop() ?? text
+  const room = Math.max(2, cells)
+  const short = shortenPath(text, room)
+  if (cellWidth(short) <= room) {
+    return short
+  }
 
-  return shortenPath(text, Math.max(cells, name.length + 2))
+  return `…${tailCells(short.startsWith('…') ? short.slice(1) : short, room - 1)}`
 }
 
 /**
  * An item's title in a column `cells` wide, for a Button's label: a native
- * button does not shrink, so a title that does not fit is cut to fit with an
- * ellipsis, or, for a path, takes its short form (`fittedPath`). Cells count
- * a monospaced face: the surface's own face is narrower for most text.
+ * button does not shrink, so a title that does not fit is cut to fit. A path
+ * takes its short form (`fittedPath`): its head is cut and the end of its
+ * file name stays. Any other title is cut in its middle, so both ends stay:
+ * two tools of one server keep different labels. Cells count a monospaced
+ * face: the surface's own face is narrower for most text.
  */
 export function fittedTitle(text: string, cells: number, isPath: boolean): string {
   if (cellWidth(text) <= cells) {
     return text
   }
+  if (isPath) {
+    return fittedPath(text, cells)
+  }
+  if (cells <= 2) {
+    return fit(text, Math.max(1, cells)).trimEnd()
+  }
+  const headRoom = Math.max(1, Math.floor((cells - 1) / 3))
 
-  return isPath ? fittedPath(text, cells) : fit(text, Math.max(1, cells)).trimEnd()
+  return `${headCells(text, headRoom).trimEnd()}…${tailCells(text, cells - 1 - headRoom).trimStart()}`
 }
 
 /**
  * An item's dim detail in the `cells` the row leaves it. The surface cuts an
  * over-long text at its end, whatever `wrap` says: a command loses its tail,
  * which is fine, but a path would lose its file name. So a path that does
- * not fit takes its short form (`fittedPath`); any other detail is given in
- * full.
+ * not fit takes its short form (`fittedPath`): its head is cut and the end of
+ * its file name stays. Any other detail is given in full.
  */
 export function fittedDetail(text: string, cells: number, isPath: boolean): string {
   return isPath && cellWidth(text) > cells ? fittedPath(text, cells) : text
@@ -641,7 +671,7 @@ function listGrid(
       const named = row.isOpenable ? (
         rowButton(rows, key, title, () => void actions.openItem(row.id))
       ) : (
-        <Text wrap="truncate" {...(marksClosed ? { dimColor: true } : {})}>
+        <Text wrap="truncate" maxLines={1} {...(marksClosed ? { dimColor: true } : {})}>
           {title}
         </Text>
       )
@@ -804,7 +834,9 @@ export function gridTree(
     const title = (
       <Box flexDirection="row" alignItems="center" columnGap={1}>
         {swatch(g, isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded, isSegmentList(segment) ? segmentTexture(segment) : null)}
-        <Text weight="bold" wrap="wrap">{`${contentListName(segment)} › ${view.item.title}`}</Text>
+        <Box flexShrink={1} minWidth={0}>
+          <Text weight="bold" wrap="wrap">{`${contentListName(segment)} › ${view.item.title}`}</Text>
+        </Box>
       </Box>
     )
 

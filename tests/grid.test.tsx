@@ -23,6 +23,7 @@ import {
   figureColumnCells,
   fittedDetail,
   fittedName,
+  fittedPath,
   fittedTitle,
   gridCells,
 } from '../hooks/grid'
@@ -200,8 +201,11 @@ test('level 2: the title row, the definition, the controls, then the facts with 
   expect(left.map(textOf)).toEqual(['Context ›', '', 'Tool results'])
   expect(left[1]?.props?.alt).toBe(SWATCH_ALT)
   expect(left[2]?.props?.weight).toBe('bold')
+  // The figures keep their width, as every fixed column does: a long trail and name cannot squeeze them onto several lines.
   const figures = (title.children ?? []).filter(isNode)[1]!
-  expect([textOf(figures), figures.props?.dimColor]).toEqual(['114k · 40% of used', true])
+  expect([figures.type, figures.props?.flexShrink]).toEqual(['Box', 0])
+  const figureText = (figures.children ?? []).filter(isNode)[0]!
+  expect([textOf(figureText), figureText.props?.dimColor]).toEqual(['114k · 40% of used', true])
   expect(textOf((head?.children ?? []).filter(isNode)[1])).toBe('The output of tool calls, such as file reads and command output.')
   // The controls come before the rows, one cell apart.
   expect(nodesOf(controls).some(node => node.props?.key === 'back')).toBe(true)
@@ -245,8 +249,12 @@ test('level 3 has a swatch picture before its bold title; the rest is as on the 
   await ui.press({ key: item.key! })
   const tree = (await ui.drawn()) as Node
   const [title, facts, note] = (tree.children ?? []).filter(isNode)
-  expect((title?.children ?? []).filter(isNode).map(node => node.type)).toEqual(['Svg', 'Text'])
-  const words = (title?.children ?? []).filter(isNode)[1]!
+  expect(title?.props).toMatchObject({ flexDirection: 'row', alignItems: 'center' })
+  expect((title?.children ?? []).filter(isNode).map(node => node.type)).toEqual(['Svg', 'Box'])
+  // The title's Box may shrink below its text, so a long path wraps inside the pane.
+  const wordsBox = (title?.children ?? []).filter(isNode)[1]!
+  expect(wordsBox.props).toMatchObject({ flexShrink: 1, minWidth: 0 })
+  const words = (wordsBox.children ?? []).filter(isNode)[0]!
   expect([textOf(words), words.props?.weight, words.props?.wrap]).toEqual(['Global › ~/.claude/CLAUDE.md', 'bold', 'wrap'])
   expect(textOf(facts)).toMatch(/ tokens · formatted · on disk$/)
   // A file the opening reminder lacks is shown from disk, and a note says so, under the facts.
@@ -603,20 +611,46 @@ test('gridCells and barCells: the grid stops at its cap; the bar is shorter in a
   expect(LEAD_CELLS * MEASURED_CELL_PX).toBeGreaterThan(10)
 })
 
-test('fittedTitle and fittedDetail: a path keeps its file name; a command is given in full', () => {
+test('fittedTitle and fittedDetail: a path keeps the end of its file name inside its cells; a command is given in full', () => {
   expect(fittedDetail('~/project/src/ledger/balance.go', 20, true)).toBe('…/ledger/balance.go')
   expect(fittedDetail('~/project/src/ledger/balance.go', 40, true)).toBe('~/project/src/ledger/balance.go')
   expect(fittedDetail('go test ./src/ledger/... -run TestBalance -v', 20, false)).toBe('go test ./src/ledger/... -run TestBalance -v')
   expect(fittedTitle('~/.claude/projects/x/memory/MEMORY.md', 16, true).endsWith('MEMORY.md')).toBe(true)
-  // The shortest form is "…/" and the whole file name: the mod never cuts into the file name.
-  expect(fittedDetail('~/project/src/ledger/balance.go', 5, true)).toBe('…/balance.go')
-  expect(fittedTitle('~/.claude/projects/x/memory/MEMORY.md', 4, true)).toBe('…/MEMORY.md')
-  expect(fittedDetail('~/project/src/ledger/a-file-name-longer-than-the-room.go', 10, true)).toBe('…/a-file-name-longer-than-the-room.go')
-  expect(fittedTitle('mcp__claude-in-chrome__computer', 12, false)).toBe('mcp__claude…')
+  // Where the file name does not fit, its head is cut: its end stays, and the path keeps to its cells.
+  expect(fittedDetail('~/project/src/ledger/balance.go', 5, true)).toBe('…e.go')
+  expect(fittedTitle('~/.claude/projects/x/memory/MEMORY.md', 4, true)).toBe('….md')
+  expect(fittedDetail('~/project/src/ledger/a-file-name-longer-than-the-room.go', 10, true)).toBe('…e-room.go')
+  // A wide character counts 2 cells: the head is cut further, and none is split.
+  expect(fittedPath('~/docs/日本語のファイル名.md', 8)).toBe('…ル名.md')
+  // Never fewer than 2 cells.
+  expect(fittedPath('~/project/balance.go', 0)).toBe('…o')
+  for (const cells of [0, 1, 2, 3, 5, 8, 13, 21]) {
+    for (const path of ['~/project/src/ledger/balance.go', '~/docs/日本語のファイル名.md', '/srv/a-file-name-longer-than-the-room.go']) {
+      expect({ path, cells, fits: cellWidth(fittedPath(path, cells)) <= Math.max(2, cells) }).toEqual({ path, cells, fits: true })
+    }
+  }
+  // A title that is not a path is cut in its middle: a third of the cells before the ellipsis, the rest after it.
+  expect(fittedTitle('mcp__claude-in-chrome__computer', 12, false)).toBe('mcp…computer')
+  expect(fittedTitle('mcp__notes__search', 11, false)).toBe('mcp…_search')
+  expect(fittedTitle('mcp__notes__lookup', 11, false)).toBe('mcp…_lookup')
+  // Spaces at the cut go.
+  expect(fittedTitle('ab cdefghijklmn', 10, false)).toBe('ab…ijklmn')
+  expect(fittedTitle('abcdefghij klmno', 10, false)).toBe('abc…klmno')
+  // Wide characters: a character that does not fit is left out.
+  expect(fittedTitle('日本語のツール名前です', 7, false)).toBe('日…です')
+  expect(fittedTitle('日本語のツール名前です', 6, false)).toBe('…です')
+  // In 2 cells or fewer, the head and the ellipsis.
+  expect(fittedTitle('abcdef', 2, false)).toBe('a…')
+  expect(fittedTitle('abcdef', 1, false)).toBe('…')
   expect(fittedTitle('Read', 12, false)).toBe('Read')
+  for (const cells of [1, 2, 3, 4, 7, 11, 20]) {
+    for (const title of ['mcp__claude-in-chrome__computer', '日本語のツール名前です', 'Please read the notes file and list the folder.']) {
+      expect({ title, cells, fits: cellWidth(fittedTitle(title, cells, false)) <= cells }).toEqual({ title, cells, fits: true })
+    }
+  }
 })
 
-test('at 40 and 46 columns no path detail is shorter than “…/” and its whole file name', async ($, on) => {
+test('at 40 and 46 columns a path detail keeps the end of its file name and stays inside its column', async ($, on) => {
   await realWorld($, on)
   for (const columns of [40, 46]) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
@@ -625,8 +659,15 @@ test('at 40 and 46 columns no path detail is shorter than “…/” and its who
     expect(reads.length).toBeGreaterThan(3)
     for (const row of reads) {
       const detail = rowLine(row).split(' ')[1] ?? ''
+      // The whole path is in the length bar's alt text: "Read ~/project/src/module-1.ts: 31k".
+      const alt = String(nodesOf(row).find(node => node.type === 'Svg')?.props?.alt)
+      const path = alt.slice('Read '.length, alt.lastIndexOf(':'))
+      // The detail's cells: the grid less the columns on the right, the title's Box and two gaps.
+      const titleBox = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]!
+      const cells = gridCells(columns) - rightColumns(row).reduce((sum, part) => sum + (part.props?.width as number) + 1, 0) - 1 - (titleBox.props?.width as number) - 1
       const where = `${columns} columns, ${detail}`
-      expect({ where, whole: /^(~|…)(\/[^/]+)*\/module-\d+\.ts$/.test(detail) }).toEqual({ where, whole: true })
+      expect({ where, end: detail === path || (detail.startsWith('…') && path.endsWith(detail.slice(1))) }).toEqual({ where, end: true })
+      expect({ where, fits: cellWidth(detail) <= cells }).toEqual({ where, fits: true })
     }
     await ui.press({ key: 'back' })
     await ui.unmount()
@@ -736,7 +777,8 @@ test('at 40 and 46 columns a long item title keeps at least half of the room it 
   for (const columns of [46, 40]) {
     const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
     await ui.press({ key: 'row-mcp' })
-    const detailed = gridRowsOf(await ui.drawn()).filter(row => textOf(row).startsWith('mcp__'))
+    // The tool names: "mcp…" or, at 40 columns, "mc…"; the server instructions' row starts with "MCP".
+    const detailed = gridRowsOf(await ui.drawn()).filter(row => textOf(row).startsWith('mc'))
     expect(detailed).toHaveLength(mcpTools.length)
     for (const row of detailed) {
       const [titleBox, detailBox] = ((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)
@@ -789,15 +831,90 @@ test('the words of the controls row start where a Button’s label starts, at ev
 
 test('the group headings of level 1 and the trail of the level 2 title are cut at their end, never on a second line', async ($, on) => {
   await realWorld($, on)
-  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
-  const headings = nodesOf(await ui.drawn()).filter(node => node.type === 'Text' && /^(Baseline|Conversation|Not loaded)/.test(textOf(node)))
-  expect(headings.length).toBeGreaterThanOrEqual(2)
-  for (const heading of headings) {
-    expect({ heading: textOf(heading), wrap: heading.props?.wrap }).toEqual({ heading: textOf(heading), wrap: 'truncate' })
+  // A phone wraps a Text cut at its end unless maxLines is set: each such Text has maxLines 1.
+  for (const surface of GRID_SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
+    const headings = nodesOf(await ui.drawn()).filter(node => node.type === 'Text' && /^(Baseline|Conversation|Not loaded)/.test(textOf(node)))
+    expect(headings.length).toBeGreaterThanOrEqual(2)
+    for (const heading of headings) {
+      expect({ surface, heading: textOf(heading), maxLines: heading.props?.maxLines }).toEqual({ surface, heading: textOf(heading), maxLines: 1 })
+      expect({ surface, heading: textOf(heading), wraps: heading.props?.wrap === 'wrap' }).toEqual({ surface, heading: textOf(heading), wraps: false })
+    }
+    await ui.press({ key: 'row-tool-results' })
+    const tree = await ui.drawn()
+    const trail = nodesOf(tree).find(node => node.type === 'Text' && textOf(node).endsWith('›'))
+    expect({ surface, maxLines: trail?.props?.maxLines }).toEqual({ surface, maxLines: 1 })
+    const name = nodesOf(tree).find(node => node.type === 'Text' && node.props?.weight === 'bold')
+    expect({ surface, maxLines: name?.props?.maxLines }).toEqual({ surface, maxLines: 1 })
+    await ui.press({ key: 'back' })
+    await ui.unmount()
   }
-  await ui.press({ key: 'row-tool-results' })
-  const trail = nodesOf(await ui.drawn()).find(node => node.type === 'Text' && textOf(node).endsWith('›'))
-  expect(trail?.props?.wrap).toBe('truncate')
+})
+
+test('a name that does not open is one line on every surface: Free space, Reserve, and a title that is not a Button', async ($, on) => {
+  await chatWorld($, on, OPENING)
+  for (const surface of GRID_SURFACES) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface, props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
+    const lineOf = (tree: unknown, text: RegExp) => nodesOf(tree).find(node => node.type === 'Text' && text.test(textOf(node)))?.props?.maxLines
+    const one = await ui.drawn()
+    expect({ surface, free: lineOf(one, /^Free space$/), reserve: lineOf(one, /^Reserve/) }).toEqual({ surface, free: 1, reserve: 1 })
+    await ui.press({ key: 'row-mcp' })
+    const two = await ui.drawn()
+    const closed = gridRowsOf(two).filter(row => !nodesOf(row).some(node => node.type === 'Button'))
+    expect(closed.length).toBeGreaterThan(0)
+    for (const row of closed) {
+      const title = nodesOf(row).find(node => node.type === 'Text')!
+      expect({ surface, title: textOf(title), maxLines: title.props?.maxLines }).toEqual({ surface, title: textOf(title), maxLines: 1 })
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('at 46 columns two tools of one server keep labels of their own: a title that is not a path is cut in its middle', async ($, on) => {
+  const w = world(on)
+  const base = richUsage()
+  const mcpTools = [
+    { name: 'mcp__notes__search', serverName: 'notes', tokens: 400, isLoaded: true },
+    { name: 'mcp__notes__lookup', serverName: 'notes', tokens: 300, isLoaded: true },
+    { name: 'mcp__0d2d52de-84ea-4267__get_meetings', serverName: '0d2d52de-84ea-4267', tokens: 200, isLoaded: true },
+  ]
+  w.usage = { ...base, context: { ...base.context, breakdown: { ...base.context.breakdown!, mcpTools } } }
+  w.messages = OPENING
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 46 } })
+  await ui.press({ key: 'row-mcp' })
+  const titles = gridRowsOf(await ui.drawn())
+    .filter(row => textOf(row).startsWith('mcp'))
+    .map(row => textOf(((row.children ?? []).filter(isNode)[0]!.children ?? []).filter(isNode)[0]))
+  expect(titles).toHaveLength(3)
+  // The long tool name is cut, and its end stays.
+  expect(titles.some(title => title.includes('…') && title.endsWith('eetings'))).toBe(true)
+  expect(titles.filter(title => title.endsWith('search') || title.endsWith('lookup'))).toHaveLength(2)
+  expect(new Set(titles).size).toBe(3)
   await ui.press({ key: 'back' })
   await ui.unmount()
+})
+
+test('a level 1 row shows its full name where it fits in the grid, whatever the terminal’s name column holds', async ($, on) => {
+  await realWorld($, on)
+  for (const columns of [58, 60, 61]) {
+    const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: columns } })
+    const tree = await ui.drawn()
+    const row = gridRowWith(tree, 'row-system')!
+    const label = String(nodesOf(row).find(node => node.type === 'Button')?.props?.label)
+    const full = 'System prompt and built-in tools'
+    expect({ columns, fits: cellWidth(full) + BUTTON_PAD_CELLS <= nameRoomOf(row, gridCells(columns)) }).toEqual({ columns, fits: true })
+    expect({ columns, label }).toEqual({ columns, label: full })
+    await ui.unmount()
+  }
+  // In a pane too narrow for the short name, the short name is cut: the label is never empty.
+  const narrow = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: { ...FOCUSED_PANE.props, bodyColumns: 10 } })
+  const labels = nodesOf(await narrow.drawn())
+    .filter(node => node.type === 'Button' && String(node.props?.key).startsWith('row-'))
+    .map(node => String(node.props?.label))
+  expect(labels.length).toBeGreaterThan(3)
+  expect(labels.filter(label => label === '')).toEqual([])
+  await narrow.unmount()
 })

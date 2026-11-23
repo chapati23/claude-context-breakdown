@@ -6,6 +6,7 @@ This repository is a Claude Code mod. The repository root is the mod folder. The
 - Product record: [PRODUCT.md](PRODUCT.md). It states the users, the purpose and the constraints that bind a design.
 - Project terms: [CONTEXT.md](CONTEXT.md). Use them in code, comments and prose.
 - Decision records: [docs/adr](docs/adr).
+- Live checks in a real Claude Code session, in the terminal and in the desktop app: the `verify-context-breakdown` skill in [.agents/skills/verify-context-breakdown](.agents/skills/verify-context-breakdown/SKILL.md). Evidence goes to `.verify/`, which git ignores.
 
 ## Reviews on pull requests
 

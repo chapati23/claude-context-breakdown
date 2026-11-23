@@ -117,7 +117,7 @@ To get new versions without these commands, turn on auto-update for the marketpl
 
 ## Use
 
-The bar is always visible above the prompt. The pane has three levels:
+The bar is always visible above the prompt. When other mods also draw rows there, the bar takes the last row, right above the prompt. When the rows do not all fit in the space above the prompt, the bar keeps its place, so that it stays in view. When the bar is the only row and the space has room for two rows, a blank row separates the bar from the line above it. The pane has three levels:
 
 1. **Segments.** Every segment with its tokens, its share of what is used, and the tokens it gained since your last prompt.
 2. **Items.** The concrete things inside one segment: each instruction file, each tool result, each skill body, each prompt. The `MCP tools` row of Not loaded opens a list of the same kind: the MCP servers whose tools are not loaded.

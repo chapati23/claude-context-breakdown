@@ -5,7 +5,7 @@ import { CHIP_GAP } from '../hooks/bar'
 import { inkOn } from '../hooks/color'
 import { CHIP_HOLD_MS } from '../hooks/focus'
 import { DARK, LIGHT, edgeColor } from '../hooks/palette'
-import { BAND, PANE, SUMMARY, SURFACES, TRANSCRIPT, usage, world } from './fixtures'
+import { BAND, PANE, barRowOf, SUMMARY, SURFACES, TRANSCRIPT, usage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
 
@@ -26,7 +26,7 @@ const isPlaced = (node: Node) => node.type === 'Box' && node.props?.position ===
  * starts at, and the chips laid over it.
  */
 async function rowOf(ui: { drawn: () => Promise<unknown> }) {
-  const tree = (await ui.drawn()) as Node
+  const tree = barRowOf(await ui.drawn()) as Node
   const children = (tree.children ?? []).filter(isNode)
   const flow: { node: Node; start: number; text: string }[] = []
   let column = 0

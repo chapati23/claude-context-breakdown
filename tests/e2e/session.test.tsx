@@ -9,7 +9,7 @@ import type { Engine } from 'claude-code/testing'
 
 import type { BarClientProps } from '../../hooks/barclient'
 import { DARK, LIGHT } from '../../hooks/palette'
-import { BAND, MESSAGES, PANE, SUMMARY, TRANSCRIPT, usage, world } from '../fixtures'
+import { BAND, MESSAGES, barRowOf, PANE, SUMMARY, TRANSCRIPT, usage, world } from '../fixtures'
 import type { World } from '../fixtures'
 import { START, flatten, mountPane } from './helpers'
 import { colorsIn, figuresOf, level2, widest } from './journeys'
@@ -21,8 +21,13 @@ type Surface = 'terminal' | 'desktop'
 /** The band's flattened text at a width, and the colours it names. Mounted and unmounted. */
 async function bandAt($: Engine, surface: Surface, columns: number) {
   const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns: columns } })
-  const tree = await ui.drawn()
-  const out = { lines: flatten(tree as RenderNode, { surface, columns }), colors: colorsIn(tree as RenderNode) }
+  const band = await ui.drawn()
+  const tree = barRowOf(band)
+  const out = {
+    lines: flatten(tree as RenderNode, { surface, columns }),
+    colors: colorsIn(tree as RenderNode),
+    blankAbove: tree !== band,
+  }
   await ui.unmount()
 
   return out
@@ -80,7 +85,9 @@ test('J7 terminal: start, measure, tool calls, compaction, /clear, light theme, 
   await w.clock.advance(0)
   expect(w.usageCalls).toBe(1)
   for (const columns of [80, 100]) {
-    const band = (await bandAt($, 'terminal', columns)).lines
+    const { lines: band, blankAbove } = await bandAt($, 'terminal', columns)
+    // Alone in the band, the bar keeps a blank row above it.
+    expect(blankAbove).toBe(true)
     expect(band).toHaveLength(1)
     expect(widest(band)).toBeLessThanOrEqual(columns)
     expect(totalOf(band)).toBe('66k/200k 33%')
@@ -414,7 +421,7 @@ test('J7 desktop: the bar is one Client; a click opens the pane; the widget and 
 
   // A click on Claude output's cell, posted from the Client, opens the pane on that segment.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 100 } })
-  const client = (await band.drawn()) as { props: { props: BarClientProps } }
+  const client = barRowOf(await band.drawn()) as { props: { props: BarClientProps } }
   const { runs, parts } = client.props.props
   const claude = runs.find(run => run.color === DARK.segments['claude-output'] && typeof run.target === 'number')?.target
   const identity = typeof claude === 'number' ? parts[String(claude)] : undefined

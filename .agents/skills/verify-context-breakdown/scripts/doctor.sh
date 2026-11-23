@@ -9,7 +9,7 @@ set -uo pipefail
 
 REPO=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 SETTINGS=$HOME/.claude/settings.json
-BAR_RE='[0-9.]+[kM]?/[0-9.]+[kM] +[0-9]+%'
+BAR_RE='[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%'
 fail=0
 ok() { echo "ok    $*"; }
 bad() { echo "FAIL  $*"; fail=1; }
@@ -18,10 +18,11 @@ case ${1:-} in
 tui)
   run=${2:?usage: doctor.sh tui <run>}
   meta=$REPO/.verify/$run/meta.txt
-  t() { tmux -L "vctx-$run" -f /dev/null "$@"; }
+  sock=vctx-$(printf %s "$REPO" | shasum | cut -c1-6)-$run   # as in tui.sh
+  t() { tmux -L "$sock" -f /dev/null "$@"; }
   [ -f "$meta" ] && ok "meta: $(sed -n 's/^build: //p' "$meta"), mod $(sed -n 's/^mod version: //p' "$meta")" || bad "no $meta: start the run with tui.sh start"
   root=$(sed -n 's/^root: //p' "$meta" 2>/dev/null)
-  if t has-session 2>/dev/null; then ok "tmux server vctx-$run is up"; else bad "tmux server vctx-$run is not up"; fi
+  if t has-session 2>/dev/null; then ok "tmux server $sock is up"; else bad "tmux server $sock is not up"; fi
   # claude sets its process title to its version, so ask whether the pane's process ended.
   [ "$(t display -p '#{pane_dead}' 2>/dev/null)" = 0 ] && ok "claude is still running in the pane" || bad "claude exited, or the pane is gone"
   # The engine writes the API declarations into each mod folder it loads, so a

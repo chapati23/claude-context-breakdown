@@ -13,7 +13,7 @@ This folder is the maintained source for proving the mod's user-facing behaviour
 ## Driving conventions
 
 - Wait for text, not for time: `scripts/tui.sh wait <run> '<ERE>'`.
-- Stable handles: the bar's total (`[0-9.]+[kM]?/[0-9.]+[kM] +[0-9]+%`), the pane's `✕`, `free before compaction` (segments), `% of segment` (items), `item <n> of <m>` (content), the controls line (`⏎ 1-9: Open`, `b: Back`, `r: Refresh`, `x: Close`).
+- Stable handles: the bar's total (`[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%`), the pane's `✕`, `free before compaction` (segments), `% of segment` (items), `item <n> of <m>` (content), the controls line (`⏎ 1-9: Open`, `b: Back`, `r: Refresh`, `x: Close`).
 - Row digits and row order depend on the session's content. Read the screen, then press the digit of the row by its name.
 - The terminal and the desktop use different keys: digits, `j` and `k` are terminal only. On the desktop, use clicks; Tab, Enter and Escape cannot be sent reliably (see ../SKILL.md, Desktop app, Drive).
 

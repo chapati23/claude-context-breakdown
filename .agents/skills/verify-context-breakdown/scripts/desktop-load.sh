@@ -31,9 +31,12 @@ on)
   ref=HEAD
   [ "${1:-}" = --ref ] && ref=$2
   [ -d "$STATE" ] && die "run $run already holds a desktop load; run 'off' first"
-  mkdir -p "$STATE"
   build=$(mktemp -d "${TMPDIR:-/tmp}/vctx-desktop-$run.XXXXXX")
+  # Until the settings change, a failure leaves nothing behind, so `on` can be retried.
+  trap 'rm -rf "$build" "$STATE"' ERR
   git -C "$REPO" archive "$ref" | tar -x -C "$build"
+  mkdir -p "$STATE"
+  echo "$build" > "$STATE/build"
   cp -p "$SETTINGS" "$STATE/settings.before.json"
   python3 - "$SETTINGS" "$build" "$KEY" "$STATE/prev.json" <<'EOF'
 import json, sys
@@ -48,8 +51,8 @@ env['CLAUDE_CODE_PLUGIN_DIR_WATCH'] = '1'
 ep[key] = False
 open(path, 'w').write(json.dumps(d, indent=2, ensure_ascii=False) + '\n')
 EOF
+  trap - ERR
   cp -p "$SETTINGS" "$STATE/settings.ours.json"
-  echo "$build" > "$STATE/build"
   {
     echo "desktop build: $ref ($(git -C "$REPO" rev-parse --short "$ref"))"
     echo "mod version: $(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$build/.claude-plugin/plugin.json")"
@@ -63,17 +66,20 @@ off)
     # Nobody touched the file since `on`: restore its exact bytes.
     cat "$STATE/settings.before.json" > "$SETTINGS"
   else
-    # The file changed meanwhile: undo only our three entries.
-    python3 - "$SETTINGS" "$KEY" "$STATE/prev.json" <<'EOF'
+    # The file changed meanwhile: undo only those of our three entries that
+    # still hold the value this run wrote; a newer value is someone's edit.
+    python3 - "$SETTINGS" "$KEY" "$STATE/prev.json" "$(cat "$STATE/build")" <<'EOF'
 import json, sys
-path, key, prev = sys.argv[1:]
+path, key, prev, build = sys.argv[1:]
 d = json.load(open(path)); p = json.load(open(prev))
 env = d.setdefault('env', {}); ep = d.setdefault('enabledPlugins', {})
-for k, v in (('CLAUDE_CODE_PLUGIN_DIRS', p['dirs']), ('CLAUDE_CODE_PLUGIN_DIR_WATCH', p['watch'])):
+for k, ours, v in (('CLAUDE_CODE_PLUGIN_DIRS', build, p['dirs']), ('CLAUDE_CODE_PLUGIN_DIR_WATCH', '1', p['watch'])):
+    if env.get(k) != ours: continue
     if v is None: env.pop(k, None)
     else: env[k] = v
-if p['enabled'] == '__unset__': ep.pop(key, None)
-else: ep[key] = p['enabled']
+if ep.get(key) is False:
+    if p['enabled'] == '__unset__': ep.pop(key, None)
+    else: ep[key] = p['enabled']
 open(path, 'w').write(json.dumps(d, indent=2, ensure_ascii=False) + '\n')
 EOF
     echo "note: settings changed during the run; removed only this run's entries"

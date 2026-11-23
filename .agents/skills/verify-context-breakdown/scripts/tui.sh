@@ -11,22 +11,23 @@
 #   tui.sh screen  <run>                   print the screen as plain text
 #   tui.sh stop    <run>                   end the session, delete the build; keep evidence
 #
-# <run> is a short name of your choice ([a-z0-9-]). Each run has its own tmux
-# server (-L vctx-<run>), its own frozen build of the mod and its own empty
+# <run> is a short name of your choice ([a-z0-9-]), new for each start. Each run has its own tmux
+# server (-L vctx-<checkout hash>-<run>), its own frozen build of the mod and its own empty
 # working folder, so several runs can go side by side. Evidence goes to
 # <repo>/.verify/<run>/ (git ignores .verify/) and survives `stop`.
 set -euo pipefail
 
 REPO=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 HERE=$(cd "$(dirname "$0")" && pwd)
-BAR_RE='[0-9.]+[kM]?/[0-9.]+[kM] +[0-9]+%'
+BAR_RE='[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%'
 
 die() { echo "tui.sh: $*" >&2; exit 1; }
 [ $# -ge 2 ] || die "usage: tui.sh <start|send|keys|wait|capture|screen|stop> <run> ..."
 cmd=$1 run=$2; shift 2
 [[ $run =~ ^[a-z0-9-]+$ ]] || die "run name must match [a-z0-9-]+"
 EVID=$REPO/.verify/$run
-SOCK=vctx-$run
+# The socket name carries a hash of the checkout path, so two worktrees can use one run name.
+SOCK=vctx-$(printf %s "$REPO" | shasum | cut -c1-6)-$run
 t() { tmux -L "$SOCK" -f /dev/null "$@"; }
 screen() { t capture-pane -p | sed 's/[[:space:]]*$//'; }
 
@@ -55,20 +56,28 @@ start)
     esac
   done
   t has-session 2>/dev/null && die "run $run is already up; stop it first"
+  # One evidence folder per launch: a reused name could pair old captures with a new build.
+  [ -e "$EVID" ] && die "evidence for run $run exists in $EVID; pick a new run name"
   root=$(mktemp -d "${TMPDIR:-/tmp}/vctx-$run.XXXXXX")
+  trap 'rm -rf "$root"' ERR
   build=$root/build work=$root/work
-  mkdir -p "$build" "$work" "$EVID"
+  mkdir -p "$build" "$work"
   if [ "$src" = ref ]; then
     git -C "$REPO" archive "$ref" | tar -x -C "$build"
     label="$ref ($(git -C "$REPO" rev-parse --short "$ref"))"
   else
+    # Skip indexed paths that no longer exist (an unstaged delete or rename).
     (cd "$REPO" && git ls-files -z --cached --others --exclude-standard -- . ':!:.agents' ':!:.claude' ':!:.verify' |
-      xargs -0 tar -cf - 2>/dev/null) | tar -x -C "$build"
+      while IFS= read -r -d '' f; do if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\0' "$f"; fi; done |
+      xargs -0 tar -cf -) | tar -x -C "$build"
     label="worktree of $(git -C "$REPO" rev-parse --short HEAD)$(git -C "$REPO" diff --quiet HEAD || echo ' + uncommitted changes')"
   fi
-  dirs="--plugin-dir $build"
-  [ $other = 1 ] && dirs="$dirs --plugin-dir $HERE/../fixtures/othermod"
+  args=(--plugin-dir "$build")
+  [ $other = 1 ] && args+=(--plugin-dir "$HERE/../fixtures/othermod")
+  args+=(--model "$model")
   touch "$root/started"
+  mkdir -p "$EVID"
+  trap - ERR
   cat > "$EVID/meta.txt" <<EOF
 run: $run
 build: $label
@@ -79,8 +88,9 @@ other mod: $([ $other = 1 ] && echo yes || echo no)
 started: $(date '+%Y-%m-%d %H:%M:%S %z')
 root: $root
 EOF
+  # Separate arguments: tmux runs them without a shell, so paths with spaces stay whole.
   t new-session -d -x "${size%x*}" -y "${size#*x}" -c "$work" \
-    "FORCE_COLOR=3 COLORTERM=truecolor claude $dirs --model $model"
+    env FORCE_COLOR=3 COLORTERM=truecolor claude "${args[@]}"
   # A new folder can ask for trust first. The folder is our own empty scratch folder.
   for _ in $(seq 1 60); do
     s=$(screen 2>/dev/null || true)

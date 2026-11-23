@@ -20,7 +20,7 @@ Preconditions:
 
 - **Segment.** `scripts/tui.sh send <run> "/ctx your"`, wait for `% of segment`, capture `arg-your`. The title line names Your prompts' segment (`Prompts`).
 - **No match.** `scripts/tui.sh send <run> "/ctx foo"`, wait for `No segment matches`, capture `arg-foo`. The heading `free before compaction` shows with the note.
-- **Not loaded.** `scripts/tui.sh send <run> "/ctx not"`, wait for `once loaded|All MCP tools are loaded now`, capture `arg-not`. Either the server list (`% of <n>k`) or the note shows, depending on the user's MCP setup.
+- **Not loaded.** `scripts/tui.sh send <run> "/ctx not"`, wait for `Not loaded › MCP tools|All MCP tools are loaded now`, capture `arg-not`. Either the server list (breadcrumb `Context › Not loaded › MCP tools`; `% of <n>k` only when Claude Code gives token figures) or the note shows, depending on the user's MCP setup.
 - **Desktop.** Type the same commands in the composer and save one picture each.
 
 ## Gotchas

@@ -20,11 +20,13 @@ Feature map: [features/README.md](features/README.md). A proof covers every entr
 
 ## Before any live check
 
-Run the unit checks first; a live run cannot find what these already find, and they take seconds:
+Run the unit checks first, **from the repository root** (the mod folder); a live run cannot find what these already find, and they take seconds:
 
 ```sh
 claude plugin validate . && claude plugin test . && npx --yes -p typescript@5.9.3 tsc -p .
 ```
+
+`tsc` needs the API declarations in `.claude-plugin/types/`, which git ignores: a new worktree lacks them until Claude Code loads the folder as a mod. See "Development" in `README.md`.
 
 ## Terminal
 
@@ -34,10 +36,10 @@ claude plugin validate . && claude plugin test . && npx --yes -p typescript@5.9.
 scripts/tui.sh start <run> [--worktree | --ref <git-ref>] [--other] [--size 110x24] [--model haiku]
 ```
 
-- `<run>`: a short name, `[a-z0-9-]`. Each run is isolated: its own tmux server (`-L vctx-<run>`), its own frozen copy of the mod in a temp folder, its own empty working folder. Several runs can go side by side (for example `before` with `--ref origin/main` and `after` with `--worktree`).
+- `<run>`: a short name, `[a-z0-9-]`, new for each launch: `start` refuses a name whose evidence folder exists, so old captures never pair with a new build. Each run is isolated: its own tmux server (`-L vctx-<hash of the checkout path>-<run>`), its own frozen copy of the mod in a temp folder, its own empty working folder. Several runs can go side by side (for example `before` with `--ref origin/main` and `after` with `--worktree`).
 - `--worktree` (default) copies the checkout as it is, uncommitted edits included. `--ref` copies a commit with `git archive`.
 - `--other` also loads `fixtures/othermod`, a probe mod that draws one band row (`OTHER MOD ROW · this row comes first`). Use it for the band order.
-- Ready means: the `❯` prompt and exactly one bar line show. The bar line matches `[0-9.]+[kM]?/[0-9.]+[kM] +[0-9]+%` (for example `69k/1M 7%`). `start` waits up to 60 s, accepts the folder-trust question for its own scratch folder, and prints `ready: run <run>, <build>`. On a timeout it prints the screen; read it, then `stop`.
+- Ready means: the `❯` prompt and exactly one bar line show. The bar line matches `[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%` (for example `69k/1M 7%`, or `4k/1M <1%`). `start` waits about 60 s, accepts the folder-trust question for its own scratch folder, and prints `ready: run <run>, <build>`. On a timeout it prints the screen; read it, then `stop`.
 - `--plugin-dir` takes the place of the installed copy for this session, so the installed copy does not draw a second bar. `doctor` checks this.
 
 ### Doctor
@@ -90,7 +92,7 @@ Proof standards:
 scripts/tui.sh stop <run>
 ```
 
-Kills only that run's tmux server and deletes only that run's temp folder (it checks the folder's name and its stamp). It keeps `.verify/<run>/`. Run it after every failed attempt too. Never `pkill claude` or `tmux kill-server` without `-L vctx-<run>`: the user runs their own sessions.
+Kills only that run's tmux server and deletes only that run's temp folder (it checks the folder's name and its stamp). It keeps `.verify/<run>/`. Run it after every failed attempt too, then start again under a new run name. Never `pkill claude` or `tmux kill-server` without the run's own `-L` socket: the user runs their own sessions.
 
 ## Desktop app
 

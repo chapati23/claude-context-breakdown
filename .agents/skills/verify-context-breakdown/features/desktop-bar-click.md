@@ -5,7 +5,8 @@ In the desktop app the bar is clickable: a click on a segment opens that segment
 ## Sub-features
 
 - `click-segment` a click on a segment opens its items.
-- `click-total` a click on the total or the legend opens the segments.
+- `click-total` a click on the total opens the segments.
+- `click-legend` a click on the legend opens the segments.
 - `hover-legend` the pointer on a segment dims the others and names it (needs real hover).
 
 ## How to get to it (user POV)
@@ -21,6 +22,7 @@ Preconditions:
 - **Locate.** `get_window_state` with `screenshot_out_file: ".verify/<run>/desktop-before-click.png"`. Find the bar row above the composer in the picture.
 - **Segment.** Pixel-click the middle of the widest segment. Wait 2 s, move the pointer once, save `desktop-click-segment.png`. The pane shows that segment's items (`% of segment`).
 - **Total.** Take a new `get_window_state` (the total moves when the pane opens), pixel-click the middle of the total text, wait, save `desktop-click-total.png`. The pane shows the segments (`free before compaction`).
+- **Legend.** Click the widest segment again so the items show, take a new `get_window_state`, pixel-click the middle of the legend's words, wait, save `desktop-click-legend.png`. The pane shows the segments again.
 - **Hover.** Not drivable: `move_cursor` moves an overlay, not the pointer. Report `hover-legend` as not checked, or hand the user the matching line of `docs/e2e.md`.
 
 ## Gotchas

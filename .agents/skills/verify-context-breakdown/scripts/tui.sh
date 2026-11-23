@@ -32,9 +32,10 @@ t() { tmux -L "$SOCK" -f /dev/null "$@"; }
 screen() { t capture-pane -p | sed 's/[[:space:]]*$//'; }
 
 wait_for() { # <ERE> <secs>
-  local re=$1 secs=$2 i=0
+  local re=$1 secs=$2 i=0 s
   while [ $i -lt $((secs * 2)) ]; do
-    screen 2>/dev/null | grep -Eq -- "$re" && return 0
+    # Read the screen into a variable first: grep -q in a pipe can end it early (status 141 under pipefail).
+    s=$(screen 2>/dev/null || true); grep -Eq -- "$re" <<<"$s" && return 0
     sleep 0.5; i=$((i + 1))
   done
   echo "tui.sh: timed out after ${secs}s waiting for /$re/. Screen:" >&2

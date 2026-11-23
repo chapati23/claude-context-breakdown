@@ -7,6 +7,8 @@ description: Prove that the context-breakdown Claude Code mod (the context bar a
 
 The mod draws two things: the **bar** (one row in the band above the prompt) and the **pane** (opened by `/ctx`, three levels: segments, items, content). Terms are in `CONTEXT.md`; the user-facing behaviour is in "Use" in `README.md`.
 
+The scripts are for macOS (`stat -f`, `sips`, the Chrome path, cmux-cua).
+
 Two surfaces, two harnesses:
 
 | Surface | Harness | Who can run it |

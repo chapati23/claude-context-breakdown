@@ -52,4 +52,4 @@ def conv(line):
         res.append(f'<span style="{css}">{html.escape(part)}</span>')
     return ''.join(res)
 body = '\n'.join(conv(l) for l in lines)
-open(out, 'w').write(f'''<!doctype html><meta charset="utf-8"><style>body{{margin:0;background:#0c0c0c}}h1{{font:600 14px -apple-system,sans-serif;color:#aaa;margin:10px 14px 0}}pre{{font:15px/1.25 Menlo,monospace;margin:8px 14px 14px;color:#d4d4d4}}</style><h1>{html.escape(title)}</h1><pre>{body}</pre>''')
+open(out, 'w', encoding='utf-8').write(f'''<!doctype html><meta charset="utf-8"><style>body{{margin:0;background:#0c0c0c}}h1{{font:600 14px -apple-system,sans-serif;color:#aaa;margin:10px 14px 0}}pre{{font:15px/1.25 Menlo,monospace;margin:8px 14px 14px;color:#d4d4d4}}</style><h1>{html.escape(title)}</h1><pre>{body}</pre>''')

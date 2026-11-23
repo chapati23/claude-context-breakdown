@@ -85,9 +85,9 @@ test('J7 terminal: start, measure, tool calls, compaction, /clear, light theme, 
   await w.clock.advance(0)
   expect(w.usageCalls).toBe(1)
   for (const columns of [80, 100]) {
-    const band = (await bandAt($, 'terminal', columns)).lines
+    const { lines: band, blankAbove } = await bandAt($, 'terminal', columns)
     // Alone in the band, the bar keeps a blank row above it.
-    expect((await bandAt($, 'terminal', columns)).blankAbove).toBe(true)
+    expect(blankAbove).toBe(true)
     expect(band).toHaveLength(1)
     expect(widest(band)).toBeLessThanOrEqual(columns)
     expect(totalOf(band)).toBe('66k/200k 33%')

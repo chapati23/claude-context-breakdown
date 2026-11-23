@@ -1126,6 +1126,28 @@ export const register: Register = on => {
     return bandTree($.ui.resolve(e), model, palette, openPane, focused, pictureFigures(snapshot), e.surface, barClientFailed)
   })
 
+  // The bar is the band's last row, so it stands right above the prompt, and
+  // another plugin's row, not the bar, meets the line above the band. Alone in
+  // the band, the bar keeps one blank row above it for the same reason.
+  on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
+    const ours = e.props.rows.find(row => row.plugin === PLUGIN)
+    if (ours === undefined) {
+      return next(e)
+    }
+    const rows = [...e.props.rows.filter(row => row !== ours), ours]
+    const tree = await next({ ...e, props: { ...e.props, rows } })
+    if (rows.length > 1) {
+      return tree
+    }
+    const { Box } = $.ui.resolve(e)
+
+    return (
+      <Box flexDirection="column" paddingTop={1}>
+        {tree}
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: 'context-breakdown' }, async ($, e) => {
     const snapshot = await read($, snapshotAtom)
     const palette = paletteFor(await read($, themeAtom))

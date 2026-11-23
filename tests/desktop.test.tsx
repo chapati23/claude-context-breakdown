@@ -13,7 +13,7 @@ import { BAR_CELLS, BUTTON_PAD_CELLS, LEAD_CELLS, gridCells } from '../hooks/gri
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
-import { BAND, CHAT, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
+import { BAND, CHAT, barRowOf, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
 import type { World } from './fixtures'
 import { flatten, mountPane } from './e2e/helpers'
 import { gridRowWith, gridRowsOf, isNode, nodesOf, rightColumns, rowLine } from './grid'
@@ -29,7 +29,7 @@ const textOf = (x: unknown): string =>
 
 /** The Client element of a desktop band, with the props it was given. */
 async function clientOf(ui: { drawn: () => Promise<unknown> }) {
-  const tree = (await ui.drawn()) as Node
+  const tree = barRowOf(await ui.drawn()) as Node
 
   expect(tree.type).toBe('Client')
 
@@ -38,7 +38,7 @@ async function clientOf(ui: { drawn: () => Promise<unknown> }) {
 
 /** The terminal band's visible text: its flow, without the chips laid over it. */
 async function terminalRowText(ui: { drawn: () => Promise<unknown> }): Promise<string> {
-  const tree = (await ui.drawn()) as Node
+  const tree = barRowOf(await ui.drawn()) as Node
 
   return (tree.children ?? [])
     .filter(isNode)

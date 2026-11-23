@@ -126,6 +126,19 @@ export const FOCUSED_PANE = { ...PANE, props: { ...PANE.props, isFocused: true }
 
 export const SURFACES = ['terminal', 'desktop'] as const
 
+/**
+ * The bar's row in a drawn band. Alone in the band, the bar stands in a Box
+ * that adds the blank row above it; this returns the row inside that Box.
+ */
+export function barRowOf<T>(tree: T): T {
+  const node = tree as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  if (node.type === 'Box' && node.props?.paddingTop === 1 && node.children?.length === 1) {
+    return node.children[0] as T
+  }
+
+  return tree
+}
+
 type Drawn = { props: Record<string, unknown>; children: readonly unknown[] }
 
 /**

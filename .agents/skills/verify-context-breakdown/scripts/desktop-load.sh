@@ -31,6 +31,13 @@ on)
   ref=HEAD
   [ "${1:-}" = --ref ] && ref=$2
   [ -d "$STATE" ] && die "run $run already holds a desktop load; run 'off' first"
+  # One desktop load at a time, across all runs: a second load would record the
+  # first one's entries as "previous" and restore a deleted build later.
+  for other in "$REPO"/.verify/*/desktop-state; do
+    [ -d "$other" ] && die "another run holds a desktop load ($other); run 'off' for it first"
+  done
+  current=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('env',{}).get('CLAUDE_CODE_PLUGIN_DIRS',''))" "$SETTINGS")
+  [[ $(basename "${current:-none}") == vctx-desktop-* ]] && die "settings already load a verify build ($current); undo that load first"
   build=$(mktemp -d "${TMPDIR:-/tmp}/vctx-desktop-$run.XXXXXX")
   # Until the settings change, a failure leaves nothing behind, so `on` can be retried.
   trap 'rm -rf "$build" "$STATE"' ERR

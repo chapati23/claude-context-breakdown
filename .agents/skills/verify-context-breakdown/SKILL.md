@@ -99,7 +99,7 @@ Kills only that run's tmux server and deletes only that run's temp folder (it ch
 The desktop app is one shared instance: the user's own. There is no isolation. Rules:
 
 - **Ask first.** Tell the user what you will do and for how long (about 5 minutes for one feature), send `/usr/local/bin/nudge-me "<session label>" "<reason>"` as its own Bash call, and wait for their go. They must not use the keyboard or the mouse during the block. Ask them to put the Claude window beside the terminal, not under it: the app does not repaint while covered.
-- One desktop load at a time. `desktop-load.sh on` refuses a second load for the same run; check `doctor.sh desktop` before you start, and do not start when it shows another folder loaded.
+- One desktop load at a time. `desktop-load.sh on` refuses while any run holds a load or the settings already point at a verify build; run `doctor.sh desktop` before you start.
 
 ### Launch
 

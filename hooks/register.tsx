@@ -1129,14 +1129,21 @@ export const register: Register = on => {
   // The bar is the band's last row, so it stands right above the prompt, and
   // another plugin's row, not the bar, meets the line above the band. Alone in
   // the band, the bar keeps one blank row above it for the same reason.
+  // Neither change may push the bar out of the band's window (`maxRows`). Each
+  // row takes at least one line, so the bar moves only while every row can
+  // fit, and the blank row comes only while two rows fit. The engine gives no
+  // row's height, so a row of several lines can still fill the window.
   on('ui.render', { component: 'AbovePromptList' }, async ($, e, next) => {
-    const ours = e.props.rows.find(row => row.plugin === PLUGIN)
-    if (ours === undefined) {
+    const { rows, maxRows } = e.props
+    const ours = rows.find(row => row.plugin === PLUGIN)
+    if (ours === undefined || rows.length > maxRows) {
       return next(e)
     }
-    const rows = [...e.props.rows.filter(row => row !== ours), ours]
-    const tree = await next({ ...e, props: { ...e.props, rows } })
     if (rows.length > 1) {
+      return next({ ...e, props: { ...e.props, rows: [...rows.filter(row => row !== ours), ours] } })
+    }
+    const tree = await next(e)
+    if (maxRows < 2) {
       return tree
     }
     const { Box } = $.ui.resolve(e)

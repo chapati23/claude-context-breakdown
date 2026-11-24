@@ -7,7 +7,7 @@ While the pane has the keyboard, keys move in it and press its controls. The ter
 - `key-move` terminal: `j`, `k` and the arrows move the ring row by row; desktop: Tab and Shift+Tab move the focus.
 - `key-open` Enter opens the row with the ring; terminal: a digit opens that row.
 - `key-letters` `b` back, `s` sort, `r` refresh, `x` close (and `n`, `p`, `f`, `v`, `c`, `m` at their levels).
-- `key-escape` `Esc` gives the keyboard back. Terminal: the controls lose their keys and a hint line shows. Desktop: the key caps stay, and the hint line shows only after the window loses the focus once.
+- `key-escape` `Esc` gives the keyboard back. Terminal: the controls lose their keys and a hint line shows. Desktop: the key caps stay, and the hint line shows only after the window loses and regains the focus.
 - `key-regain` `/ctx` on an open pane gives it the keyboard again.
 
 ## How to get to it (user POV)

@@ -175,7 +175,7 @@ In the content of an item, the mouse wheel and the arrow keys scroll the text. I
 
 In the desktop app, the pane draws no `↓` or `↑` control and no `j` or `k`, at any level. In the segments and the items, the words before the controls say `⏎: Open`: `enter` opens the row with the focus. The app limits a mod's scroll to the height the pane had when it opened, so the mod moves the window only to its top: `f`, `v`, `n` and `p` show the new text from its top. When Claude adds an item to the list that the pane shows, the focus stays on its row: a new first row does not take it.
 
-In the desktop app, the app draws the key of each control as a small key cap inside its button, before the label. The controls keep their key caps with and without the keyboard. The rows have no key cap, so every row starts its name in the same column. The controls line keeps the same controls in the same order, so `Esc` adds only the line that says how to get the keys. The desktop app draws that line late: after `Esc` it still tells the mod that the pane has the keyboard, until its window loses the focus once.
+In the desktop app, the app draws the key of each control as a small key cap inside its button, before the label. The controls keep their key caps with and without the keyboard. The rows have no key cap, so every row starts its name in the same column. The controls line keeps the same controls in the same order, so `Esc` adds only the line that says how to get the keys. The desktop app draws that line late: after `Esc` it still tells the mod that the pane has the keyboard, until its window loses and regains the focus.
 
 Reading the pane:
 

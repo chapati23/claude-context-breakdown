@@ -63,7 +63,7 @@ Binding constraints (confirmed 2026-11-19):
 Technical constraints:
 
 - The mods API is early access and can change between releases. A Claude Code update can break the mod.
-- A mod cannot read which palette the theme `auto` resolved to, or when `Esc` or typing takes the keyboard back. In the desktop app, the pane's own `isFocused` stays true after `Esc` until the window loses the focus. The desktop app does not tell a mod where `tab` moved the focus, and it limits a mod's scroll.
+- A mod cannot read which palette the theme `auto` resolved to, or when `Esc` or typing takes the keyboard back. In the desktop app, the pane's own `isFocused` stays true after `Esc` until the window loses and regains the focus. The desktop app does not tell a mod where `tab` moved the focus, and it limits a mod's scroll.
 - The mod shows the main session only, not the windows of subagents. It reads at most the newest 4,096 messages. It shows how the window grew since the last prompt only, and it keeps no history. The system prompt has no finer split.
 
 Terminology: the terms in [CONTEXT.md](CONTEXT.md) are binding in code, comments, prose and interface text. Each term lists the words to avoid.

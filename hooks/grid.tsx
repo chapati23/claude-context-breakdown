@@ -38,12 +38,12 @@ import { formatShare, formatTokens } from './format'
 import { colorOf } from './palette'
 import type { Palette } from './palette'
 import {
-  ADDED_NOTE,
   BASELINE_HEADING,
   CONVERSATION_HEADING,
   NOT_LOADED_HEADING,
   RESERVE_NAME,
   SERVERS_ROW,
+  addedNote,
   contentBody,
   contentListCrumb,
   keyGroups,
@@ -485,7 +485,7 @@ function segmentsGrid(
         </Box>
       )}
       {notes(g.el, [
-        ...(table.added === true ? [ADDED_NOTE] : []),
+        ...(table.added === true ? [addedNote(snapshot, stats.added)] : []),
         snapshot.isEstimate
           ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
           : 'All numbers are estimates.',

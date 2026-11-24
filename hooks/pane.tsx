@@ -385,6 +385,19 @@ export const NOT_LOADED_HEADING = 'Not loaded · outside the window'
 export const RESERVE_NAME = 'Reserve for compaction'
 /** The note below level 1's table while it shows the column `added`: it says what the column counts. */
 export const ADDED_NOTE = `${ADDED_NAME}: tokens since your last prompt.`
+/**
+ * The sentence the note adds while a baseline segment gained tokens: the
+ * Baseline heading says "before your first prompt", so a figure there
+ * needs a reason.
+ */
+export const BASELINE_ADDED_NOTE = 'A baseline segment grows when Claude Code loads more of its content later.'
+
+/** The note below level 1's table while it shows the column `added`; with BASELINE_ADDED_NOTE while a baseline segment grew. */
+export function addedNote(snapshot: ContextBreakdownSnapshot, added: Added): string {
+  const grew = snapshot.baseline.some(segment => (added[segment.id] ?? 0) > 0)
+
+  return grew ? `${ADDED_NOTE} ${BASELINE_ADDED_NOTE}` : ADDED_NOTE
+}
 
 /** The deferred category names say "(deferred)"; the heading says "Not loaded". */
 export function withoutDeferred(name: string): string {
@@ -602,7 +615,7 @@ function segmentsBody(
       )}
       {table.added === true && (
         <Box flexDirection="column" marginTop={1}>
-          {noteBelow(el, ADDED_NOTE, noteCells)}
+          {noteBelow(el, addedNote(snapshot, stats.added), noteCells)}
         </Box>
       )}
       {swaps && (
@@ -1477,7 +1490,7 @@ export function bodyRowsAtLeast(
     // Free space and the reserve, Not loaded, the notes and the line that describes the ringed row.
     3 +
     (one.deferred.length === 0 ? 0 : 2 + one.deferred.length) +
-    (one.table.added === true ? lines(ADDED_NOTE) : 0) +
+    (one.table.added === true ? lines(addedNote(snapshot, one.stats.added)) : 0) +
     1 +
     DESCRIBE_ROWS +
     lines(estimatesNote(snapshot))

@@ -114,9 +114,15 @@ click)
   # An SGR mouse click, as a terminal sends it under the fullscreen layout
   # (Claude Code turns mouse tracking on there). Columns and rows count from 1.
   [ $# -ge 1 ] || die "usage: tui.sh click <run> <col> [row]"
-  col=$1 row=${2:-$(screen | grep -nE "$BAR_RE" | head -1 | cut -d: -f1)}
+  [ "$(t display -p '#{mouse_any_flag}')" = 1 ] ||
+    die "the session does not report mouse clicks (the classic renderer, e.g. CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1?)"
+  # The bar is the last total on screen: it sits above the prompt, and a total in the transcript is higher up.
+  col=$1 row=${2:-$(screen | grep -nE "$BAR_RE" | tail -1 | cut -d: -f1)}
   [ -n "$row" ] || die "no bar row on screen; pass the row"
-  t send-keys -l -- "$(printf '\e[<0;%d;%dM\e[<0;%d;%dm' "$col" "$row" "$col" "$row")" ;;
+  [[ $col =~ ^[0-9]+$ && $row =~ ^[0-9]+$ ]] && ((10#$col > 0 && 10#$row > 0)) || die "column and row must be positive numbers"
+  col=$((10#$col)) row=$((10#$row))
+  seq=$(printf '\e[<0;%d;%dM\e[<0;%d;%dm' "$col" "$row" "$col" "$row")
+  t send-keys -l -- "$seq" ;;
 screen)
   screen ;;
 capture)

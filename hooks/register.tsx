@@ -106,8 +106,13 @@ async function notePaneSeen($: Engine): Promise<void> {
   if (notedPaneSeen) {
     return
   }
-  notedPaneSeen = true
-  await quietly(update($, paneSeenAtom, () => true))
+  // Note it only after the write: a write that fails leaves the next open to try again.
+  await quietly(
+    (async () => {
+      await update($, paneSeenAtom, () => true)
+      notedPaneSeen = true
+    })(),
+  )
 }
 
 /**

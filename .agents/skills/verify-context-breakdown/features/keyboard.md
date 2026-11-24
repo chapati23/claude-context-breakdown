@@ -19,7 +19,7 @@ While the pane has the keyboard, keys move in it and press its controls. The ter
 
 Preconditions:
 
-- Terminal: a run started with `--size 120x50` (at 24 rows the hint line and the line that describes the ringed row fall below the visible pane). Rows are numbered from what is in the session: in a session with no prompt yet there are only 5 rows that open, so a digit above 5 goes to the prompt.
+- Terminal: a run started with `--size 120x50` (at 24 rows the line that describes the ringed row falls below the visible pane; the hint line and the controls stand above the rows there, and scroll out once the ring moves below the first rows). Rows are numbered from what is in the session: in a session with no prompt yet there are only 5 rows that open, so a digit above 5 goes to the prompt.
 - Desktop: the baseline desktop preconditions in [README.md](./README.md) and the user's go.
 
 Terminal (proven on 2026-11-24 in Claude Code 2.1.331: `j`, Enter, `b`, a digit, `Esc`, `/ctx` again, `x`. Not run yet: `k`, the arrows, Tab, `r`, `s`; add a step with a visible result before you claim them):

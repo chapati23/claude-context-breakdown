@@ -56,7 +56,7 @@ Read-only. Checks: the tmux server is up; `claude` still runs (`pane_dead` is 0;
 
 ```sh
 scripts/tui.sh send <run> "Print the numbers 1 to 40, one per line, and nothing else."
-scripts/tui.sh wait <run> '✻ [A-Za-z]+ for [0-9]' 90     # the turn line, e.g. "✻ Cogitated for 2s · done 7:37 PM"
+scripts/tui.sh wait <run> '✻ [^ ]+ for [0-9]' 90     # the turn line, e.g. "✻ Cogitated for 2s · done 7:37 PM"
 scripts/tui.sh send <run> "/ctx"                          # opens the pane on the right, with the keys
 scripts/tui.sh wait <run> 'free before compaction'
 scripts/tui.sh keys <run> 6                               # a digit opens that row (terminal only)

@@ -19,7 +19,7 @@ Preconditions:
 
 - Two terminal runs: `scripts/tui.sh start band-other --other` and `scripts/tui.sh start band-alone`. Both doctors exit 0.
 
-- **Fill the transcript.** In each run: `scripts/tui.sh send <run> "Print the numbers 1 to 40, one per line, and nothing else."` then `scripts/tui.sh wait <run> '✻ [A-Za-z]+ for [0-9]' 90`.
+- **Fill the transcript.** In each run: `scripts/tui.sh send <run> "Print the numbers 1 to 40, one per line, and nothing else."` then `scripts/tui.sh wait <run> '✻ [^ ]+ for [0-9]' 90`.
 - **Capture.** `scripts/tui.sh capture band-other band --html` and `scripts/tui.sh capture band-alone band --html`.
 - **band-last proof.** In `.verify/band-other/band.txt` the lines read, in order: `✻ … for …`, `OTHER MOD ROW · this row comes first … [-]`, the bar line. The bar line comes after the probe row, and the next band-free line is the prompt's rule (a Claude Code notice line, such as the tmux focus-events hint, can stand between them).
 - **band-blank proof.** In `.verify/band-alone/band.txt` the line after `✻ … for …` is empty (it can hold only `[-]` at the right edge), and the bar line follows it.

@@ -33,7 +33,7 @@ Found on 2026-11-23 in Claude 6.x (desktop):
 - Capture before and after each action (`scripts/tui.sh capture <run> <label>`, or a desktop `screenshot_out_file`), into `.verify/<run>/`.
 - Quote the lines of the capture that show the expected end state.
 - Name the surface and the entry point with every artifact.
-- Report a desktop step that needs hover or keys as not checked; never report it as verified through the terminal.
+- Report a desktop step as not checked when no desktop picture shows its result (Tab and Enter so far, see [keyboard.md](./keyboard.md)); never report it as verified through the terminal. Hover and letter keys can be shown (see ../SKILL.md, Desktop app, Drive).
 
 ## Feature entry contract
 

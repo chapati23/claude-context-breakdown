@@ -22,13 +22,13 @@ Preconditions:
 - Terminal: a run started with `--size 120x50` (at 24 rows the hint line and the line that describes the ringed row fall below the visible pane). Rows are numbered from what is in the session: in a session with no prompt yet there are only 5 rows that open, so a digit above 5 goes to the prompt.
 - Desktop: the baseline desktop preconditions in [README.md](./README.md) and the user's go.
 
-Terminal (all proven on 2026-11-24 in Claude Code 2.1.331):
+Terminal (proven on 2026-11-24 in Claude Code 2.1.331: `j`, Enter, `b`, a digit, `Esc`, `/ctx` again, `x`. Not run yet: `k`, the arrows, Tab, `r`, `s`; add a step with a visible result before you claim them):
 
 - **Move and open.** `scripts/tui.sh send <run> "/ctx"`, wait for `⏎ 1-9: Open`, then `scripts/tui.sh keys <run> j j Enter`, wait for `% of segment`. The ring starts on row 1, so the third row opens (for example `Global  8.2k · 14% of used`).
 - **Back.** `scripts/tui.sh keys <run> b`, wait for `free before compaction`.
-- **Digit.** `scripts/tui.sh keys <run> 1`, wait for `% of segment`; the prompt line stays `❯` with nothing after it.
+- **Digit.** `scripts/tui.sh keys <run> 1`, wait for `% of segment`; the prompt line stays `❯` with nothing after it. Then `scripts/tui.sh keys <run> b` and wait for `free before compaction`: row 1 (System) has no rows that open, so the next steps start from the segments.
 - **Escape.** `scripts/tui.sh keys <run> Escape`, wait for `For keys: click the pane, or run /ctx`. The controls line shows `Refresh  Close` without keys.
-- **Regain.** `scripts/tui.sh send <run> "/ctx"`, wait for `⏎ 1-9: Open`.
+- **Regain.** `scripts/tui.sh send <run> "/ctx"`, wait for `r: Refresh` (a keyed control that every level shows; `⏎ 1-9: Open` shows only in a list with rows that open).
 - **Close.** `scripts/tui.sh keys <run> x`: the `✕` and the `│` column are gone.
 
 Desktop (partly proven on 2026-11-24):

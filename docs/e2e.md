@@ -125,7 +125,7 @@ line per check:
 - [ ] Open the MCP tools row of Not loaded: the list of servers shows, with grey bars. Press b: the focus is on the MCP tools row again.
 - [ ] Send a prompt that reads a file, then look at the segments in a pane wider than about 60 columns: the column `added` stands after the share, in line with the header, and `added: tokens since your last prompt.` is below the table.
 - [ ] Look at the controls line of a pane narrower than its keys: it breaks between groups, never inside a group that fits on one row.
-- [ ] Press Escape in the pane: the keys go back to the prompt, the hint line shows, and the key caps on the controls stay in place and keep their style. The rows have no key cap.
+- [ ] Press Escape in the pane: the keys go back to the prompt, and the key caps on the controls stay in place and keep their style. The rows have no key cap. The hint line does not show at once: in Claude Code 2.1.331 the desktop app keeps telling the mod that the pane has the keyboard after Escape, also across a redraw after a prompt (seen 2026-11-24). It shows once the window loses and regains the focus.
 - [ ] Click the pane after Escape: the keys come back, and no row, bar or figure moves.
 - [ ] Look at a segment's row at level 1: the swatch, then the native button with the name and no key cap.
 - [ ] Look at the rows of a long list, the tenth and the eleventh included: every name starts in the same column, and the length bars and each figure column line up from row to row.

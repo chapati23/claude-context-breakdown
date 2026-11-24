@@ -36,7 +36,7 @@ Desktop (partly proven on 2026-11-24):
 - **Give the pane the keyboard.** After `/ctx` (two Returns) the keyboard stays in the composer: an Enter there did not open a row. Pixel-click the pane's text, for example the line `All numbers are estimates.`.
 - **Letter.** `press_key` `x` with `delivery_mode: "foreground"`: the pane closed (proven). Use letters whose effect is visible: `b` at level 2, `s` in Your prompts (`Newest first` ↔ `Largest first`), `x`.
 - **Tab and Enter.** `press_key` `tab` and `return` (foreground) showed no visible focus ring and opened no row in pictures. Not proven; report as not checked, or hand the user the lines of the desktop checklist in `docs/e2e.md`.
-- **Escape.** Not tried yet. Expected: the line `Click the pane for keys` shows, and the key caps stay on the controls.
+- **Escape.** `press_key` `escape` (foreground) gives the keyboard back to the composer: a following `x` types there (proven 2026-11-24). The line `Click the pane for keys` does not show then: the desktop app keeps reporting the pane as having the keyboard, also after a redraw from a new prompt. It shows after the window loses and regains the focus. Check the keyboard's place with a letter, never with the hint line.
 
 ## Gotchas
 

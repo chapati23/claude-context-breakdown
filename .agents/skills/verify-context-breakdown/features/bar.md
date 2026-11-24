@@ -1,6 +1,6 @@
 # Context bar
 
-The bar is one row above the prompt. It shows the context window as coloured segments, then the total (`69k/1M 7%`), then a legend that names the largest segment and its tokens (`· ▉ System notifications 24k`). Until the pane is first opened in the session, the legend's place reads `· /ctx for details`. In a window of 500k or more, while use and the reserve fill an eighth of it or less, the bar draws free space 32 times smaller and a scale break `╱╱·` stands between the free dots and the reserve. It updates after each measurement.
+The bar is one row above the prompt. It shows the context window as coloured segments, then the total (`69k/1M 7%`), then a legend that names the largest segment and its tokens (`· ▉ System notifications 24k`). Until the pane is first opened in the session, the legend's place reads `· /ctx for details`. In a window of 500k or more, while use and the reserve fill an eighth of it or less and the bar is 20 cells wide or more, the bar draws free space 32 times smaller and a scale break `╱╱·` stands between the free dots and the reserve. It updates after each measurement.
 
 ## Sub-features
 

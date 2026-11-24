@@ -1,7 +1,7 @@
 // The terminal pane as a person reads it, compared line by line with the
 // goldens in golden.ts. Levels 1, 2 (Tool results) and 3 (one Read result),
 // at 45 and 88 columns, with and without the keyboard. Then the terminal's
-// band in an early session of a 1M window, at its true scale, before and
+// band in an early session of a 1M window, before and
 // after `/ctx` first opens the pane. The marks show the
 // ring (⟦ ⟧), off controls (⟪ ⟫) and dim parts (⟨ ⟩); see flatten in helpers.ts.
 //
@@ -155,7 +155,7 @@ test('the terminal pane at levels 1, 2 and 3 reads as its goldens', async ($, on
   await added.unmount()
 
   // The band in an early session of a 1M window: 69k used, mostly free
-  // space at the bar's true scale. At 150 and 90 terminal columns (the band is 5 narrower),
+  // space. At 150 and 90 terminal columns (the band is 5 narrower),
   // with the hint until `/ctx` opens the pane, then with the legend.
   const early = earlySession()
   w.usage = early.usage

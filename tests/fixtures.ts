@@ -353,11 +353,6 @@ export const LOCAL_COMMAND = [
 ] as const
 
 /**
- * The tool results of the session the design critique looked at: twelve
- * results, 114.4k characters in all, largest first. Rows 10 to 12 have no
- * hotkey.
- */
-/**
  * An early session of a 1M window, the bar compressed: 69k used. Baseline
  * 44.5k (System 24k, MCP 2.8k, Global instructions 8.2k, Skills 9.5k);
  * conversation 24k (Tool results 7k, System notifications 17k, Your prompts
@@ -410,6 +405,11 @@ export function earlySession(): { usage: SessionUsage; messages: unknown[] } {
   }
 }
 
+/**
+ * The tool results of the session the design critique looked at: twelve
+ * results, 114.4k characters in all, largest first. Rows 10 to 12 have no
+ * hotkey.
+ */
 const REAL_RESULTS = [31_000, 22_000, 14_500, 11_200, 9400, 7300, 6100, 4800, 3600, 2700, 1200, 600]
 
 /**

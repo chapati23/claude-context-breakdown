@@ -529,6 +529,13 @@ export function levelOne(snapshot: ContextBreakdownSnapshot, columns: number, ba
   return { deferred, shown, baselineRows, table, stats: { used, largest: largestOf(shown), added: added ?? {} } }
 }
 
+/** The note at the foot of level 1: every number is an estimate, and after a compaction why some carry `~`. */
+export function estimatesNote(snapshot: ContextBreakdownSnapshot): string {
+  return snapshot.isEstimate
+    ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
+    : 'All numbers are estimates.'
+}
+
 function segmentsBody(
   el: Ui,
   snapshot: ContextBreakdownSnapshot,
@@ -603,13 +610,7 @@ function segmentsBody(
         </Box>
       )}
       <Box flexDirection="column" marginTop={1}>
-        {noteBelow(
-          el,
-          snapshot.isEstimate
-            ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
-            : 'All numbers are estimates.',
-          noteCells,
-        )}
+        {noteBelow(el, estimatesNote(snapshot), noteCells)}
       </Box>
     </Box>
   )
@@ -1275,6 +1276,7 @@ function keysLine(
   surface: RenderSurface,
   actions: PaneActions,
   ring: string | null,
+  atTop = false,
 ) {
   const { Box, Button, Text } = el
   const line = keyGroups(view, actions, isFocused, surface, openRows, columns)
@@ -1308,8 +1310,9 @@ function keysLine(
   // Each group is a Box of its own in a row that wraps: the line breaks
   // between groups, so keys that belong together stay together. A group
   // wider than the pane shrinks to it and wraps inside itself.
+  // Above the body (`atTop`) the blank row goes below the line.
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" {...(atTop ? { marginBottom: 1 } : { marginTop: 1 })}>
       {!isFocused && (
         <Text dimColor wrap="wrap">
           {keysHint(surface)}
@@ -1345,7 +1348,9 @@ function keysLine(
  * and brings it into view; the `/ctx` hook then puts the window back.
  * `ringNow`: the key of the element the last focus event gave the ring.
  * `base`: the measurement at the person's last prompt, for level 1's column
- * `added`.
+ * `added`. `bodyRows`: the rows the host gives the pane's body
+ * (`scroll.bodyRows`); where the body of level 1 or 2 needs more, the keys
+ * line stands above it (`keysOnTop`).
  */
 export function paneTree(
   el: Ui,
@@ -1359,6 +1364,7 @@ export function paneTree(
   keepsPlace = false,
   ringNow: string | null = null,
   base: ContextBreakdownBase | null = null,
+  bodyRows: number | null = null,
 ): RenderElement {
   const { Box, Text } = el
   const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
@@ -1394,10 +1400,96 @@ export function paneTree(
     }
   }
 
+  const onTop = keysOnTop(bodyRows, view, snapshot, columns, isFocused, base)
+
   return (
     <Box flexDirection="column">
+      {onTop && keysLine(el, view, openRows, columns, isFocused, surface, actions, ring, true)}
       {body}
-      {keysLine(el, view, openRows, columns, isFocused, surface, actions, ring)}
+      {!onTop && keysLine(el, view, openRows, columns, isFocused, surface, actions, ring)}
     </Box>
   )
+}
+
+/**
+ * The fewest rows the terminal's body of level 1 or 2 takes, the keys line
+ * left out. A floor, not the height: a long name or a note in the list can
+ * wrap to more rows. Level 3 has its keys above its text already: 0.
+ */
+export function bodyRowsAtLeast(
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  columns: number,
+  base: ContextBreakdownBase | null,
+): number {
+  if (view.level === 3) {
+    return 0
+  }
+  if (view.level === 2) {
+    const { list } = view
+    const two = levelTwo(list, snapshot, columns)
+    const def = two.def === null ? NOT_LOADED_DEF.definition : two.def.definition
+    const textCells = Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS))
+    const joined = two.column === null ? null : factsRow(two.table, two.facts, two.column)
+    const notes = (two.hidden === null ? 0 : 1) + (two.sizes === null ? 0 : 1)
+
+    return (
+      // The breadcrumb, the definition, the facts line, the list's note, the column's name.
+      1 +
+      wrapCells(sentence(def), textCells).length +
+      1 +
+      (list.note === null ? 0 : 1) +
+      (joined === null && two.column !== null ? 1 : 0) +
+      // The rows after a blank row, then the notes after another.
+      1 +
+      list.rows.length +
+      (notes === 0 ? 0 : 1 + notes)
+    )
+  }
+  if (snapshot === null) {
+    return 1
+  }
+  const one = levelOne(snapshot, columns, base)
+  const cells = rowCells(one.table)
+  const lines = (text: string) => 1 + wrapCells(text, cells).length
+
+  return (
+    (view.note === undefined ? 0 : 1) +
+    // The heading and the column header; each group after a blank row: its heading and rows.
+    2 +
+    2 +
+    one.baselineRows +
+    2 +
+    (one.shown.length - one.baselineRows) +
+    // Free space and the reserve, Not loaded, the notes and the line that describes the ringed row.
+    3 +
+    (one.deferred.length === 0 ? 0 : 2 + one.deferred.length) +
+    (one.table.added === true ? lines(ADDED_NOTE) : 0) +
+    1 +
+    DESCRIBE_ROWS +
+    lines(estimatesNote(snapshot))
+  )
+}
+
+/**
+ * Whether the terminal's keys line stands above the body of level 1 or 2:
+ * when the host gives the pane fewer rows (`bodyRows`) than the body and
+ * the keys line take. A short pane, such as the overlay above the prompt in
+ * a narrow terminal, then shows the keys without a scroll, as level 3 does.
+ * The keys line takes its blank row, its controls' row, and the hint's row
+ * while the pane does not hold the keys.
+ */
+export function keysOnTop(
+  bodyRows: number | null,
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  columns: number,
+  isFocused: boolean,
+  base: ContextBreakdownBase | null,
+): boolean {
+  if (bodyRows === null || view.level === 3) {
+    return false
+  }
+
+  return bodyRowsAtLeast(view, snapshot, columns, base) + 2 + (isFocused ? 0 : 1) > bodyRows
 }

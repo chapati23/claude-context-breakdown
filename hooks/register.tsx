@@ -1273,6 +1273,19 @@ export const register: Register = on => {
       return gridTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, holds, base)
     }
 
-    return paneTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, keepsPlace, ringNow, base)
+    return paneTree(
+      $.ui.resolve(e),
+      snapshot,
+      view,
+      e.props.bodyColumns,
+      actions,
+      palette,
+      isFocused,
+      e.surface,
+      keepsPlace,
+      ringNow,
+      base,
+      e.props.scroll?.bodyRows ?? null,
+    )
   })
 }

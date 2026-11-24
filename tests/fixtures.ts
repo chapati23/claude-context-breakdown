@@ -353,7 +353,7 @@ export const LOCAL_COMMAND = [
 ] as const
 
 /**
- * An early session of a 1M window, the bar compressed: 69k used. Baseline
+ * An early session of a 1M window: 69k used. Baseline
  * 44.5k (System 24k, MCP 2.8k, Global instructions 8.2k, Skills 9.5k);
  * conversation 24k (Tool results 7k, System notifications 17k, Your prompts
  * 77, Claude output 80, its Bash call included); reserve 33k. One character

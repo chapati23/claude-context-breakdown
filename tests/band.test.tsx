@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { CHIP_GAP, FREE, SCALE_BREAK } from '../hooks/bar'
+import { CHIP_GAP } from '../hooks/bar'
 import { inkOn } from '../hooks/color'
 import { CHIP_HOLD_MS } from '../hooks/focus'
 import { DARK, LIGHT, edgeColor } from '../hooks/palette'
@@ -732,7 +732,7 @@ test('a precompute compaction changes nothing', async ($, on) => {
   expect(w.usageCalls).toBe(calls)
 })
 
-/** A started session that is early in a 1M window, so the bar is compressed. */
+/** A started session that is early in a 1M window: 69k used. */
 async function early($: Engine, on: Parameters<typeof world>[0]) {
   const w = world(on)
   const session = earlySession()
@@ -743,42 +743,6 @@ async function early($: Engine, on: Parameters<typeof world>[0]) {
 
   return w
 }
-
-test('in an early 1M session the terminal draws a scale break: dim slashes, then a free dot, never a Button', async ($, on) => {
-  const w = await early($, on)
-  await seePane($, w)
-  const ui = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: 145 } })
-  const row = await rowOf(ui)
-  const at = row.flow.findIndex(item => item.text === SCALE_BREAK)
-  // The host's dim ink, as the total's: no colour of the mod's own.
-  expect(row.flow[at]?.node).toMatchObject({ type: 'Text', props: { dimColor: true } })
-  expect(row.flow[at]?.node.props?.color).toBeUndefined()
-  // Free space before it, one free dot after it, then the reserve.
-  expect(row.flow[at - 1]?.text).toMatch(/^·+$/)
-  expect(row.flow[at + 1]).toMatchObject({ text: FREE, node: { type: 'Text', props: { color: DARK.free } } })
-  expect(row.flow[at + 2]?.text).toMatch(/^▒+$/)
-  // It starts at the 77th cell of the 105-cell bar: 53 segment cells and 23 free ones before it.
-  expect(row.flow[at]?.start).toBe(76)
-  expect(row.flow.filter(item => item.text.includes('╱'))).toHaveLength(1)
-  // The tab order: one Button per segment, in bar order, and no other.
-  expect((await ui.findAll({ type: 'Button' })).map(button => button.key)).toEqual([
-    'seg-system',
-    'seg-mcp',
-    'seg-global-instructions',
-    'seg-skills-agents',
-    'seg-tool-results',
-    'seg-injections',
-  ])
-  // A chip may lie over the break; none belongs to it, and none ends past the row.
-  for (const chip of row.chips) {
-    expect(chip.box.hover?.scope).toMatch(/^seg-/)
-    expect((chip.box.props?.left as number) + chip.text.length).toBeLessThanOrEqual(row.width)
-  }
-  // The notifications' chip goes right of its cells, one cell away: the break's cells count.
-  const notes = row.flow.find(item => item.node.props?.key === 'seg-injections')!
-  expect(chipOf(row, 'injections')?.box.props?.left).toBe(notes.start + notes.text.length + CHIP_GAP)
-  await ui.unmount()
-})
 
 /** The band's row as read, without the chips: the terminal's flow, or the desktop Client's runs. */
 async function rowText(ui: { drawn: () => Promise<unknown> }, surface: 'terminal' | 'desktop'): Promise<string> {
@@ -823,13 +787,12 @@ test('until the pane is first opened the band leads to /ctx; a click on the bar 
   await again.unmount()
 })
 
-test('the mobile app draws the hint after the total, in the app’s face, and the picture’s alt text says when free space is shortened', async ($, on) => {
+test('the mobile app draws the hint after the total, in the app’s face, beside the bar picture', async ($, on) => {
   await early($, on)
   const ui = await $.ui.mount({ ...BAND, surface: 'mobile', props: { ...BAND.props, bodyColumns: 145 } })
   const hint = await ui.find({ type: 'Text', text: '/ctx for details' })
   expect(hint?.props).toMatchObject({ tabular: true, dimColor: true })
   const bar = (await ui.findAll({ type: 'Svg' }))[0]
-  expect(bar?.props.alt).toBe('Context window: 69k/1M 7%, free space shortened')
-  expect(String(bar?.props.source)).toContain('<title>Scale break: 870k of free space left out</title>')
+  expect(bar?.props.alt).toBe('Context window: 69k/1M 7%')
   await ui.unmount()
 })

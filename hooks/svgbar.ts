@@ -5,7 +5,7 @@
 // bar's do.
 
 import type { ContextBreakdownSegmentId } from '../types'
-import { SCALE_BREAK_CELLS, TEXTURE_COVERAGE, TEXTURED } from './bar'
+import { TEXTURE_COVERAGE, TEXTURED } from './bar'
 import { formatPercent, formatTokens } from './format'
 import type { LayoutPart } from './layout'
 import { colorOf } from './palette'
@@ -22,13 +22,6 @@ export const SVG_SWATCH_PX = 10
 const SEPARATOR_PX = 1.5
 /** The bar's corner radius, in CSS pixels. */
 const RADIUS_PX = 3
-/**
- * The scale break's first two cells, left transparent, with the two strokes
- * in them. Its third cell is free track.
- */
-export const BREAK_STROKES_PX = (SCALE_BREAK_CELLS - 1) * SVG_CELL_PX
-/** The width of the scale break's strokes, in CSS pixels. */
-const BREAK_STROKE_PX = 1.5
 
 /** Names the picture's classes by: a segment id, or "free" and "reserve". */
 function classOf(id: string): string {
@@ -72,25 +65,12 @@ export function svgBarWidth(parts: readonly LayoutPart[]): number {
  * segment a rectangle with a thin space before the next, the reserve at the
  * right end. Every segment carries a `<title>`, which the surface shows as a
  * tooltip where it draws the picture interactive.
- *
- * A scale break (see `isCompressed` in layout.ts) stops the track: its first
- * two cells stay transparent and hold two parallel strokes in Palette.scaleBreak,
- * its third is track again. A transparent rectangle over it carries its title.
  */
-export function barSvg(
-  parts: readonly LayoutPart[],
-  palette: Palette,
-  tokensOf: TokensOf,
-  used: number,
-  isEstimate = false,
-): string {
+export function barSvg(parts: readonly LayoutPart[], palette: Palette, tokensOf: TokensOf, used: number): string {
   const width = svgBarWidth(parts)
   const height = SVG_BAR_HEIGHT
   const ids = [...new Set(parts.flatMap(part => (part.kind === 'segment' ? [part.id] : [])))]
   const shapes: string[] = []
-  // The free track: the whole bar, less the scale break's first two cells where there is one.
-  const track: { x: number; w: number }[] = []
-  let trackFrom = 0
   let x = 0
   parts.forEach((part, index) => {
     const w = part.cells * SVG_CELL_PX
@@ -106,30 +86,15 @@ export function barSvg(
       shapes.push(
         `<rect class="${classOf('reserve')}" x="${x}" y="0" width="${w}" height="${height}"><title>Reserve: kept free for compaction</title></rect>`,
       )
-    } else if (part.kind === 'break') {
-      track.push({ x: trackFrom, w: x - trackFrom })
-      trackFrom = x + BREAK_STROKES_PX
-      const stroke = `stroke="${palette.scaleBreak}" stroke-width="${BREAK_STROKE_PX}"`
-      const title = `Scale break: ${isEstimate ? '~' : ''}${formatTokens(part.omitted)} of free space left out`
-      shapes.push(
-        `<line x1="${x + 3}" y1="${height}" x2="${x + 6}" y2="0" ${stroke}/>` +
-          `<line x1="${x + 8}" y1="${height}" x2="${x + 11}" y2="0" ${stroke}/>` +
-          `<rect x="${x}" y="0" width="${w}" height="${height}" fill="transparent"><title>${escapeXml(title)}</title></rect>`,
-      )
     }
     x += w
   })
-  track.push({ x: trackFrom, w: width - trackFrom })
-  const free = track
-    .filter(piece => piece.w > 0)
-    .map(piece => `<rect class="${classOf('free')}" x="${piece.x}" y="0" width="${piece.w}" height="${height}"/>`)
-    .join('')
 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     styleFor(palette, ids) +
     `<clipPath id="r"><rect width="${width}" height="${height}" rx="${RADIUS_PX}" ry="${RADIUS_PX}"/></clipPath>` +
-    `<g clip-path="url(#r)">${free}${shapes.join('')}</g>` +
+    `<g clip-path="url(#r)"><rect class="${classOf('free')}" width="${width}" height="${height}"/>${shapes.join('')}</g>` +
     `</svg>`
   )
 }

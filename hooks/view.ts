@@ -4,7 +4,7 @@ import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot } from '../typ
 import { barChips } from './bar'
 import type { Chip } from './bar'
 import { formatPercent, formatTokens } from './format'
-import { isCompressed, layoutBar, layoutCompressed } from './layout'
+import { layoutBar } from './layout'
 import type { LayoutPart } from './layout'
 import { segmentDef } from './segments'
 import { freeTokens, usedTokens } from './snapshot'
@@ -213,12 +213,6 @@ export function bandModelFor(
   return surface === 'terminal' ? model : { ...model, chips: [] }
 }
 
-/**
- * The band's model with a bar `room` cells wide. In a large window while use
- * is low the bar is compressed (`isCompressed`): it draws free space 32 times
- * smaller behind a scale break. Every snapshot is laid out afresh, so
- * the bar returns to its true scale on the draw after use crosses the line.
- */
 function withBar(
   snapshot: ContextBreakdownSnapshot,
   room: number,
@@ -226,10 +220,12 @@ function withBar(
   legend: Legend | null,
   hint: string | null,
 ): BandModel {
-  const groups = [snapshot.baseline, snapshot.conversation]
-  const input = { width: room, window: snapshot.window, groups, reserve: snapshot.reserve }
-  const compressed = isCompressed(usedTokens(snapshot), snapshot.reserve, snapshot.window, room, groups)
-  const parts = compressed ? layoutCompressed(input) : layoutBar(input)
+  const parts = layoutBar({
+    width: room,
+    window: snapshot.window,
+    groups: [snapshot.baseline, snapshot.conversation],
+    reserve: snapshot.reserve,
+  })
   // The row as drawn in flow: the bar, a space, the total and the legend or the hint.
   const rowWidth = parts.reduce((sum, part) => sum + part.cells, 0) + 1 + label.length + sideCells({ legend, hint })
   const tokens = new Map<string, number>(

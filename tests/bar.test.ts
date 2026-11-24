@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownSnapshot } from '../types'
 import { CHIP_GAP, EDGE, FILLED, TEXTURE, barChips, chipForms, chipsToDraw, placeChip, segmentCells, segmentRuns } from '../hooks/bar'
-import type { LayoutPart, SegmentPart } from '../hooks/layout'
+import type { SegmentPart } from '../hooks/layout'
 import {
   HINT_FORMS,
   LEGEND_JOIN,
@@ -252,18 +252,17 @@ describe('the legend', () => {
   })
 
   test('takes the colour of the cell that holds its segment when that one is merged', () => {
-    // The conversation's segments are each under half a cell. Claude output
-    // goes into Your prompts, then Tool results (the first) into its right
-    // neighbour, Your prompts again. A 200k window, which the bar never
-    // compresses (see layout.test.ts for a compressed one).
+    // A 1M window: the conversation's segments are each under half a cell.
+    // Claude output goes into Your prompts, then Tool results (the first)
+    // into its right neighbour, Your prompts again.
     const s = snapshot({
-      window: 200_000,
+      window: 1_000_000,
       reserve: 0,
       baseline: [{ id: 'system', tokens: 40_000 }],
       conversation: [
-        { id: 'tool-results', tokens: 1600 },
-        { id: 'prompts', tokens: 1400 },
-        { id: 'claude-output', tokens: 1200 },
+        { id: 'tool-results', tokens: 8000 },
+        { id: 'prompts', tokens: 7000 },
+        { id: 'claude-output', tokens: 6000 },
       ],
     })
     for (const columns of [60, 80]) {
@@ -368,95 +367,6 @@ const EARLY: Partial<ContextBreakdownSnapshot> = {
     { id: 'claude-output', tokens: 80 },
   ],
 }
-
-const partsOf = (model: { parts: readonly LayoutPart[] }) =>
-  model.parts.map(p => (p.kind === 'segment' ? `${p.id} ${p.cells}` : `${p.kind} ${p.cells}`))
-
-describe('the compressed bar in the band', () => {
-  test('at 150 columns, the early 1M session gives its segments 53 of 105 cells behind a scale break', () => {
-    // The terminal's band is 5 columns narrower than the terminal.
-    const model = bandModel(snapshot(EARLY), 145)
-    expect(model.label).toBe('69k/1M 7%')
-    expect(model.legend?.text).toBe('System notifications 17k')
-    expect(partsOf(model)).toEqual([
-      'system 19',
-      'mcp 2',
-      'global-instructions 6',
-      'skills-agents 7',
-      'tool-results 6',
-      'injections 13',
-      'free 23',
-      'break 3',
-      'reserve 26',
-    ])
-    // The segments and the reserve take most of the bar: 79 of 105 cells.
-    // The break leaves out 31 of every 32 free tokens: 101,657 are held, so
-    // the bar draws 28,073.2 of the 898,343 free ones.
-    const brk = model.parts.find(p => p.kind === 'break')
-    expect(brk?.kind === 'break' && Math.round(brk.omitted)).toBe(870_270)
-    // The notifications cell holds Your prompts and Claude output too.
-    const notes = model.parts.find((p): p is SegmentPart => p.kind === 'segment' && p.id === 'injections')
-    expect(notes?.members).toEqual(['injections', 'prompts', 'claude-output'])
-  })
-
-  test('at 90 columns, the same session behind a scale break', () => {
-    const model = bandModel(snapshot(EARLY), 85)
-    expect(model.legend?.text).toBe('System notifications 17k')
-    expect(partsOf(model)).toEqual([
-      'system 8',
-      'mcp 1',
-      'global-instructions 3',
-      'skills-agents 3',
-      'tool-results 2',
-      'injections 6',
-      'free 8',
-      'break 3',
-      'reserve 11',
-    ])
-    expect(model.parts.reduce((sum, p) => sum + p.cells, 0)).toBe(45)
-  })
-
-  test('returns to the true scale on the draw after use and the reserve pass an eighth of the window', () => {
-    const at = (system: number) => bandModel(snapshot({ ...EARLY, baseline: [{ id: 'system', tokens: system }] }), 145)
-    // 24,157 of conversation: 67,843 more in System makes 92k used, with the 33k reserve an eighth.
-    const under = at(67_843)
-    const over = at(67_844)
-    expect(under.parts.some(p => p.kind === 'break')).toBe(true)
-    expect(over.parts.some(p => p.kind === 'break')).toBe(false)
-    // The total and the legend do not change at the crossing.
-    expect(over.label).toBe(under.label)
-    expect(over.legend).toEqual(under.legend)
-    // The segments drop to about a sixth of their cells.
-    const cells = (model: typeof under) => model.parts.reduce((sum, p) => sum + (p.kind === 'segment' ? p.cells : 0), 0)
-    expect(cells(over)).toBeLessThan(cells(under) / 3)
-    // A 200k window never compresses.
-    expect(bandModel(snapshot(), 145).parts.some(p => p.kind === 'break')).toBe(false)
-  })
-
-  test('counts the break’s cells in the chips’ places, and gives it no chip', () => {
-    const model = bandModel(snapshot(EARLY), 145)
-    const starts = new Map<string, number>()
-    let start = 0
-    for (const p of model.parts) {
-      if (p.kind === 'segment') {
-        starts.set(p.id, start)
-      }
-      start += p.cells
-    }
-    expect(model.chips.map(chip => chip.id)).toEqual(['system', 'mcp', 'global-instructions', 'skills-agents', 'tool-results', 'injections'])
-    for (const chip of model.chips) {
-      const p = model.parts.find((one): one is SegmentPart => one.kind === 'segment' && one.id === chip.id)!
-      const end = starts.get(chip.id)! + p.cells
-      expect(chip.left === end + CHIP_GAP || chip.left + chip.text.length === starts.get(chip.id)! - CHIP_GAP).toBe(true)
-    }
-    // The row the chips are placed in counts the break: a chip that reaches
-    // past the bar ends at the row's end.
-    const row = 105 + 1 + model.label.length + legendCells(model.legend!)
-    for (const chip of model.chips) {
-      expect(chip.left + chip.text.length).toBeLessThanOrEqual(row)
-    }
-  })
-})
 
 describe('the hint', () => {
   test('stands in the legend’s place until the pane is opened, naming /ctx', () => {

@@ -3,18 +3,7 @@
 import type { Elements, EngineInterface, RenderElement } from 'claude-code'
 
 import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot } from '../types'
-import {
-  FILLED,
-  FREE,
-  MIN_CHIP_CELLS,
-  RESERVE,
-  SCALE_BREAK,
-  chipForms,
-  chipsToDraw,
-  segmentCells,
-  segmentKey,
-  segmentRuns,
-} from './bar'
+import { FILLED, FREE, MIN_CHIP_CELLS, RESERVE, chipForms, chipsToDraw, segmentCells, segmentKey, segmentRuns } from './bar'
 import type { Chip } from './bar'
 import { inkOn } from './color'
 import type { LayoutPart, SegmentPart } from './layout'
@@ -94,11 +83,6 @@ function barCells(ui: Ui, model: BandModel, palette: Palette, openPane: OpenPane
     }
     if (part.kind === 'reserve') {
       return <Text color={palette.reserve}>{RESERVE.repeat(part.cells)}</Text>
-    }
-    if (part.kind === 'break') {
-      // The scale break: the host's dim ink, as the total's, then one free
-      // dot. Not a Button: it opens nothing and takes no tab stop.
-      return [<Text dimColor>{SCALE_BREAK}</Text>, <Text color={palette.free}>{FREE}</Text>]
     }
     const cells = segmentText(ui, palette, part)
     if (openPane === null) {
@@ -194,7 +178,6 @@ function pictureRow(
   const { Box, Text, Button, Svg } = ui
   const { legend, hint } = model
   const hasBar = model.parts.length > 0
-  const isCut = model.parts.some(part => part.kind === 'break')
   const total = (
     <Text tabular dimColor>
       {model.label}
@@ -205,8 +188,8 @@ function pictureRow(
     <Box flexDirection="row" alignItems="center" columnGap={1}>
       {hasBar && (
         <Svg
-          source={barSvg(model.parts, palette, figures.tokensOf, figures.used, figures.isEstimate)}
-          alt={`Context window: ${model.label}${isCut ? ', free space shortened' : ''}`}
+          source={barSvg(model.parts, palette, figures.tokensOf, figures.used)}
+          alt={`Context window: ${model.label}`}
           width={svgBarWidth(model.parts)}
           height={SVG_BAR_HEIGHT}
           isInteractive
@@ -265,14 +248,6 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     }
     if (part.kind === 'reserve') {
       runs.push({ text: RESERVE.repeat(part.cells), color: palette.reserve, target: null, mono: true })
-
-      return
-    }
-    if (part.kind === 'break') {
-      // One cell a code point, as `targetAt` counts; it opens nothing. The
-      // break follows every segment, so no segment's index moves.
-      runs.push({ text: SCALE_BREAK, dimColor: true, target: null, mono: true })
-      runs.push({ text: FREE, color: palette.free, target: null, mono: true })
 
       return
     }
@@ -380,11 +355,8 @@ export function drawsPicture(surface: string): boolean {
   return surface !== 'terminal'
 }
 
-/**
- * What the picture's tooltips read: each segment's tokens, what is used, and
- * whether the figures are estimated (the scale break's title then says "~").
- */
-export type PictureFigures = { tokensOf: TokensOf; used: number; isEstimate: boolean }
+/** What the picture's tooltips read: each segment's tokens, and what is used. */
+export type PictureFigures = { tokensOf: TokensOf; used: number }
 
 /**
  * The band's row for one model (see `bandModel`). `focused` is the key of
@@ -445,5 +417,5 @@ export function pictureFigures(snapshot: ContextBreakdownSnapshot): PictureFigur
     [...snapshot.baseline, ...snapshot.conversation].map(segment => [segment.id, segment.tokens]),
   )
 
-  return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot), isEstimate: snapshot.isEstimate }
+  return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot) }
 }

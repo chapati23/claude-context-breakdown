@@ -17,19 +17,6 @@ export const EDGE = '▉'
 export const TEXTURE = '▓'
 export const FREE = '·'
 export const RESERVE = '▒'
-/**
- * The scale break: two U+2571 slashes, the only diagonal on the row. It
- * stands where the bar leaves out free space in a large window while use is
- * low (see `isCompressed` in layout.ts). Drawn in the host's dim ink, as the
- * total is, so it adds no colour of the mod's own.
- */
-export const SCALE_BREAK = '╱╱'
-/**
- * Cells the scale break takes: its two slashes and one free dot after them.
- * The dot says that free space goes on past the scale break, and keeps the slashes
- * off the reserve's ▒.
- */
-export const SCALE_BREAK_CELLS = 3
 
 /** Segments drawn in a texture: the texture itself sets them apart, so no edge. */
 export const TEXTURED: ReadonlySet<string> = new Set(['compaction-summary'])
@@ -197,8 +184,6 @@ export function barChips(
   const chips: Chip[] = []
   let start = 0
   for (const part of parts) {
-    // Free space, the scale break and the reserve get no chip; their cells
-    // still count towards the next segment's start.
     if (part.kind === 'segment') {
       const place = placeChip(start, part.cells, barWidth, rowWidth, chipForms(part, tokensOf))
       if (place !== null) {

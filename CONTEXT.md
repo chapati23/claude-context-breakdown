@@ -55,7 +55,7 @@ _Avoid_: Compact message, recap
 ### What the user sees
 
 **Bar**:
-The one-row picture of the whole window, drawn above the prompt, with one stretch per segment.
+The one-row picture of the window, drawn above the prompt, with one stretch per segment. In a large window while use is low, a scale break leaves out most of the free space.
 _Avoid_: Meter, gauge, status line
 
 **Chip**:

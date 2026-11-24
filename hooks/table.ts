@@ -93,13 +93,21 @@ export function tableLayout(columns: number, widestName: number, swatch = true):
 /**
  * The table with the column `added` where it has room: ADDED_CELLS more
  * inside TABLE_MAX_COLUMNS and the pane's spare cell, after a share column.
- * The other columns keep their cells: the column never narrows the names or
- * the bar, so in a narrow pane it does not show.
+ * Where the row is too wide for it, the length bar gives up cells, down to
+ * BAR_MIN_CELLS: the figure of growth says more than the bar's last cells.
+ * The column never narrows the names, so in a narrow pane it does not show.
  */
 export function withAdded(table: Table, columns: number): Table {
   const room = Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS)
+  if (!table.share) {
+    return table
+  }
+  const over = rowCells(table) + ADDED_CELLS - room
+  if (over <= 0) {
+    return { ...table, added: true }
+  }
 
-  return table.share && rowCells(table) + ADDED_CELLS <= room ? { ...table, added: true } : table
+  return table.bar - over >= BAR_MIN_CELLS ? { ...table, bar: table.bar - over, added: true } : table
 }
 
 /** Cells of a whole row, mark included. */

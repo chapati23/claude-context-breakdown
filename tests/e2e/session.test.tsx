@@ -238,8 +238,14 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   expect(addedIn(grown.find(line => line.includes('Free space')))).toBeUndefined()
   expect(grown).toContain(NOTE)
   expect(grown.indexOf(NOTE)).toBeLessThan(grown.indexOf('All numbers are estimates.'))
-  // A pane too narrow for 7 more cells keeps its table and draws no column and no note.
-  const narrow = await paneAt(64)
+  // A side pane of 64 columns (a terminal of 150) narrows the length bars
+  // and keeps the column: the names keep their cells.
+  const side = await paneAt(64)
+  expect(hasColumn(side)).toBe(true)
+  expect(Math.abs(addedIn(side.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  expect(side).toContain(NOTE)
+  // A pane too narrow for 7 more cells, even with the shortest bar, keeps its table and draws no column and no note.
+  const narrow = await paneAt(45)
   expect(hasColumn(narrow)).toBe(false)
   expect(narrow).not.toContain(NOTE)
   expect(narrow.some(line => /\+\S+$/.test(line))).toBe(false)

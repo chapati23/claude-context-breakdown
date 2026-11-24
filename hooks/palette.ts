@@ -33,7 +33,7 @@ export type Palette = {
    * Not loaded, which is no segment's colour and holds 3:1, the threshold
    * for a graphic that is not text, on the backgrounds.
    */
-  cut: string
+  scaleBreak: string
   /** The terminal backgrounds the palette is made for, the two ends of a range. */
   backgrounds: readonly [string, string]
 }
@@ -61,7 +61,7 @@ export const DARK: Palette = {
   free: '#4A4A4A',
   reserve: '#5A5A5A',
   notLoaded: '#8A8A8A',
-  cut: '#8A8A8A',
+  scaleBreak: '#8A8A8A',
   backgrounds: ['#000000', '#1E1E1E'],
 }
 
@@ -88,7 +88,7 @@ export const LIGHT: Palette = {
   free: '#B8B8B8',
   reserve: '#A8A8A8',
   notLoaded: '#7A7A7A',
-  cut: '#7A7A7A',
+  scaleBreak: '#7A7A7A',
   backgrounds: ['#FFFFFF', '#F5F5F5'],
 }
 

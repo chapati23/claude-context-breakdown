@@ -26,7 +26,7 @@ export const RESERVE = '▒'
 export const SCALE_BREAK = '╱╱'
 /**
  * Cells the scale break takes: its two slashes and one free dot after them.
- * The dot says that free space goes on past the cut, and keeps the slashes
+ * The dot says that free space goes on past the scale break, and keeps the slashes
  * off the reserve's ▒.
  */
 export const SCALE_BREAK_CELLS = 3

@@ -115,12 +115,12 @@ for (const palette of [DARK, LIGHT]) describe(`the ${palette.name} palette`, () 
 
   test('draws the scale break’s strokes in a grey that is no segment’s colour, at 3:1 on both backgrounds', () => {
     const segments = [...BASELINE_IDS, ...CONVERSATION_IDS].map(id => colorOf(palette, id))
-    expect(palette.cut).toMatch(/^#[0-9A-F]{6}$/)
-    expect(segments).not.toContain(palette.cut)
-    expect([palette.free, palette.reserve]).not.toContain(palette.cut)
+    expect(palette.scaleBreak).toMatch(/^#[0-9A-F]{6}$/)
+    expect(segments).not.toContain(palette.scaleBreak)
+    expect([palette.free, palette.reserve]).not.toContain(palette.scaleBreak)
     // 3:1 is the threshold for a graphic that is not text.
     for (const background of palette.backgrounds) {
-      expect(contrast(palette.cut, background)).toBeGreaterThanOrEqual(3)
+      expect(contrast(palette.scaleBreak, background)).toBeGreaterThanOrEqual(3)
     }
   })
 

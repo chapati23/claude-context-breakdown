@@ -11,7 +11,7 @@ import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
 import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
 import { BAR_CELLS, BUTTON_PAD_CELLS, LEAD_CELLS, gridCells } from '../hooks/grid'
 import { DARK, LIGHT } from '../hooks/palette'
-import { BREAK_GAP_PX, SVG_CELL_PX, barSvg, svgBarWidth } from '../hooks/svgbar'
+import { BREAK_STROKES_PX, SVG_CELL_PX, barSvg, svgBarWidth } from '../hooks/svgbar'
 import { bandModel } from '../hooks/view'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
@@ -1113,7 +1113,7 @@ test('the desktop Client shows the hint until the pane is opened, and a segment 
   await band.unmount()
 })
 
-test('barSvg cuts the free track at the scale break, draws two strokes in its gap and titles it', () => {
+test('barSvg stops the free track at the scale break, draws two strokes there and titles it', () => {
   const model = bandModel(
     {
       window: 1_000_000,
@@ -1141,13 +1141,13 @@ test('barSvg cuts the free track at the scale break, draws two strokes in its ga
   const svg = barSvg(model.parts, DARK, () => 0, 69_000)
   expect(svg).toContain('<title>Scale break: 870k of free space left out</title>')
   expect(barSvg(model.parts, DARK, () => 0, 69_000, true)).toContain('<title>Scale break: ~870k of free space left out</title>')
-  // The two strokes, bottom left to top right, in the cut grey.
-  expect(svg).toContain(`<line x1="${x + 3}" y1="10" x2="${x + 6}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)
-  expect(svg).toContain(`<line x1="${x + 8}" y1="10" x2="${x + 11}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)
-  expect(barSvg(model.parts, LIGHT, () => 0, 69_000)).toContain(`stroke="${LIGHT.cut}"`)
+  // The two strokes, bottom left to top right, in the scale break's grey.
+  expect(svg).toContain(`<line x1="${x + 3}" y1="10" x2="${x + 6}" y2="0" stroke="${DARK.scaleBreak}" stroke-width="1.5"/>`)
+  expect(svg).toContain(`<line x1="${x + 8}" y1="10" x2="${x + 11}" y2="0" stroke="${DARK.scaleBreak}" stroke-width="1.5"/>`)
+  expect(barSvg(model.parts, LIGHT, () => 0, 69_000)).toContain(`stroke="${LIGHT.scaleBreak}"`)
   // No free track under the break's first 14 px: one track ends at it, the next starts after.
   const tracks = [...svg.matchAll(/<rect class="c-free" x="([\d.]+)" y="0" width="([\d.]+)"/g)].map(m => [Number(m[1]), Number(m[2])])
-  expect(BREAK_GAP_PX).toBe(14)
+  expect(BREAK_STROKES_PX).toBe(14)
   expect(tracks).toEqual([
     [0, x],
     [x + 14, width - x - 14],

@@ -23,10 +23,10 @@ const SEPARATOR_PX = 1.5
 /** The bar's corner radius, in CSS pixels. */
 const RADIUS_PX = 3
 /**
- * The scale break's gap: its first two cells, left transparent, with the two
- * strokes in it. Its third cell is free track.
+ * The scale break's first two cells, left transparent, with the two strokes
+ * in them. Its third cell is free track.
  */
-export const BREAK_GAP_PX = (SCALE_BREAK_CELLS - 1) * SVG_CELL_PX
+export const BREAK_STROKES_PX = (SCALE_BREAK_CELLS - 1) * SVG_CELL_PX
 /** The width of the scale break's strokes, in CSS pixels. */
 const BREAK_STROKE_PX = 1.5
 
@@ -73,8 +73,8 @@ export function svgBarWidth(parts: readonly LayoutPart[]): number {
  * right end. Every segment carries a `<title>`, which the surface shows as a
  * tooltip where it draws the picture interactive.
  *
- * A scale break (see `isCompressed` in layout.ts) cuts the track: its first
- * two cells stay transparent and hold two parallel strokes in Palette.cut,
+ * A scale break (see `isCompressed` in layout.ts) stops the track: its first
+ * two cells stay transparent and hold two parallel strokes in Palette.scaleBreak,
  * its third is track again. A transparent rectangle over it carries its title.
  */
 export function barSvg(
@@ -88,7 +88,7 @@ export function barSvg(
   const height = SVG_BAR_HEIGHT
   const ids = [...new Set(parts.flatMap(part => (part.kind === 'segment' ? [part.id] : [])))]
   const shapes: string[] = []
-  // The free track: the whole bar, less the break's gap where there is one.
+  // The free track: the whole bar, less the scale break's first two cells where there is one.
   const track: { x: number; w: number }[] = []
   let trackFrom = 0
   let x = 0
@@ -108,8 +108,8 @@ export function barSvg(
       )
     } else if (part.kind === 'break') {
       track.push({ x: trackFrom, w: x - trackFrom })
-      trackFrom = x + BREAK_GAP_PX
-      const stroke = `stroke="${palette.cut}" stroke-width="${BREAK_STROKE_PX}"`
+      trackFrom = x + BREAK_STROKES_PX
+      const stroke = `stroke="${palette.scaleBreak}" stroke-width="${BREAK_STROKE_PX}"`
       const title = `Scale break: ${isEstimate ? '~' : ''}${formatTokens(part.omitted)} of free space left out`
       shapes.push(
         `<line x1="${x + 3}" y1="${height}" x2="${x + 6}" y2="0" ${stroke}/>` +

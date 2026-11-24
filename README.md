@@ -8,7 +8,7 @@ Claude Code's own `/context` command shows a similar report, but only when you a
 
 ![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
 
-The pictures in this file show Claude Code in Ghostty, in sessions with a 200k window: version 2.1.328, and version 2.1.327 for the picture of the bar.
+The pictures in this file show Claude Code in Ghostty, in sessions with a 200k window: version 2.1.328, and version 2.1.327 for the picture of the bar. They were taken before version 0.11.0 of the mod: there the legend right of the total gives a percent of what is used (`Tool results 23%`). The legend now gives the segment's tokens (`Tool results 114k`).
 
 > Status: early version. The mod uses Claude Code's mods API, which is early access and can change between releases.
 
@@ -69,7 +69,8 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 ![The bar with the pointer on its last segment. A chip beside the segment reads "Claude output 5.6k".](docs/img/bar.png)
 
 - A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour, and no gap after it.
-- Right of the bar is the total, then the largest conversation segment with its share of what is used: `364k/1M 36% · ▉ Tool results 40%`. The percent is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
+- Right of the bar is the total, then the largest conversation segment with its tokens: `364k/1M 36% · ▉ Tool results 114k`. The percent of the total is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
+- Until you first open the pane in a session, the place of the largest segment reads `· /ctx for details`. After that, it names the largest segment.
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.
 - The keyboard chip goes away 4 seconds after the focus last moved, or at once when the focus moves into a pane, a prompt is sent, or you click a segment. Claude Code does not tell a mod when `Esc` or typing takes the keyboard back, so until then the chip can stay for up to 4 seconds. While it shows, pointing at another segment shows no chip.
 - A chip stays inside the bar when it fits there, on the right of its segment or else on the left. A chip that does not fit covers the total and the legend to the end of the row.

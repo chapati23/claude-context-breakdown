@@ -5,7 +5,7 @@ import { CHIP_GAP } from '../hooks/bar'
 import { inkOn } from '../hooks/color'
 import { CHIP_HOLD_MS } from '../hooks/focus'
 import { DARK, LIGHT, edgeColor } from '../hooks/palette'
-import { BAND, PANE, barRowOf, SUMMARY, SURFACES, TRANSCRIPT, usage, world } from './fixtures'
+import { BAND, PANE, barRowOf, earlySession, SUMMARY, SURFACES, TRANSCRIPT, seePane, usage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
 
@@ -208,6 +208,7 @@ test('a chip with no room on the right flips to the left of its segment', async 
   ]
   await $.session.start(START)
   await w.clock.advance(0)
+  await seePane($, w)
 
   {
     // Too narrow for the legend: only the total is right of the bar.
@@ -426,14 +427,15 @@ test('the legend names the largest conversation segment after a swatch of its co
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
+  await seePane($, w)
 
   // The desktop's legend is data of the Client: see desktop.test.tsx.
   for (const surface of ['terminal'] as const) {
     for (const bodyColumns of [60, 80, 100]) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
       const row = await rowOf(ui)
-      const at = row.flow.findIndex(item => item.text === ' Tool results 45%')
-      // 30k of 66k used. The words are dim text, as the total: a segment
+      const at = row.flow.findIndex(item => item.text === ' Tool results 30k')
+      // 30k of 66k used: its tokens, not a percent. The words are dim text, as the total: a segment
       // colour holds only 3:1, too little for text.
       expect(row.flow[at]?.node.props).toEqual({ dimColor: true })
       // The swatch before them carries the colour.
@@ -445,7 +447,7 @@ test('the legend names the largest conversation segment after a swatch of its co
     // 12 + 3 + 2 + 16 + 2 + 20 = 55 columns hold the legend; 54 do not.
     for (const [bodyColumns, hasLegend] of [[55, true], [54, false], [24, false]] as const) {
       const ui = await $.ui.mount({ ...BAND, surface, props: { ...BAND.props, bodyColumns } })
-      expect((await ui.find({ type: 'Text', text: /^ ?Tool results 45%$/ })) !== undefined).toBe(hasLegend)
+      expect((await ui.find({ type: 'Text', text: /^ ?Tool results 30k$/ })) !== undefined).toBe(hasLegend)
       expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
       expect((await ui.findAll({ type: 'Button' })).length).toBeGreaterThan(0)
       await ui.unmount()
@@ -459,7 +461,7 @@ test('the widget seat’s glance draws the legend as a swatch picture in the seg
   await w.clock.advance(0)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, placement: 'widget', bodyColumns: 100 } })
-  const words = await ui.find({ type: 'Text', text: 'Tool results 45%' })
+  const words = await ui.find({ type: 'Text', text: 'Tool results 30k' })
   // The total, the dot and the words are text in the app's face, with tabular digits.
   expect(words?.props).toMatchObject({ tabular: true, dimColor: true })
   expect(words?.props.mono).toBeUndefined()
@@ -728,4 +730,69 @@ test('a precompute compaction changes nothing', async ($, on) => {
   await w.clock.advance(0)
 
   expect(w.usageCalls).toBe(calls)
+})
+
+/** A started session that is early in a 1M window: 69k used. */
+async function early($: Engine, on: Parameters<typeof world>[0]) {
+  const w = world(on)
+  const session = earlySession()
+  w.usage = session.usage
+  w.messages = session.messages
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  return w
+}
+
+/** The band's row as read, without the chips: the terminal's flow, or the desktop Client's runs. */
+async function rowText(ui: { drawn: () => Promise<unknown> }, surface: 'terminal' | 'desktop'): Promise<string> {
+  if (surface === 'terminal') {
+    return (await rowOf(ui)).flow.map(item => item.text).join('')
+  }
+  const client = barRowOf(await ui.drawn()) as { props: { props: { runs: { text: string }[] } } }
+
+  return client.props.props.runs.map(run => run.text).join('')
+}
+
+test('until the pane is first opened the band leads to /ctx; a click on the bar opens it and brings the legend', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...WIDE, surface })
+    expect(await rowText(ui, surface)).toMatch(/ 66k\/200k 33% · \/ctx for details$/)
+    await ui.unmount()
+  }
+  // The terminal draws it as dim text, as the total.
+  const before = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  expect((await rowOf(before)).flow.at(-1)?.node.props).toEqual({ dimColor: true })
+  await before.press({ key: 'seg-tool-results' })
+  await before.unmount()
+  expect(w.opened).toEqual(['context-breakdown'])
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...WIDE, surface })
+    const text = await rowText(ui, surface)
+    expect(text).toMatch(/ 66k\/200k 33% · ▉ Tool results 30k$/)
+    expect(text).not.toContain('/ctx')
+    await ui.unmount()
+  }
+
+  // A new session leads to /ctx again.
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const again = await $.ui.mount({ ...WIDE, surface: 'terminal' })
+  expect(await rowText(again, 'terminal')).toMatch(/ · \/ctx for details$/)
+  await again.unmount()
+})
+
+test('the mobile app draws the hint after the total, in the app’s face, beside the bar picture', async ($, on) => {
+  await early($, on)
+  const ui = await $.ui.mount({ ...BAND, surface: 'mobile', props: { ...BAND.props, bodyColumns: 145 } })
+  const hint = await ui.find({ type: 'Text', text: '/ctx for details' })
+  expect(hint?.props).toMatchObject({ tabular: true, dimColor: true })
+  const bar = (await ui.findAll({ type: 'Svg' }))[0]
+  expect(bar?.props.alt).toBe('Context window: 69k/1M 7%')
+  await ui.unmount()
 })

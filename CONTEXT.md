@@ -63,7 +63,7 @@ The small label beside a segment of the bar that gives the segment's name and si
 _Avoid_: Tooltip, popover, hover title
 
 **Legend**:
-The text right of the bar's total that names the largest conversation segment and its share of what is used.
+The text right of the bar's total that names the largest conversation segment and its tokens. Until the user first opens the pane in a session, its place reads "/ctx for details".
 _Avoid_: Key, caption
 
 **Swatch**:

@@ -13,7 +13,7 @@ import { BAR_CELLS, BUTTON_PAD_CELLS, LEAD_CELLS, gridCells } from '../hooks/gri
 import { DARK } from '../hooks/palette'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
-import { BAND, CHAT, barRowOf, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
+import { BAND, CHAT, barRowOf, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, seePane, usage, world } from './fixtures'
 import type { World } from './fixtures'
 import { flatten, mountPane } from './e2e/helpers'
 import { gridRowWith, gridRowsOf, isNode, nodesOf, rightColumns, rowLine } from './grid'
@@ -81,6 +81,8 @@ async function measured($: Engine, on: On) {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
+  // The person has found the pane: the band shows the legend, not the hint.
+  await seePane($, w)
 
   return w
 }
@@ -126,10 +128,10 @@ test('the desktop band is one Client with the terminal row’s text, split into 
   const isBarCell = (run: BarRun) => typeof run.target === 'number' || run.color === DARK.free || run.color === DARK.reserve
   expect(runs.filter(isBarCell).every(run => run.mono === true)).toBe(true)
   expect(total.map(run => run.mono === true)).toEqual([true, false])
-  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', 'Tool results 45%'])
+  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', 'Tool results 30k'])
   expect(runs.filter(run => run.mono === true && !isBarCell(run)).map(run => run.text)).toEqual([' ', ' · ', '▉', ' '])
   // The legend's swatch, the space after it and the words are marked as legend, so a hover can replace them.
-  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' ', 'Tool results 45%'])
+  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' ', 'Tool results 30k'])
   expect(runs.find(run => run.isLegend === true)?.color).toBe(DARK.segments['tool-results'])
   expect(runs.filter(run => run.isLegend !== true && run.text.includes('Tool results'))).toEqual([])
 
@@ -183,7 +185,7 @@ test('the Client module draws the runs, swaps the legend for a name under the po
   const drawnText = async () => (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => text.text).join('')
 
   expect(await drawnText()).toBe(runs.map(run => run.text).join(''))
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
   // A code-font run is drawn mono; any other run in the app's face, with tabular digits.
   const faces = (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => ({ mono: text.props.mono, tabular: text.props.tabular }))
   expect(faces).toEqual(runs.map(run => (run.mono === true ? { mono: true, tabular: undefined } : { mono: undefined, tabular: true })))
@@ -194,12 +196,12 @@ test('the Client module draws the runs, swaps the legend for a name under the po
   const name = await ui.find({ type: 'Text', in: CLIENT, text: hovers[String(claude)]! })
   expect({ mono: name?.props.mono, tabular: name?.props.tabular }).toEqual({ mono: undefined, tabular: true })
   expect(hovered).toContain(hovers[String(claude)]!)
-  expect(hovered).not.toContain('Tool results 45%')
+  expect(hovered).not.toContain('Tool results 30k')
   // The total stays while a name shows.
   expect(hovered).toContain('66k/200k 33%')
 
   await ui.pointer({ type: 'leave', x: 0, y: 0 })
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
 
   // A left press on a segment posts it, and the hooks module opens the pane.
   await ui.pointer({ type: 'down', x: column(claude), y: 0, button: 'left' })
@@ -450,6 +452,7 @@ test('after the bar Client failed, bandTree draws the desktop bar as the picture
   const model: BandModel = {
     label: '9k/20k 45%',
     legend: null,
+    hint: null,
     parts: [{ kind: 'segment', id: 'system', members: ['system'], tokens: 9000, cells: 4 }, { kind: 'free', cells: 4 }],
     chips: [],
   }
@@ -506,7 +509,7 @@ test('an enter names no segment until a move places the pointer', async ($, on) 
   // The enter carries the column the last move reported, wherever the pointer came back in.
   await ui.pointer({ type: 'enter', x: columnOf(runs, claude), y: 0 })
   expect(await drawnText()).not.toContain(hovers[String(claude)]!)
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
   await ui.unmount()
 })
 
@@ -642,7 +645,7 @@ test('the widget seat still shows a glance with no Button and no Client', async 
   // The bar is the picture, with the total and the legend in the surface's own face, with tabular digits.
   expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
   expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
-  expect(await ui.find({ type: 'Text', text: 'Tool results 45%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Tool results 30k' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1038,4 +1041,26 @@ test('the mobile app draws key words and key caps only while the pane holds the 
       await ui.unmount()
     }
   }
+})
+
+test('the desktop Client shows the hint until the pane is opened, and a segment name takes its place under the pointer', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const { runs, hovers } = (await clientOf(band)).props
+  // The join in the code font, the words in the app's face; the words make way for a name.
+  expect(runs.slice(-2)).toEqual([
+    { text: ' · ', dimColor: true, target: null, mono: true },
+    { text: '/ctx for details', dimColor: true, target: null, isLegend: true },
+  ])
+  // Every column from the total on opens level 1, the hint's too.
+  const total = columnOf(runs, 'total')
+  expect(targetAt(runs, total + 30)).toBe('total')
+  // A name fits in the hint's 16 characters.
+  for (const text of Object.values(hovers)) {
+    expect(cellWidth(text)).toBeLessThanOrEqual('/ctx for details'.length)
+  }
+  expect(Object.keys(hovers).length).toBeGreaterThan(0)
+  await band.unmount()
 })

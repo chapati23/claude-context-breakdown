@@ -1,6 +1,8 @@
 // The terminal pane as a person reads it, compared line by line with the
 // goldens in golden.ts. Levels 1, 2 (Tool results) and 3 (one Read result),
-// at 45 and 88 columns, with and without the keyboard. The marks show the
+// at 45 and 88 columns, with and without the keyboard. Then the terminal's
+// band in an early session of a 1M window, before and
+// after `/ctx` first opens the pane. The marks show the
 // ring (⟦ ⟧), off controls (⟪ ⟫) and dim parts (⟨ ⟩); see flatten in helpers.ts.
 //
 // When a drawing changes on purpose, the test fails and prints the whole
@@ -16,7 +18,7 @@
 
 import { expect, test } from 'claude-code/testing'
 
-import { NOTES } from '../fixtures'
+import { BAND, NOTES, barRowOf, earlySession } from '../fixtures'
 import { GOLDEN } from './golden'
 import { flatten, mountPane, real, session } from './helpers'
 
@@ -151,6 +153,25 @@ test('the terminal pane at levels 1, 2 and 3 reads as its goldens', async ($, on
   const added = await mountPane($, 'terminal', { columns: 88, isFocused: true })
   drawings['level1-added/88/focused'] = flatten(await added.drawn(), { marks: true, columns: 88 })
   await added.unmount()
+
+  // The band in an early session of a 1M window: 69k used, mostly free
+  // space. At 150 and 90 terminal columns (the band is 5 narrower),
+  // with the hint until `/ctx` opens the pane, then with the legend.
+  const early = earlySession()
+  w.usage = early.usage
+  w.messages = early.messages
+  await $.session.measure({ context: w.usage.context, rateLimits: [], changed: ['context'] })
+  await w.clock.advance(0)
+  const drawBand = async (state: string) => {
+    for (const columns of [145, 85]) {
+      const band = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: columns } })
+      drawings[`band-1m-69k/${columns}/${state}`] = flatten(barRowOf(await band.drawn()), { marks: true, columns })
+      await band.unmount()
+    }
+  }
+  await drawBand('hint')
+  await $.command.run({ command: 'ctx', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await drawBand('legend')
 
   const keys = new Set([...Object.keys(drawings), ...Object.keys(GOLDEN)])
   const changed = [...keys].filter(key => JSON.stringify(drawings[key]) !== JSON.stringify(GOLDEN[key]))

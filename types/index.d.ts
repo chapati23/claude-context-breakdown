@@ -284,6 +284,12 @@ declare module 'claude-code' {
        * session started, a compaction or `/clear`.
        */
       base: Shaped<ContextBreakdownBase | null>
+      /**
+       * Whether the pane has been opened since the session started. Until it
+       * has, the band shows the way to it, "/ctx for details", in the
+       * legend's place.
+       */
+      paneSeen: Shaped<boolean>
     }
   }
 }

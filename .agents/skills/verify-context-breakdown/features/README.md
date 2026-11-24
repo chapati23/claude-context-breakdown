@@ -7,7 +7,7 @@ This folder is the maintained source for proving the mod's user-facing behaviour
 - Unit checks pass: `claude plugin validate .`, `claude plugin test .`, `tsc -p .`.
 - Terminal: a run started with `scripts/tui.sh start <run>` and a passing `scripts/doctor.sh tui <run>`. Default size `110x24`; the pane opens on the right, about 44 columns wide.
 - Desktop: the user's go, `scripts/desktop-load.sh on <run>`, a passing `scripts/doctor.sh desktop`, and a **new** local session in the app.
-- The session has had one prompt: `Print the numbers 1 to 40, one per line, and nothing else.` Before the first prompt the bar has a total but no legend, and the column `added` has no base.
+- The session has had one prompt: `Print the numbers 1 to 40, one per line, and nothing else.` Before the first prompt the bar has a total and the hint `· /ctx for details`, and the column `added` has no base. Until the pane is first opened in the session, the hint stands in the legend's place on every surface.
 - Never drive a terminal session that this run did not start. Drive the desktop app only inside the block the user agreed to.
 
 ## Driving conventions

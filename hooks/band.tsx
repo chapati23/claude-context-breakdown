@@ -15,7 +15,7 @@ import type { TokensOf } from './svgbar'
 import type { BarClientProps, BarRun, PartIdentity } from './barclient'
 import { usedTokens } from './snapshot'
 import type { BandModel } from './view'
-import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, bandModel, fit, legendCells } from './view'
+import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, bandModel, fit, sideCells } from './view'
 import { cellWidth } from './text'
 
 /** The element table of the surface being drawn. */
@@ -142,7 +142,7 @@ function row(
   focused: string | null,
 ): RenderElement {
   const { Box, Text } = ui
-  const { legend } = model
+  const { legend, hint } = model
 
   // The chips come last, so they paint over the cells before them.
   return (
@@ -152,6 +152,7 @@ function row(
       {legend !== null && <Text dimColor>{LEGEND_JOIN}</Text>}
       {legend !== null && <Text color={colorOf(palette, legend.cell)}>{segmentCells(legend.cell, 1)}</Text>}
       {legend !== null && <Text dimColor>{` ${legend.text}`}</Text>}
+      {hint !== null && <Text dimColor>{`${LEGEND_JOIN}${hint}`}</Text>}
       {openPane !== null &&
         chipsToDraw(model.chips, focused).map(({ chip, isForced }) => chipBox(ui, chip, palette, isForced))}
     </Box>
@@ -175,7 +176,7 @@ function pictureRow(
   openPane: OpenPane | null,
 ): RenderElement {
   const { Box, Text, Button, Svg } = ui
-  const { legend } = model
+  const { legend, hint } = model
   const hasBar = model.parts.length > 0
   const total = (
     <Text tabular dimColor>
@@ -212,6 +213,16 @@ function pictureRow(
       {legend !== null && (
         <Text tabular dimColor>
           {legend.text}
+        </Text>
+      )}
+      {hint !== null && (
+        <Text tabular dimColor>
+          ·
+        </Text>
+      )}
+      {hint !== null && (
+        <Text tabular dimColor>
+          {hint}
         </Text>
       )}
     </Box>
@@ -254,14 +265,19 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     parts[String(index)] = { id: part.id, members: [...part.members] }
     hoverParts.push({ index, forms: chipForms(part, tokensOf).map(form => form.trim()) })
   })
-  const { legend } = model
+  const { legend, hint } = model
   // The name shows in the legend's place, in the app's face as the legend's
   // words are: the longest form that fits, else the shortest cut to fit. The
   // cells of a text in that face no longer bound its drawn width, so the name
   // gets as many characters as the words it replaces, not the swatch and the
-  // space too: those stay as a margin. With no legend there is no room, and
-  // no name shows.
-  const room = legend === null ? 0 : legendCells(legend) - LEGEND_JOIN.length - LEGEND_SWATCH_CELLS
+  // space too: those stay as a margin. In place of the hint, the name gets the
+  // hint's characters. With neither there is no room, and no name shows.
+  const room =
+    legend !== null
+      ? sideCells(model) - LEGEND_JOIN.length - LEGEND_SWATCH_CELLS
+      : hint !== null
+        ? sideCells(model) - LEGEND_JOIN.length
+        : 0
   for (const { index, forms } of hoverParts) {
     const fits = forms.find(form => cellWidth(form) <= room)
     const text = fits ?? (room >= MIN_CHIP_CELLS ? fit(forms[forms.length - 1] ?? '', room).trimEnd() : '')
@@ -289,6 +305,11 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     })
     runs.push({ text: ' ', target: null, isLegend: true, mono: true })
     runs.push({ text: legend.text, dimColor: true, target: null, isLegend: true })
+  }
+  if (hint !== null) {
+    // As the legend's: the join in the code font, the words in the app's face.
+    runs.push({ text: LEGEND_JOIN, dimColor: true, target: null, mono: true })
+    runs.push({ text: hint, dimColor: true, target: null, isLegend: true })
   }
 
   return { runs, hovers, parts }
@@ -369,7 +390,7 @@ export function bandTree(
 
 /**
  * The glance a minimized pane shows (the desktop app's widget seat): the bar,
- * the total and the legend, with nothing to press.
+ * the total and the legend, with nothing to press. No hint: the pane is open.
  */
 export function glanceTree(
   ui: Ui,

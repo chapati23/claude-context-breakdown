@@ -48,7 +48,7 @@ Success is adoption (confirmed 2026-11-19): other Claude Code users install the 
 
 Confirmed functionality:
 
-- The bar, with the total, the legend and one chip at a time.
+- The bar, with the total, the legend and one chip at a time. Until the user first opens the pane in a session, the legend's place reads "/ctx for details".
 - The pane with three levels: segments, items, content. The content level has a formatted view and a raw view, and can show the file on disk in place of the text as loaded.
 - The "Not loaded" block for tool schemas that are outside the window. Its `MCP tools` row opens a list of the MCP servers whose tools are not loaded.
 - The column `added`: the tokens that each segment gained since the last prompt. The heading of the pane warns when free space is below 10% of the window.
@@ -79,7 +79,7 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 
 ## Evidence on Hand
 
-- Four pictures of real sessions (Claude Code 2.1.328, and 2.1.327 for the bar; Ghostty, 200k window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png).
+- Four pictures of real sessions (Claude Code 2.1.328, and 2.1.327 for the bar; Ghostty, 200k window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png). They predate 0.11.0: the bar's legend in them gives a percent of what is used, not tokens.
 - [README.md](README.md): the behaviour of the bar and the pane, the keys per surface, how the numbers are made, and the limits.
 - [docs/adr/0001-build-as-a-mod-on-the-early-access-api.md](docs/adr/0001-build-as-a-mod-on-the-early-access-api.md): the options that were rejected, with reasons.
 - Tests under `tests/`, with golden end-to-end journeys under `tests/e2e/` and their description in [docs/e2e.md](docs/e2e.md).

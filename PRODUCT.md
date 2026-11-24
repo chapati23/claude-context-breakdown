@@ -21,7 +21,7 @@ Authors of skills, hooks and MCP servers can use the mod to measure their own wo
 
 ## Product Purpose
 
-`context-breakdown` is a Claude Code mod. It draws one bar above the prompt: the full length of the bar is the window, and each coloured stretch is one segment. A pane lists every segment, then the items of one segment, then the content of one item as loaded.
+`context-breakdown` is a Claude Code mod. It draws one bar above the prompt: the full length of the bar is the window, and each coloured stretch is one segment. One exception: in a window of 500k tokens or more, while use and the reserve fill an eighth of it or less, the bar shows the first quarter of the window, and a scale break (`╱╱`) stands for the free space it leaves out. The total and its percent always count the whole window. A pane lists every segment, then the items of one segment, then the content of one item as loaded.
 
 It exists because Claude Code's own `/context` report shows the window only on request and shows the conversation as one number.
 
@@ -48,7 +48,7 @@ Success is adoption (confirmed 2026-11-19): other Claude Code users install the 
 
 Confirmed functionality:
 
-- The bar, with the total, the legend and one chip at a time.
+- The bar, with the total, the legend and one chip at a time. Until the user first opens the pane in a session, the legend's place reads "/ctx for details".
 - The pane with three levels: segments, items, content. The content level has a formatted view and a raw view, and can show the file on disk in place of the text as loaded.
 - The "Not loaded" block for tool schemas that are outside the window. Its `MCP tools` row opens a list of the MCP servers whose tools are not loaded.
 - The column `added`: the tokens that each segment gained since the last prompt. The heading of the pane warns when free space is below 10% of the window.

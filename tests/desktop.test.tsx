@@ -6,14 +6,17 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { bandTree } from '../hooks/band'
+import { bandTree, barClientProps } from '../hooks/band'
 import { hoveredPart, isFaded, targetAt } from '../hooks/barclient'
 import type { BarClientPost, BarClientProps, BarRun } from '../hooks/barclient'
 import { BAR_CELLS, BUTTON_PAD_CELLS, LEAD_CELLS, gridCells } from '../hooks/grid'
-import { DARK } from '../hooks/palette'
+import { DARK, LIGHT } from '../hooks/palette'
+import { BREAK_GAP_PX, SVG_CELL_PX, barSvg, svgBarWidth } from '../hooks/svgbar'
+import { bandModel } from '../hooks/view'
 import { cellWidth } from '../hooks/text'
 import type { BandModel } from '../hooks/view'
-import { BAND, CHAT, barRowOf, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, manyResults, richUsage, realSession, usage, world } from './fixtures'
+import type { LayoutPart } from '../hooks/layout'
+import { BAND, CHAT, barRowOf, FOCUSED_PANE, MESSAGES, NOTES, PANE, PROJECT_MD, PROJECT_TEXT, earlySession, manyResults, richUsage, realSession, seePane, usage, world } from './fixtures'
 import type { World } from './fixtures'
 import { flatten, mountPane } from './e2e/helpers'
 import { gridRowWith, gridRowsOf, isNode, nodesOf, rightColumns, rowLine } from './grid'
@@ -81,6 +84,8 @@ async function measured($: Engine, on: On) {
   const w = world(on)
   await $.session.start(START)
   await w.clock.advance(0)
+  // The person has found the pane: the band shows the legend, not the hint.
+  await seePane($, w)
 
   return w
 }
@@ -126,10 +131,10 @@ test('the desktop band is one Client with the terminal row’s text, split into 
   const isBarCell = (run: BarRun) => typeof run.target === 'number' || run.color === DARK.free || run.color === DARK.reserve
   expect(runs.filter(isBarCell).every(run => run.mono === true)).toBe(true)
   expect(total.map(run => run.mono === true)).toEqual([true, false])
-  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', 'Tool results 45%'])
+  expect(runs.filter(run => run.mono !== true).map(run => run.text)).toEqual(['66k/200k 33%', 'Tool results 30k'])
   expect(runs.filter(run => run.mono === true && !isBarCell(run)).map(run => run.text)).toEqual([' ', ' · ', '▉', ' '])
   // The legend's swatch, the space after it and the words are marked as legend, so a hover can replace them.
-  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' ', 'Tool results 45%'])
+  expect(runs.filter(run => run.isLegend === true).map(run => run.text)).toEqual(['▉', ' ', 'Tool results 30k'])
   expect(runs.find(run => run.isLegend === true)?.color).toBe(DARK.segments['tool-results'])
   expect(runs.filter(run => run.isLegend !== true && run.text.includes('Tool results'))).toEqual([])
 
@@ -183,7 +188,7 @@ test('the Client module draws the runs, swaps the legend for a name under the po
   const drawnText = async () => (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => text.text).join('')
 
   expect(await drawnText()).toBe(runs.map(run => run.text).join(''))
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
   // A code-font run is drawn mono; any other run in the app's face, with tabular digits.
   const faces = (await ui.findAll({ type: 'Text', in: CLIENT })).map(text => ({ mono: text.props.mono, tabular: text.props.tabular }))
   expect(faces).toEqual(runs.map(run => (run.mono === true ? { mono: true, tabular: undefined } : { mono: undefined, tabular: true })))
@@ -194,12 +199,12 @@ test('the Client module draws the runs, swaps the legend for a name under the po
   const name = await ui.find({ type: 'Text', in: CLIENT, text: hovers[String(claude)]! })
   expect({ mono: name?.props.mono, tabular: name?.props.tabular }).toEqual({ mono: undefined, tabular: true })
   expect(hovered).toContain(hovers[String(claude)]!)
-  expect(hovered).not.toContain('Tool results 45%')
+  expect(hovered).not.toContain('Tool results 30k')
   // The total stays while a name shows.
   expect(hovered).toContain('66k/200k 33%')
 
   await ui.pointer({ type: 'leave', x: 0, y: 0 })
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
 
   // A left press on a segment posts it, and the hooks module opens the pane.
   await ui.pointer({ type: 'down', x: column(claude), y: 0, button: 'left' })
@@ -450,12 +455,13 @@ test('after the bar Client failed, bandTree draws the desktop bar as the picture
   const model: BandModel = {
     label: '9k/20k 45%',
     legend: null,
+    hint: null,
     parts: [{ kind: 'segment', id: 'system', members: ['system'], tokens: 9000, cells: 4 }, { kind: 'free', cells: 4 }],
     chips: [],
   }
   const opened: unknown[] = []
   const draw = (clientFailed: boolean) =>
-    bandTree(ui, model, DARK, part => opened.push(part), null, { tokensOf: () => 9000, used: 9000 }, 'desktop', clientFailed) as unknown as Drawn
+    bandTree(ui, model, DARK, part => opened.push(part), null, { tokensOf: () => 9000, used: 9000, isEstimate: false }, 'desktop', clientFailed) as unknown as Drawn
   const all = (node: unknown): Drawn[] => {
     if (Array.isArray(node)) {
       return node.flatMap(all)
@@ -506,7 +512,7 @@ test('an enter names no segment until a move places the pointer', async ($, on) 
   // The enter carries the column the last move reported, wherever the pointer came back in.
   await ui.pointer({ type: 'enter', x: columnOf(runs, claude), y: 0 })
   expect(await drawnText()).not.toContain(hovers[String(claude)]!)
-  expect(await drawnText()).toContain('Tool results 45%')
+  expect(await drawnText()).toContain('Tool results 30k')
   await ui.unmount()
 })
 
@@ -642,7 +648,7 @@ test('the widget seat still shows a glance with no Button and no Client', async 
   // The bar is the picture, with the total and the legend in the surface's own face, with tabular digits.
   expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(2)
   expect((await ui.find({ type: 'Text', text: /66k\/200k 33%/ }))?.text.trim()).toBe('66k/200k 33%')
-  expect(await ui.find({ type: 'Text', text: 'Tool results 45%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Tool results 30k' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1038,4 +1044,139 @@ test('the mobile app draws key words and key caps only while the pane holds the 
       await ui.unmount()
     }
   }
+})
+
+/** A measured session early in a 1M window, the pane once opened: the bar is compressed. */
+async function early($: Engine, on: On) {
+  const w = world(on)
+  const session = earlySession()
+  w.usage = session.usage
+  w.messages = session.messages
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await seePane($, w)
+
+  return w
+}
+
+test('the desktop Client draws the scale break as two runs that open nothing, and every click still lands', async ($, on) => {
+  const w = await early($, on)
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, bodyColumns: 145 } })
+  const props = (await clientOf(band)).props
+  const { runs } = props
+  const at = runs.findIndex(run => run.text === '╱╱')
+  expect(runs[at]).toEqual({ text: '╱╱', dimColor: true, target: null, mono: true })
+  expect(runs[at + 1]).toEqual({ text: '·', color: DARK.free, target: null, mono: true })
+  // The break's three columns open nothing; it starts after 28 segment cells and 61 free ones.
+  const column = columnOf(runs, null) + 61
+  expect(runs.slice(0, at).reduce((sum, run) => sum + [...run.text].length, 0)).toBe(89)
+  expect(column).toBe(89)
+  for (const x of [89, 90, 91]) {
+    expect(targetAt(runs, x)).toBeNull()
+    expect(hoveredPart(runs, x)).toBeNull()
+  }
+  // The reserve after it opens nothing, and the first column after the bar opens level 1.
+  expect(targetAt(runs, 92)).toBeNull()
+  expect(targetAt(runs, 105)).toBe('total')
+  expect(targetAt(runs, 104)).toBeNull()
+  // No segment's index moved: a click on the notifications' cells posts their identity.
+  const notes = targetOfColor(runs, DARK.segments.injections)
+  expect(props.parts[String(notes)]).toEqual({ id: 'injections', members: ['injections', 'prompts', 'claude-output'] })
+  const system = targetOfColor(runs, DARK.segments.system)
+  await band.post(postOf(props, system), { in: CLIENT })
+  expect(w.opened).toEqual(['context-breakdown'])
+  const pane = await mountPane($, 'desktop', { columns: 88, isFocused: true })
+  expect(level2(flatten(await pane.drawn(), { surface: 'desktop', columns: 88 })).name).toBe('System prompt and built-in tools')
+  await pane.unmount()
+  await band.unmount()
+})
+
+test('the desktop Client shows the hint until the pane is opened, and a segment name takes its place under the pointer', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  const band = await $.ui.mount({ ...WIDE, surface: 'desktop' })
+  const { runs, hovers } = (await clientOf(band)).props
+  // The join in the code font, the words in the app's face; the words make way for a name.
+  expect(runs.slice(-2)).toEqual([
+    { text: ' · ', dimColor: true, target: null, mono: true },
+    { text: '/ctx for details', dimColor: true, target: null, isLegend: true },
+  ])
+  // Every column from the total on opens level 1, the hint's too.
+  const total = columnOf(runs, 'total')
+  expect(targetAt(runs, total + 30)).toBe('total')
+  // A name fits in the hint's 16 characters.
+  for (const text of Object.values(hovers)) {
+    expect(cellWidth(text)).toBeLessThanOrEqual('/ctx for details'.length)
+  }
+  expect(Object.keys(hovers).length).toBeGreaterThan(0)
+  await band.unmount()
+})
+
+test('barSvg cuts the free track at the scale break, draws two strokes in its gap and titles it', () => {
+  const model = bandModel(
+    {
+      window: 1_000_000,
+      reserve: 33_000,
+      baseline: [{ id: 'system', tokens: 24_000 }],
+      conversation: [{ id: 'tool-results', tokens: 45_000 }],
+      deferred: [],
+      notLoadedServers: [],
+      isEstimate: false,
+      staleTokens: null,
+      charsPerToken: null,
+      measuredAt: 0,
+    },
+    80,
+  )
+  expect(model.parts.filter(part => part.kind === 'break')).toHaveLength(1)
+  const width = svgBarWidth(model.parts)
+  let x = 0
+  for (const part of model.parts) {
+    if (part.kind === 'break') {
+      break
+    }
+    x += part.cells * SVG_CELL_PX
+  }
+  const svg = barSvg(model.parts, DARK, () => 0, 69_000)
+  expect(svg).toContain('<title>Scale break: 750k of free space left out</title>')
+  expect(barSvg(model.parts, DARK, () => 0, 69_000, true)).toContain('<title>Scale break: ~750k of free space left out</title>')
+  // The two strokes, bottom left to top right, in the cut grey.
+  expect(svg).toContain(`<line x1="${x + 3}" y1="10" x2="${x + 6}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)
+  expect(svg).toContain(`<line x1="${x + 8}" y1="10" x2="${x + 11}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)
+  expect(barSvg(model.parts, LIGHT, () => 0, 69_000)).toContain(`stroke="${LIGHT.cut}"`)
+  // No free track under the break's first 14 px: one track ends at it, the next starts after.
+  const tracks = [...svg.matchAll(/<rect class="c-free" x="([\d.]+)" y="0" width="([\d.]+)"/g)].map(m => [Number(m[1]), Number(m[2])])
+  expect(BREAK_GAP_PX).toBe(14)
+  expect(tracks).toEqual([
+    [0, x],
+    [x + 14, width - x - 14],
+  ])
+  for (const [start, width] of tracks) {
+    expect(start! + width! <= x || start! >= x + 14).toBe(true)
+  }
+  // A bar at true scale keeps its one track.
+  const linear = barSvg([{ kind: 'segment', id: 'system', members: ['system'], tokens: 1, cells: 4 }, { kind: 'free', cells: 6 }], DARK, () => 0, 1)
+  expect([...linear.matchAll(/class="c-free"/g)]).toHaveLength(1)
+  expect(linear).not.toContain('Scale break')
+})
+
+test('after the bar Client failed, the picture row’s alt text says when free space is shortened', () => {
+  type Drawn = { type: string; props: Record<string, unknown> & { children?: unknown } }
+  const ui = new Proxy({}, { get: (_, type) => (props: Drawn['props']) => ({ type: String(type), props }) }) as never
+  const segment: LayoutPart = { kind: 'segment', id: 'system', members: ['system'], tokens: 9000, cells: 4 }
+  const parts: LayoutPart[] = [segment, { kind: 'free', cells: 14 }, { kind: 'break', cells: 3, omitted: 750_000 }]
+  const model: BandModel = { label: '9k/1M <1%', legend: null, hint: null, parts, chips: [] }
+  const figures = { tokensOf: () => 9000, used: 9000, isEstimate: false }
+  const svgOf = (m: BandModel) => {
+    const row = bandTree(ui, m, DARK, () => undefined, null, figures, 'desktop', true) as unknown as Drawn
+    const children = row.props.children as unknown[]
+
+    return (children.flat() as (Drawn | false)[]).find(child => child !== false && child.type === 'Svg') as Drawn
+  }
+  expect(svgOf(model).props.alt).toBe('Context window: 9k/1M <1%, free space shortened')
+  expect(svgOf({ ...model, parts: [segment, { kind: 'free', cells: 17 }] }).props.alt).toBe('Context window: 9k/1M <1%')
+  // The Client's runs follow the same parts.
+  const runs = barClientProps(model, DARK, () => 9000).runs
+  expect(runs.map(run => run.text).join('')).toBe(`███▉${'·'.repeat(14)}╱╱· 9k/1M <1%`)
 })

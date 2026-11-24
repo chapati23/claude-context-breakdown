@@ -63,8 +63,12 @@ The small label beside a segment of the bar that gives the segment's name and si
 _Avoid_: Tooltip, popover, hover title
 
 **Legend**:
-The text right of the bar's total that names the largest conversation segment and its share of what is used.
+The text right of the bar's total that names the largest conversation segment and its tokens. Until the user first opens the pane in a session, its place reads "/ctx for details".
 _Avoid_: Key, caption
+
+**Scale break**:
+The mark ╱╱· that stands where the bar leaves out free space in a large window while use is low. Every other cell of the bar keeps one scale: the bar then shows the first quarter of the window.
+_Avoid_: Break mark, cut, gap, ellipsis, zoom
 
 **Swatch**:
 A small square in a segment's colour before the segment's name, so that the name can be matched to its stretch of the bar. The legend has one: one cell of the bar's glyphs in the segment's colour in the terminal and the desktop app, and a picture 10 by 10 pixels on the editor and the mobile app. Off the terminal each swatch in the pane is a picture 10 by 10 pixels. There it stands before the name of each segment's row at level 1, of free space and of the reserve, and in the titles of levels 2 and 3; the list of servers that are not loaded has none. The swatch of free space, the reserve or the compaction summary shows its texture there. In the terminal, each swatch in the pane of a segment is two full blocks `██` in its colour, also for the compaction summary. It stands before a row's name while the table has no length bar, and in the titles of levels 2 and 3; the list of servers has none. Free space shows `··` and the reserve `▒▒`, the bar's own glyphs: in the swatch's place while the table has no length bar, else at the start of the length bar's column.

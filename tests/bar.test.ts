@@ -2,8 +2,18 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import type { ContextBreakdownSnapshot } from '../types'
 import { CHIP_GAP, EDGE, FILLED, TEXTURE, barChips, chipForms, chipsToDraw, placeChip, segmentCells, segmentRuns } from '../hooks/bar'
-import type { SegmentPart } from '../hooks/layout'
-import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, MIN_BAR_WITH_LEGEND, bandModel, bandModelFor, legendCells, legendForms } from '../hooks/view'
+import type { LayoutPart, SegmentPart } from '../hooks/layout'
+import {
+  HINT_FORMS,
+  LEGEND_JOIN,
+  LEGEND_SWATCH_CELLS,
+  MIN_BAR_WITH_LEGEND,
+  bandModel,
+  bandModelFor,
+  hintCells,
+  legendCells,
+  legendForms,
+} from '../hooks/view'
 
 const part = (id: string, cells: number, members = [id], tokens = 1000): SegmentPart => ({
   kind: 'segment',
@@ -225,30 +235,35 @@ const INJECTIONS: Partial<ContextBreakdownSnapshot> = {
 }
 
 describe('the legend', () => {
-  test('names the largest conversation segment and its share of what is used', () => {
-    // 30k of 66k used: 45%, though it is 15% of the window.
-    expect(legendForms(snapshot())).toEqual([{ id: 'tool-results', cell: 'tool-results', text: 'Tool results 45%' }])
+  test('names the largest conversation segment and its tokens, not a percent', () => {
+    // 30k of 66k used: a percent beside the total's (of the window) would
+    // read as a share of the window too.
+    expect(legendForms(snapshot())).toEqual([{ id: 'tool-results', cell: 'tool-results', text: 'Tool results 30k' }])
     const forms = legendForms(snapshot(INJECTIONS))
-    expect(forms.map(form => form.text)).toEqual(['System notifications 45%', 'Notifications 45%'])
+    expect(forms.map(form => form.text)).toEqual(['System notifications 30k', 'Notifications 30k'])
+    for (const form of forms) {
+      expect(form.text).not.toContain('%')
+    }
   })
 
-  test('marks its share with ~ while the figures are estimated, as the total is', () => {
-    expect(legendForms(snapshot({ isEstimate: true }))[0]?.text).toBe('Tool results ~45%')
+  test('marks its tokens with ~ while the figures are estimated, as the total is', () => {
+    expect(legendForms(snapshot({ isEstimate: true }))[0]?.text).toBe('Tool results ~30k')
     expect(bandModel(snapshot({ isEstimate: true }), 80).label).toBe('~66k/200k 33%')
   })
 
   test('takes the colour of the cell that holds its segment when that one is merged', () => {
-    // A 1M window: the conversation's segments are each under half a cell.
-    // Claude output goes into Your prompts, then Tool results (the first)
-    // into its right neighbour, Your prompts again.
+    // The conversation's segments are each under half a cell. Claude output
+    // goes into Your prompts, then Tool results (the first) into its right
+    // neighbour, Your prompts again. A 200k window, which the bar never
+    // compresses (see layout.test.ts for a compressed one).
     const s = snapshot({
-      window: 1_000_000,
+      window: 200_000,
       reserve: 0,
       baseline: [{ id: 'system', tokens: 40_000 }],
       conversation: [
-        { id: 'tool-results', tokens: 8000 },
-        { id: 'prompts', tokens: 7000 },
-        { id: 'claude-output', tokens: 6000 },
+        { id: 'tool-results', tokens: 1600 },
+        { id: 'prompts', tokens: 1400 },
+        { id: 'claude-output', tokens: 1200 },
       ],
     })
     for (const columns of [60, 80]) {
@@ -271,24 +286,24 @@ describe('the legend', () => {
   test('sits right of the total while the bar keeps its cells', () => {
     const model = bandModel(snapshot(), 80)
     expect(model.label).toBe('66k/200k 33%')
-    expect(model.legend?.text).toBe('Tool results 45%')
+    expect(model.legend?.text).toBe('Tool results 30k')
     const bar = model.parts.reduce((sum, p) => sum + p.cells, 0)
     // The join, the swatch and a space, then the words.
-    expect(legendCells(model.legend!)).toBe(LEGEND_JOIN.length + LEGEND_SWATCH_CELLS + 'Tool results 45%'.length)
+    expect(legendCells(model.legend!)).toBe(LEGEND_JOIN.length + LEGEND_SWATCH_CELLS + 'Tool results 30k'.length)
     expect(bar + 1 + model.label.length + legendCells(model.legend!)).toBe(79)
   })
 
   test('steps down to the short name, then goes first when the row is narrow', () => {
     const s = snapshot(INJECTIONS)
-    const full = 'System notifications 45%'.length
-    const short = 'Notifications 45%'.length
+    const full = 'System notifications 30k'.length
+    const short = 'Notifications 30k'.length
     const label = '66k/200k 33%'.length
     // Room for the bar's floor with the long name, then with the short one.
     const longFits = label + LEGEND_JOIN.length + LEGEND_SWATCH_CELLS + full + 2 + MIN_BAR_WITH_LEGEND
     const shortFits = label + LEGEND_JOIN.length + LEGEND_SWATCH_CELLS + short + 2 + MIN_BAR_WITH_LEGEND
-    expect(bandModel(s, longFits).legend?.text).toBe('System notifications 45%')
-    expect(bandModel(s, longFits - 1).legend?.text).toBe('Notifications 45%')
-    expect(bandModel(s, shortFits).legend?.text).toBe('Notifications 45%')
+    expect(bandModel(s, longFits).legend?.text).toBe('System notifications 30k')
+    expect(bandModel(s, longFits - 1).legend?.text).toBe('Notifications 30k')
+    expect(bandModel(s, shortFits).legend?.text).toBe('Notifications 30k')
     const narrow = bandModel(s, shortFits - 1)
     expect(narrow.legend).toBeNull()
     expect(narrow.label).toBe('66k/200k 33%')
@@ -328,6 +343,166 @@ describe('bandModelFor', () => {
       expect(model.chips).toEqual([])
       // Everything else is the terminal's model.
       expect({ ...model, chips: undefined }).toEqual({ ...bandModel(s, 80), chips: undefined })
+    }
+  })
+})
+
+/**
+ * The early session of a 1M window: 69k used. System 24k, MCP 2.8k, Global
+ * instructions 8.2k, Skills 9.5k; Tool results 7k, System notifications 17k,
+ * Your prompts 77, Claude output 80; the 33k reserve.
+ */
+const EARLY: Partial<ContextBreakdownSnapshot> = {
+  window: 1_000_000,
+  reserve: 33_000,
+  baseline: [
+    { id: 'system', tokens: 24_000 },
+    { id: 'mcp', tokens: 2800 },
+    { id: 'global-instructions', tokens: 8200 },
+    { id: 'skills-agents', tokens: 9500 },
+  ],
+  conversation: [
+    { id: 'tool-results', tokens: 7000 },
+    { id: 'injections', tokens: 17_000 },
+    { id: 'prompts', tokens: 77 },
+    { id: 'claude-output', tokens: 80 },
+  ],
+}
+
+const partsOf = (model: { parts: readonly LayoutPart[] }) =>
+  model.parts.map(p => (p.kind === 'segment' ? `${p.id} ${p.cells}` : `${p.kind} ${p.cells}`))
+
+describe('the compressed bar in the band', () => {
+  test('at 150 columns, the early 1M session gives its segments 28 of 105 cells behind a scale break', () => {
+    // The terminal's band is 5 columns narrower than the terminal.
+    const model = bandModel(snapshot(EARLY), 145)
+    expect(model.label).toBe('69k/1M 7%')
+    expect(model.legend?.text).toBe('System notifications 17k')
+    expect(partsOf(model)).toEqual([
+      'system 10',
+      'mcp 1',
+      'global-instructions 3',
+      'skills-agents 4',
+      'tool-results 3',
+      'injections 7',
+      'free 61',
+      'break 3',
+      'reserve 13',
+    ])
+    const brk = model.parts.find(p => p.kind === 'break')
+    expect(brk?.kind === 'break' && brk.omitted).toBe(750_000)
+    // The notifications cell holds Your prompts and Claude output too.
+    const notes = model.parts.find((p): p is SegmentPart => p.kind === 'segment' && p.id === 'injections')
+    expect(notes?.members).toEqual(['injections', 'prompts', 'claude-output'])
+  })
+
+  test('at 90 columns, the same session behind a scale break', () => {
+    const model = bandModel(snapshot(EARLY), 85)
+    expect(model.legend?.text).toBe('System notifications 17k')
+    expect(partsOf(model)).toEqual([
+      'system 5',
+      'global-instructions 1',
+      'skills-agents 2',
+      'tool-results 1',
+      'injections 3',
+      'free 24',
+      'break 3',
+      'reserve 6',
+    ])
+    expect(model.parts.reduce((sum, p) => sum + p.cells, 0)).toBe(45)
+  })
+
+  test('returns to the true scale on the draw after use and the reserve pass an eighth of the window', () => {
+    const at = (system: number) => bandModel(snapshot({ ...EARLY, baseline: [{ id: 'system', tokens: system }] }), 145)
+    // 24,157 of conversation: 67,843 more in System makes 92k used, with the 33k reserve an eighth.
+    const under = at(67_843)
+    const over = at(67_844)
+    expect(under.parts.some(p => p.kind === 'break')).toBe(true)
+    expect(over.parts.some(p => p.kind === 'break')).toBe(false)
+    // The total and the legend do not change at the crossing.
+    expect(over.label).toBe(under.label)
+    expect(over.legend).toEqual(under.legend)
+    // The segments drop to about a quarter of their cells.
+    const cells = (model: typeof under) => model.parts.reduce((sum, p) => sum + (p.kind === 'segment' ? p.cells : 0), 0)
+    expect(cells(over)).toBeLessThan(cells(under) / 3)
+    // A 200k window never compresses.
+    expect(bandModel(snapshot(), 145).parts.some(p => p.kind === 'break')).toBe(false)
+  })
+
+  test('counts the break’s cells in the chips’ places, and gives it no chip', () => {
+    const model = bandModel(snapshot(EARLY), 145)
+    const starts = new Map<string, number>()
+    let start = 0
+    for (const p of model.parts) {
+      if (p.kind === 'segment') {
+        starts.set(p.id, start)
+      }
+      start += p.cells
+    }
+    expect(model.chips.map(chip => chip.id)).toEqual(['system', 'mcp', 'global-instructions', 'skills-agents', 'tool-results', 'injections'])
+    for (const chip of model.chips) {
+      const p = model.parts.find((one): one is SegmentPart => one.kind === 'segment' && one.id === chip.id)!
+      const end = starts.get(chip.id)! + p.cells
+      expect(chip.left === end + CHIP_GAP || chip.left + chip.text.length === starts.get(chip.id)! - CHIP_GAP).toBe(true)
+    }
+    // The row the chips are placed in counts the break: a chip that reaches
+    // past the bar ends at the row's end.
+    const row = 105 + 1 + model.label.length + legendCells(model.legend!)
+    for (const chip of model.chips) {
+      expect(chip.left + chip.text.length).toBeLessThanOrEqual(row)
+    }
+  })
+})
+
+describe('the hint', () => {
+  test('stands in the legend’s place until the pane is opened, naming /ctx', () => {
+    const model = bandModel(snapshot(), 80, { hint: true })
+    expect(model.hint).toBe('/ctx for details')
+    expect(model.legend).toBeNull()
+    // The bar loses the cells the hint takes: the row ends one cell short of the band.
+    const bar = model.parts.reduce((sum, p) => sum + p.cells, 0)
+    expect(bar + 1 + model.label.length + hintCells(model.hint!)).toBe(79)
+    // Without it, the legend as before.
+    expect(bandModel(snapshot(), 80).hint).toBeNull()
+    expect(bandModel(snapshot(), 80).legend?.text).toBe('Tool results 30k')
+  })
+
+  test('shows before the first prompt, while there is no legend', () => {
+    const before = snapshot({ conversation: [{ id: 'conversation', tokens: 0 }] })
+    expect(bandModel(before, 80).legend).toBeNull()
+    expect(bandModel(before, 80, { hint: true }).hint).toBe('/ctx for details')
+  })
+
+  test('steps down to /ctx, then goes first when the row is narrow', () => {
+    const label = '66k/200k 33%'.length
+    const longFits = label + hintCells(HINT_FORMS[0]!) + 2 + MIN_BAR_WITH_LEGEND
+    const shortFits = label + hintCells(HINT_FORMS[1]!) + 2 + MIN_BAR_WITH_LEGEND
+    expect(bandModel(snapshot(), longFits, { hint: true }).hint).toBe('/ctx for details')
+    expect(bandModel(snapshot(), longFits - 1, { hint: true }).hint).toBe('/ctx')
+    expect(bandModel(snapshot(), shortFits, { hint: true }).hint).toBe('/ctx')
+    const narrow = bandModel(snapshot(), shortFits - 1, { hint: true })
+    expect(narrow.hint).toBeNull()
+    expect(narrow.legend).toBeNull()
+    expect(narrow.parts.length).toBeGreaterThan(0)
+    for (const form of HINT_FORMS) {
+      expect(form).toContain('/ctx')
+    }
+  })
+
+  test('no chip ever reaches past the row the hint is drawn on', () => {
+    for (let columns = 5; columns <= 160; columns += 1) {
+      for (const s of [snapshot(), snapshot(EARLY)]) {
+        const model = bandModel(s, columns, { hint: true })
+        const row =
+          model.parts.reduce((sum, p) => sum + p.cells, 0) +
+          (model.parts.length > 0 ? 1 : 0) +
+          model.label.length +
+          (model.hint === null ? 0 : hintCells(model.hint))
+        expect(row).toBeLessThan(Math.max(columns, 1))
+        for (const chip of model.chips) {
+          expect(chip.left + chip.text.length).toBeLessThanOrEqual(row)
+        }
+      }
     }
   })
 })

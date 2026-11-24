@@ -91,8 +91,16 @@ test('J7 terminal: start, measure, tool calls, compaction, /clear, light theme, 
     expect(band).toHaveLength(1)
     expect(widest(band)).toBeLessThanOrEqual(columns)
     expect(totalOf(band)).toBe('66k/200k 33%')
-    // The legend names the largest conversation segment.
-    expect(band[0]).toMatch(/ · ▉ Tool results 45%$/)
+    // Until the person first opens the pane, the legend's place leads to it.
+    expect(band[0]).toMatch(/ 66k\/200k 33% · \/ctx for details$/)
+  }
+  // `/ctx` opens the pane: from then on the legend names the largest
+  // conversation segment and its tokens.
+  await $.command.run({ command: 'ctx', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  // `/ctx` leaves one measurement pending: let it land before the burst counts them.
+  await w.clock.advance(5000)
+  for (const columns of [80, 100]) {
+    expect((await bandAt($, 'terminal', columns)).lines[0]).toMatch(/ 66k\/200k 33% · ▉ Tool results 30k$/)
   }
   // The bar is longer at 100 columns than at 80, and states the same figures.
   const narrow = (await bandAt($, 'terminal', 80)).lines[0]!
@@ -445,7 +453,7 @@ test('J7 desktop: the bar is one Client; a click opens the pane; the widget and 
 
   // The widget seat: a glance of swatches, the total and the largest segment, no rows.
   const glance = await paneNow($, 'desktop', { placement: 'widget', bodyColumns: 100 })
-  expect(glance.lines).toEqual(['<svg> 66k/200k 33% · <svg> Tool results 45%'])
+  expect(glance.lines).toEqual(['<svg> 66k/200k 33% · <svg> Tool results 30k'])
 
   // A compaction marks the Client's total too.
   w.messages = SUMMARY

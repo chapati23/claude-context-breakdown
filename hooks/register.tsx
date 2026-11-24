@@ -84,6 +84,30 @@ const ringAtom = atom({ plugin: 'context-breakdown', key: 'ring' } as const, nul
 const baseAtom = atom({ plugin: 'context-breakdown', key: 'base' } as const, null, {
   shape: 'base-2',
 })
+// Whether the pane has been opened in this session (see `paneSeen` in types).
+const paneSeenAtom = atom({ plugin: 'context-breakdown', key: 'paneSeen' } as const, false, {
+  shape: 'pane-seen-1',
+})
+
+/**
+ * Whether this load has noted the pane as seen since the session started: a
+ * hint that spares each later open a write. It is never drawn from; a reload
+ * that resets it costs one write that changes nothing.
+ */
+let notedPaneSeen = false
+
+/**
+ * Notes that the person opened the pane, with `/ctx` or a click on the bar:
+ * the band's hint gives way to the legend. Not from the pane's render hook,
+ * as drawing is pure: the engine refuses a write made while it draws.
+ */
+async function notePaneSeen($: Engine): Promise<void> {
+  if (notedPaneSeen) {
+    return
+  }
+  notedPaneSeen = true
+  await quietly(update($, paneSeenAtom, () => true))
+}
 
 /**
  * This load of the code. State outlives a reload; a focus written by an
@@ -249,7 +273,10 @@ function bandActs($: Engine): BandActs {
       return writeRing($, () => null)
     },
     toLevel1: () => writeView($, toLevel1),
-    open: () => $.ui.open({ id: PANE_ID, title: PANE_TITLE }),
+    open: async () => {
+      await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+      await notePaneSeen($)
+    },
     toTop: () => $.ui.scroll(TOP_SCROLL),
   }
 }
@@ -555,6 +582,9 @@ export const register: Register = on => {
     void quietly(writeRing($, () => null))
     // A new session has no prompt yet: level 1's column `added` has no base.
     void quietly(update($, baseAtom, () => null))
+    // Nor has the person opened the pane in it: the band shows the hint.
+    notedPaneSeen = false
+    void quietly(update($, paneSeenAtom, () => false))
     // The theme picks the palette. Read in the background: the session
     // does not wait for the settings list.
     void quietly(
@@ -649,6 +679,7 @@ export const register: Register = on => {
     try {
       // Focus so the keys work at once; no closeOnEscape: the pane stays.
       await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
+      await notePaneSeen($)
       const { share } = held
       if (share !== null) {
         // The ring first, and wait for it: a window put back before the
@@ -1100,7 +1131,7 @@ export const register: Register = on => {
     if (snapshot === null || e.props.hasSurvey) {
       return next(e)
     }
-    const model = bandModelFor(snapshot, e.props.bodyColumns, e.surface)
+    const model = bandModelFor(snapshot, e.props.bodyColumns, e.surface, { hint: !(await read($, paneSeenAtom)) })
     // Too narrow for even the shortest total.
     if (model.label === '') {
       return next(e)

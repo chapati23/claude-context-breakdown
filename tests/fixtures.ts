@@ -2,6 +2,7 @@
 
 import type { On, SessionContextBreakdown, SessionMessage, SessionUsage } from 'claude-code'
 import { mock } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 const category = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred') => ({
   name,
@@ -120,6 +121,20 @@ export const PANE = {
     view: {},
   },
 } as const
+
+/**
+ * Runs `/ctx`, as a person who has found the pane: from then on the band
+ * shows the legend in place of the hint "/ctx for details".
+ */
+export async function seePane($: Engine, w?: World): Promise<void> {
+  await $.command.run({ command: 'ctx', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  if (w !== undefined) {
+    // As if the person closed it again: the test counts its own opens.
+    w.opened.length = 0
+    w.open.clear()
+    w.focused.length = 0
+  }
+}
 
 /** The pane while it holds the keyboard: hotkeys work and the key line shows them. */
 export const FOCUSED_PANE = { ...PANE, props: { ...PANE.props, isFocused: true } } as const
@@ -342,6 +357,59 @@ export const LOCAL_COMMAND = [
  * results, 114.4k characters in all, largest first. Rows 10 to 12 have no
  * hotkey.
  */
+/**
+ * An early session of a 1M window, the bar compressed: 69k used. Baseline
+ * 44.5k (System 24k, MCP 2.8k, Global instructions 8.2k, Skills 9.5k);
+ * conversation 24k (Tool results 7k, System notifications 17k, Your prompts
+ * 77, Claude output 80, its Bash call included); reserve 33k. One character
+ * is one token.
+ */
+export function earlySession(): { usage: SessionUsage; messages: unknown[] } {
+  const messagesTokens = 7000 + 17_000 + 77 + 80
+  const used = 44_500 + messagesTokens
+  const call = { type: 'tool_use', id: 'early1', name: 'Bash', input: { command: 'ls' } }
+  const callChars = call.name.length + JSON.stringify(call.input).length
+  const messages: unknown[] = [
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>'.padEnd(17_000, 'i') }] },
+    { role: 'user', content: [{ type: 'text', text: 'p'.repeat(77) }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'c'.repeat(80 - callChars) }] },
+    { role: 'assistant', content: [call] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'early1', content: 'r'.repeat(7000) }] },
+  ]
+  const base = breakdown()
+
+  return {
+    messages,
+    usage: {
+      startedAt: 0,
+      context: {
+        tokens: used,
+        percent: Math.floor((used / 1_000_000) * 100),
+        window: 1_000_000,
+        breakdown: {
+          ...base,
+          categories: [
+            category('System prompt', 4000, 'used'),
+            category('System tools', 20_000, 'used'),
+            category('MCP tools', 2800, 'used'),
+            category('Memory files', 8200, 'used'),
+            category('Skills', 9500, 'used'),
+            category('Messages', messagesTokens, 'used'),
+            category('Autocompact buffer', 33_000, 'buffer'),
+            category('Free space', 1_000_000 - used - 33_000, 'free'),
+          ],
+          totalTokens: used,
+          maxTokens: 1_000_000,
+          rawMaxTokens: 1_000_000,
+          percentage: Math.floor((used / 1_000_000) * 100),
+          memoryFiles: [{ path: '/home/user/.claude/CLAUDE.md', type: 'User', tokens: 8200 }],
+        },
+      },
+      rateLimits: [],
+    },
+  }
+}
+
 const REAL_RESULTS = [31_000, 22_000, 14_500, 11_200, 9400, 7300, 6100, 4800, 3600, 2700, 1200, 600]
 
 /**

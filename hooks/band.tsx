@@ -3,7 +3,18 @@
 import type { Elements, EngineInterface, RenderElement } from 'claude-code'
 
 import type { ContextBreakdownSegmentId, ContextBreakdownSnapshot } from '../types'
-import { FILLED, FREE, MIN_CHIP_CELLS, RESERVE, chipForms, chipsToDraw, segmentCells, segmentKey, segmentRuns } from './bar'
+import {
+  FILLED,
+  FREE,
+  MIN_CHIP_CELLS,
+  RESERVE,
+  SCALE_BREAK,
+  chipForms,
+  chipsToDraw,
+  segmentCells,
+  segmentKey,
+  segmentRuns,
+} from './bar'
 import type { Chip } from './bar'
 import { inkOn } from './color'
 import type { LayoutPart, SegmentPart } from './layout'
@@ -15,7 +26,7 @@ import type { TokensOf } from './svgbar'
 import type { BarClientProps, BarRun, PartIdentity } from './barclient'
 import { usedTokens } from './snapshot'
 import type { BandModel } from './view'
-import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, bandModel, fit, legendCells } from './view'
+import { LEGEND_JOIN, LEGEND_SWATCH_CELLS, bandModel, fit, sideCells } from './view'
 import { cellWidth } from './text'
 
 /** The element table of the surface being drawn. */
@@ -84,6 +95,11 @@ function barCells(ui: Ui, model: BandModel, palette: Palette, openPane: OpenPane
     if (part.kind === 'reserve') {
       return <Text color={palette.reserve}>{RESERVE.repeat(part.cells)}</Text>
     }
+    if (part.kind === 'break') {
+      // The scale break: the host's dim ink, as the total's, then one free
+      // dot. Not a Button: it opens nothing and takes no tab stop.
+      return [<Text dimColor>{SCALE_BREAK}</Text>, <Text color={palette.free}>{FREE}</Text>]
+    }
     const cells = segmentText(ui, palette, part)
     if (openPane === null) {
       return cells
@@ -142,7 +158,7 @@ function row(
   focused: string | null,
 ): RenderElement {
   const { Box, Text } = ui
-  const { legend } = model
+  const { legend, hint } = model
 
   // The chips come last, so they paint over the cells before them.
   return (
@@ -152,6 +168,7 @@ function row(
       {legend !== null && <Text dimColor>{LEGEND_JOIN}</Text>}
       {legend !== null && <Text color={colorOf(palette, legend.cell)}>{segmentCells(legend.cell, 1)}</Text>}
       {legend !== null && <Text dimColor>{` ${legend.text}`}</Text>}
+      {hint !== null && <Text dimColor>{`${LEGEND_JOIN}${hint}`}</Text>}
       {openPane !== null &&
         chipsToDraw(model.chips, focused).map(({ chip, isForced }) => chipBox(ui, chip, palette, isForced))}
     </Box>
@@ -175,8 +192,9 @@ function pictureRow(
   openPane: OpenPane | null,
 ): RenderElement {
   const { Box, Text, Button, Svg } = ui
-  const { legend } = model
+  const { legend, hint } = model
   const hasBar = model.parts.length > 0
+  const isCut = model.parts.some(part => part.kind === 'break')
   const total = (
     <Text tabular dimColor>
       {model.label}
@@ -187,8 +205,8 @@ function pictureRow(
     <Box flexDirection="row" alignItems="center" columnGap={1}>
       {hasBar && (
         <Svg
-          source={barSvg(model.parts, palette, figures.tokensOf, figures.used)}
-          alt={`Context window: ${model.label}`}
+          source={barSvg(model.parts, palette, figures.tokensOf, figures.used, figures.isEstimate)}
+          alt={`Context window: ${model.label}${isCut ? ', free space shortened' : ''}`}
           width={svgBarWidth(model.parts)}
           height={SVG_BAR_HEIGHT}
           isInteractive
@@ -212,6 +230,16 @@ function pictureRow(
       {legend !== null && (
         <Text tabular dimColor>
           {legend.text}
+        </Text>
+      )}
+      {hint !== null && (
+        <Text tabular dimColor>
+          ·
+        </Text>
+      )}
+      {hint !== null && (
+        <Text tabular dimColor>
+          {hint}
         </Text>
       )}
     </Box>
@@ -240,6 +268,14 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
 
       return
     }
+    if (part.kind === 'break') {
+      // One cell a code point, as `targetAt` counts; it opens nothing. The
+      // break follows every segment, so no segment's index moves.
+      runs.push({ text: SCALE_BREAK, dimColor: true, target: null, mono: true })
+      runs.push({ text: FREE, color: palette.free, target: null, mono: true })
+
+      return
+    }
     const color = colorOf(palette, part.id)
     const { fill, edge } = segmentRuns(part.id, part.cells)
     // No background: the terminal's is there for its inverted highlight, and
@@ -254,14 +290,19 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     parts[String(index)] = { id: part.id, members: [...part.members] }
     hoverParts.push({ index, forms: chipForms(part, tokensOf).map(form => form.trim()) })
   })
-  const { legend } = model
+  const { legend, hint } = model
   // The name shows in the legend's place, in the app's face as the legend's
   // words are: the longest form that fits, else the shortest cut to fit. The
   // cells of a text in that face no longer bound its drawn width, so the name
   // gets as many characters as the words it replaces, not the swatch and the
-  // space too: those stay as a margin. With no legend there is no room, and
-  // no name shows.
-  const room = legend === null ? 0 : legendCells(legend) - LEGEND_JOIN.length - LEGEND_SWATCH_CELLS
+  // space too: those stay as a margin. In place of the hint, the name gets the
+  // hint's characters. With neither there is no room, and no name shows.
+  const room =
+    legend !== null
+      ? sideCells(model) - LEGEND_JOIN.length - LEGEND_SWATCH_CELLS
+      : hint !== null
+        ? sideCells(model) - LEGEND_JOIN.length
+        : 0
   for (const { index, forms } of hoverParts) {
     const fits = forms.find(form => cellWidth(form) <= room)
     const text = fits ?? (room >= MIN_CHIP_CELLS ? fit(forms[forms.length - 1] ?? '', room).trimEnd() : '')
@@ -289,6 +330,11 @@ export function barClientProps(model: BandModel, palette: Palette, tokensOf: Tok
     })
     runs.push({ text: ' ', target: null, isLegend: true, mono: true })
     runs.push({ text: legend.text, dimColor: true, target: null, isLegend: true })
+  }
+  if (hint !== null) {
+    // As the legend's: the join in the code font, the words in the app's face.
+    runs.push({ text: LEGEND_JOIN, dimColor: true, target: null, mono: true })
+    runs.push({ text: hint, dimColor: true, target: null, isLegend: true })
   }
 
   return { runs, hovers, parts }
@@ -334,8 +380,11 @@ export function drawsPicture(surface: string): boolean {
   return surface !== 'terminal'
 }
 
-/** What the picture's tooltips read: each segment's tokens, and what is used. */
-export type PictureFigures = { tokensOf: TokensOf; used: number }
+/**
+ * What the picture's tooltips read: each segment's tokens, what is used, and
+ * whether the figures are estimated (the scale break's title then says "~").
+ */
+export type PictureFigures = { tokensOf: TokensOf; used: number; isEstimate: boolean }
 
 /**
  * The band's row for one model (see `bandModel`). `focused` is the key of
@@ -369,7 +418,7 @@ export function bandTree(
 
 /**
  * The glance a minimized pane shows (the desktop app's widget seat): the bar,
- * the total and the legend, with nothing to press.
+ * the total and the legend, with nothing to press. No hint: the pane is open.
  */
 export function glanceTree(
   ui: Ui,
@@ -396,5 +445,5 @@ export function pictureFigures(snapshot: ContextBreakdownSnapshot): PictureFigur
     [...snapshot.baseline, ...snapshot.conversation].map(segment => [segment.id, segment.tokens]),
   )
 
-  return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot) }
+  return { tokensOf: id => tokens.get(id) ?? 0, used: usedTokens(snapshot), isEstimate: snapshot.isEstimate }
 }

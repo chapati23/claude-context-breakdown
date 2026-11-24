@@ -9,7 +9,7 @@ The bar is one row above the prompt. It shows the context window as coloured seg
 - `bar-legend` after the pane was opened once, the legend names the largest segment and its tokens.
 - `bar-break` in a 1M window with less than about 92k used, the bar shows `╱╱·` before the reserve.
 - `bar-update` the total grows after a turn that adds content.
-- `bar-desktop` the desktop app draws the same row as a picture with the total and the legend as text.
+- `bar-desktop` the desktop app draws the same row as a picture with the total, then the hint or the legend, as text.
 
 ## How to get to it (user POV)
 
@@ -24,7 +24,7 @@ Preconditions:
 
 - **First look (terminal).** Run `scripts/tui.sh capture bar fresh`. One line matches the bar regex, for example `█████████▉███▉███▉····…╱╱·▒▒▒ 41k/1M 4% · /ctx for details`.
 - **After a prompt (terminal).** Run `scripts/tui.sh send bar "Print the numbers 1 to 40, one per line, and nothing else."`, then `scripts/tui.sh wait bar '✻ [A-Za-z]+ for [0-9]' 90`, then `scripts/tui.sh capture bar after-prompt --html`. The total is larger than in `fresh` (for example `69k/1M 7%`) and the line still ends with `· /ctx for details`. Then `scripts/tui.sh send bar "/ctx"`, `scripts/tui.sh wait bar 'free before compaction'`, `scripts/tui.sh keys bar x`, and capture `after-ctx`: the line ends with `· ▉ <segment name> <tokens>`, for example `· ▉ System notifications 24k`.
-- **Desktop.** In a new desktop session send the same prompt, wait about 5 s, save `desktop-bar.png`. The row above the composer shows the bar picture, the total and the legend; nothing is cut at the right edge.
+- **Desktop.** In a new desktop session send the same prompt, wait about 5 s, save `desktop-bar.png`. The row above the composer shows the bar picture, the total and the hint `· /ctx for details`; nothing is cut at the right edge. Then click the total, close the pane, and save `desktop-bar-legend.png`: the hint has made way for the legend, `· ▉ <segment name> <tokens>`.
 
 ## Gotchas
 

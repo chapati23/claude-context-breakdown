@@ -100,7 +100,7 @@ Kills only that run's tmux server and deletes only that run's temp folder (it ch
 
 The desktop app is one shared instance: the user's own. There is no isolation. Rules:
 
-- **Ask first.** Tell the user what you will do and for how long (about 5 minutes for one feature), send `/usr/local/bin/nudge-me "<session label>" "<reason>"` as its own Bash call, and wait for their go. They must not use the keyboard or the mouse during the block. Ask them to put the Claude window beside the terminal, not under it: the app does not repaint while covered.
+- **Ask first.** Tell the user what you will do and for how long (about 5 minutes for one feature), send `/usr/local/bin/nudge-me "<session label>" "<reason>"` as its own Bash call, and wait for their go. They must not use the keyboard or the mouse during the block. Ask them to put the Claude window on the same Space as the cmux window and beside it, not under it: the app does not repaint while covered or on another Space.
 - One desktop load at a time. `desktop-load.sh on` refuses while any run holds a load or the settings already point at a verify build; run `doctor.sh desktop` before you start.
 
 ### Launch
@@ -116,9 +116,9 @@ Then, with `cmux-cua` (prefer it; it acts without taking keyboard focus):
 
 1. `start_session` with a session id such as `verify-<run>`; pass it on every call.
 2. `launch_app` with `bundle_id: "com.anthropic.claudefordesktop"`. Then `list_windows` **with that `pid`** (never without: the unfiltered list holds every window of the machine). The main window has the title `Claude`.
-3. **The window must be on the visible Space.** When cmux (or any app) runs full screen, the Claude window lives on another Space. Then `bring_to_front` does not show it, input sent with `delivery_mode: "foreground"` still lands (the driver switches there and back), but every `get_window_state` picture is stale or blank. Proof needs pictures, so before the block ask the user to take cmux out of full screen or to put the Claude window on the screen that shows. Check with `list_windows` (`is_on_screen: true`) and one test picture.
-4. Start a new local session: the File menu items `New Session` or `New Session in New Window` (AX menu items; read their `element_index` from `get_window_state` with `include_screenshot: false`, `max_elements: 120`, `query: "New Session"`) and click by index. A new window lands on the current Space, which can also get around step 3. Only a new session reads the settings again.
-5. **Pick a model with quota** before the first prompt. A new session uses the app's default model. On 2026-11-23 that was Fable 5.2, its usage limit was reached, and the prompt failed with `Fable limit reached`. The picker is the model name at the bottom right of the composer (for example `Fable 5.2 Medium`); two foreground clicks on it did not open a menu in a picture from another Space. Not solved yet.
+3. **The window must be on the visible Space.** On 2026-11-24, with the Claude window on cmux's Space, input and pictures both worked. When cmux (or any app) runs full screen on its own Space, the Claude window lives on another Space. Then `bring_to_front` does not show it, input sent with `delivery_mode: "foreground"` still lands (the driver switches there and back), but every `get_window_state` picture is stale or blank. Proof needs pictures, so before the block ask the user to take cmux out of full screen or to put the Claude window on the screen that shows. Check with `list_windows` (`is_on_screen: true`) and one test picture.
+4. Start a new local session: pixel-click `New` at the top of the sidebar (foreground), or use the File menu items `New Session` or `New Session in New Window` (AX menu items; read their `element_index` from `get_window_state` with `include_screenshot: false`, `max_elements: 120`, `query: "New Session"`). An AX press on a menu item can fail with `-25202`; then use the sidebar button. A new window lands on the current Space, which can also get around step 3. Only a new session reads the settings again. Check that the folder under the composer is this repository and that `This computer` is selected.
+5. **Pick a model with quota** before the first prompt. A new session uses the app's default model. On 2026-11-23 that was Fable 5.2, its usage limit was reached, and the prompt failed with `Fable limit reached`. The picker is the model name at the bottom right of the composer (for example `Fable 5.2 Medium`). Driving the picker is not recorded yet; if the default model has no quota, ask the user to set Haiku or Sonnet as the default (on 2026-11-24 Haiku 5.5 worked).
 6. Ready: after the first prompt, the bar shows above the composer with a total such as `69k/1M 7%`.
 
 ### Doctor
@@ -129,10 +129,13 @@ Then, with `cmux-cua` (prefer it; it acts without taking keyboard focus):
 
 - The composer is web content: it is not in the AX tree (the tree is the menu bar). Pixel-click the box `Describe a task or ask a question` and type in one call: `type_text` with `x`, `y` and `delivery_mode: "foreground"`, then `press_key` `return` with `delivery_mode: "foreground"`. Use the same prompt as in the terminal.
 - For a picture only, call `get_window_state` with `max_elements: 1` and `screenshot_out_file`; the AX walk returns only the menu bar anyway.
-- `/ctx` + `return` opens the pane. Clicks on rows and controls press them. A click on a bar segment opens its items; a click on the total or the legend opens the segments.
+- A slash command needs **two** Returns: the first accepts the suggestion (`/ctx [segment]` shows in the composer), the second sends it.
+- `/ctx` opens the pane in the app's right-hand panel, in a tab named `Plugin`. Clicks on rows and controls press them. A click on a bar segment opens its items; a click on the total or the legend opens the segments. The bar is narrower while the panel is open, so small segments share a cell (the legend reads `System +5 more …`) and a click there opens the segments, as designed.
+- On 2026-11-24 the first click on `Close` only showed it hovered; a second click closed the pane. Cause not established; click again before you report a failure.
 - Use foreground delivery for clicks and keys. With background delivery the pane did not get the keyboard and letters went to the composer.
-- The helper cannot hover (`move_cursor` moves an overlay only) and the app ignores modifier keys (cmd+a). Never plan a step that needs either. Hover effects (dimmed segments, the name in the legend's place) and the keyboard (Tab, Escape, Enter on a row) stay with the user: report them as not checked, or give the user the matching lines of "Manual checklist for the desktop app" in `docs/e2e.md` to do themselves (about 2 minutes).
-- The app redraws late. Before each capture, wait about 2 s and make one more pointer move; a capture right after an action can show the state before it.
+- **Hover:** a pixel click with foreground delivery moves the real pointer, and it stays there, so hover effects can be seen: after a click on the bar the other segments are dim and the legend names the cell under the pointer. `move_cursor` moves only an overlay and shows no hover. The app ignores modifier keys (cmd+a); never plan a step that needs one.
+- **Keyboard:** see [features/keyboard.md](features/keyboard.md). Letter keys sent with `press_key` (foreground) reach the pane after a click on the pane's text; Tab and Enter showed no effect in pictures. Report each key you could not show as not checked, or give the user the matching lines of "Manual checklist for the desktop app" in `docs/e2e.md` (about 2 minutes).
+- The app redraws late. Before each capture, wait about 2 s; a capture right after an action can show the state before it. When `get_window_state` lists the menu bar first (not the `Claude` window), the app is not the active one, and later pictures can be stale: on 2026-11-24 a row click then left no trace. Bring the window forward with a click on an empty area before the next step.
 - Coordinates move: the bar's total moves when the pane opens or closes. Take a new `get_window_state` before each pixel click and click the middle of the text you see.
 - `/clear` in the desktop app starts a new session process that reads the settings again. Do not run `off` while a check still needs the session.
 
@@ -146,7 +149,7 @@ Then, with `cmux-cua` (prefer it; it acts without taking keyboard focus):
 scripts/desktop-load.sh off <run>     # outside the sandbox
 ```
 
-Restores the exact settings bytes when nobody changed the file meanwhile; else removes only this run's three entries. Deletes the frozen copy. Keeps `.verify/<run>/`. Then `end_session` in cmux-cua. Leave the desktop session open: it is the user's window. A session that is still open keeps the build it loaded until the user starts a new one; say so in the report.
+Restores the exact settings bytes when nobody changed the file meanwhile; else removes only this run's three entries. Deletes the frozen copy. Keeps `.verify/<run>/`. Then `end_session` in cmux-cua. Leave the desktop session open: it is the user's window. With `CLAUDE_CODE_PLUGIN_DIR_WATCH` on, that session sees its build deleted and says `hooks.json changed — names no hooks module now; hooks/register.tsx unloaded`: the bar is gone there until the user starts a new session, which runs the installed copy. Say so in the report.
 
 ## Report
 

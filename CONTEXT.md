@@ -67,7 +67,7 @@ The text right of the bar's total that names the largest conversation segment an
 _Avoid_: Key, caption
 
 **Scale break**:
-The mark ╱╱· that stands where the bar leaves out free space in a large window while use is low. Every other cell of the bar keeps one scale: the bar then shows the first quarter of the window.
+The mark ╱╱· that stands where the bar leaves out free space in a large window while use is low. The bar then draws one of every 32 free tokens; the segments, the reserve and the free dots that remain keep one scale.
 _Avoid_: Break mark, cut, gap, ellipsis, zoom
 
 **Swatch**:

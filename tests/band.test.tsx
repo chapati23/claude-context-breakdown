@@ -757,8 +757,8 @@ test('in an early 1M session the terminal draws a scale break: dim slashes, then
   expect(row.flow[at - 1]?.text).toMatch(/^·+$/)
   expect(row.flow[at + 1]).toMatchObject({ text: FREE, node: { type: 'Text', props: { color: DARK.free } } })
   expect(row.flow[at + 2]?.text).toMatch(/^▒+$/)
-  // It starts at the 103rd cell of the 105-cell bar: 28 segment cells and 61 free ones before it.
-  expect(row.flow[at]?.start).toBe(89)
+  // It starts at the 77th cell of the 105-cell bar: 53 segment cells and 23 free ones before it.
+  expect(row.flow[at]?.start).toBe(76)
   expect(row.flow.filter(item => item.text.includes('╱'))).toHaveLength(1)
   // The tab order: one Button per segment, in bar order, and no other.
   expect((await ui.findAll({ type: 'Button' })).map(button => button.key)).toEqual([
@@ -830,6 +830,6 @@ test('the mobile app draws the hint after the total, in the app’s face, and th
   expect(hint?.props).toMatchObject({ tabular: true, dimColor: true })
   const bar = (await ui.findAll({ type: 'Svg' }))[0]
   expect(bar?.props.alt).toBe('Context window: 69k/1M 7%, free space shortened')
-  expect(String(bar?.props.source)).toContain('<title>Scale break: 750k of free space left out</title>')
+  expect(String(bar?.props.source)).toContain('<title>Scale break: 870k of free space left out</title>')
   await ui.unmount()
 })

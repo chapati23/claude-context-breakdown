@@ -1067,16 +1067,16 @@ test('the desktop Client draws the scale break as two runs that open nothing, an
   const at = runs.findIndex(run => run.text === '╱╱')
   expect(runs[at]).toEqual({ text: '╱╱', dimColor: true, target: null, mono: true })
   expect(runs[at + 1]).toEqual({ text: '·', color: DARK.free, target: null, mono: true })
-  // The break's three columns open nothing; it starts after 28 segment cells and 61 free ones.
-  const column = columnOf(runs, null) + 61
-  expect(runs.slice(0, at).reduce((sum, run) => sum + [...run.text].length, 0)).toBe(89)
-  expect(column).toBe(89)
-  for (const x of [89, 90, 91]) {
+  // The break's three columns open nothing; it starts after 53 segment cells and 23 free ones.
+  const column = columnOf(runs, null) + 23
+  expect(runs.slice(0, at).reduce((sum, run) => sum + [...run.text].length, 0)).toBe(76)
+  expect(column).toBe(76)
+  for (const x of [76, 77, 78]) {
     expect(targetAt(runs, x)).toBeNull()
     expect(hoveredPart(runs, x)).toBeNull()
   }
   // The reserve after it opens nothing, and the first column after the bar opens level 1.
-  expect(targetAt(runs, 92)).toBeNull()
+  expect(targetAt(runs, 79)).toBeNull()
   expect(targetAt(runs, 105)).toBe('total')
   expect(targetAt(runs, 104)).toBeNull()
   // No segment's index moved: a click on the notifications' cells posts their identity.
@@ -1139,8 +1139,8 @@ test('barSvg cuts the free track at the scale break, draws two strokes in its ga
     x += part.cells * SVG_CELL_PX
   }
   const svg = barSvg(model.parts, DARK, () => 0, 69_000)
-  expect(svg).toContain('<title>Scale break: 750k of free space left out</title>')
-  expect(barSvg(model.parts, DARK, () => 0, 69_000, true)).toContain('<title>Scale break: ~750k of free space left out</title>')
+  expect(svg).toContain('<title>Scale break: 870k of free space left out</title>')
+  expect(barSvg(model.parts, DARK, () => 0, 69_000, true)).toContain('<title>Scale break: ~870k of free space left out</title>')
   // The two strokes, bottom left to top right, in the cut grey.
   expect(svg).toContain(`<line x1="${x + 3}" y1="10" x2="${x + 6}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)
   expect(svg).toContain(`<line x1="${x + 8}" y1="10" x2="${x + 11}" y2="0" stroke="${DARK.cut}" stroke-width="1.5"/>`)

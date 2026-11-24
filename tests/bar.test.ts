@@ -373,24 +373,27 @@ const partsOf = (model: { parts: readonly LayoutPart[] }) =>
   model.parts.map(p => (p.kind === 'segment' ? `${p.id} ${p.cells}` : `${p.kind} ${p.cells}`))
 
 describe('the compressed bar in the band', () => {
-  test('at 150 columns, the early 1M session gives its segments 28 of 105 cells behind a scale break', () => {
+  test('at 150 columns, the early 1M session gives its segments 53 of 105 cells behind a scale break', () => {
     // The terminal's band is 5 columns narrower than the terminal.
     const model = bandModel(snapshot(EARLY), 145)
     expect(model.label).toBe('69k/1M 7%')
     expect(model.legend?.text).toBe('System notifications 17k')
     expect(partsOf(model)).toEqual([
-      'system 10',
-      'mcp 1',
-      'global-instructions 3',
-      'skills-agents 4',
-      'tool-results 3',
-      'injections 7',
-      'free 61',
+      'system 19',
+      'mcp 2',
+      'global-instructions 6',
+      'skills-agents 7',
+      'tool-results 6',
+      'injections 13',
+      'free 23',
       'break 3',
-      'reserve 13',
+      'reserve 26',
     ])
+    // The segments and the reserve take most of the bar: 79 of 105 cells.
+    // The break leaves out 31 of every 32 free tokens: 101,657 are held, so
+    // the bar draws 28,073.2 of the 898,343 free ones.
     const brk = model.parts.find(p => p.kind === 'break')
-    expect(brk?.kind === 'break' && brk.omitted).toBe(750_000)
+    expect(brk?.kind === 'break' && Math.round(brk.omitted)).toBe(870_270)
     // The notifications cell holds Your prompts and Claude output too.
     const notes = model.parts.find((p): p is SegmentPart => p.kind === 'segment' && p.id === 'injections')
     expect(notes?.members).toEqual(['injections', 'prompts', 'claude-output'])
@@ -400,14 +403,15 @@ describe('the compressed bar in the band', () => {
     const model = bandModel(snapshot(EARLY), 85)
     expect(model.legend?.text).toBe('System notifications 17k')
     expect(partsOf(model)).toEqual([
-      'system 5',
-      'global-instructions 1',
-      'skills-agents 2',
-      'tool-results 1',
-      'injections 3',
-      'free 24',
+      'system 8',
+      'mcp 1',
+      'global-instructions 3',
+      'skills-agents 3',
+      'tool-results 2',
+      'injections 6',
+      'free 8',
       'break 3',
-      'reserve 6',
+      'reserve 11',
     ])
     expect(model.parts.reduce((sum, p) => sum + p.cells, 0)).toBe(45)
   })
@@ -422,7 +426,7 @@ describe('the compressed bar in the band', () => {
     // The total and the legend do not change at the crossing.
     expect(over.label).toBe(under.label)
     expect(over.legend).toEqual(under.legend)
-    // The segments drop to about a quarter of their cells.
+    // The segments drop to about a sixth of their cells.
     const cells = (model: typeof under) => model.parts.reduce((sum, p) => sum + (p.kind === 'segment' ? p.cells : 0), 0)
     expect(cells(over)).toBeLessThan(cells(under) / 3)
     // A 200k window never compresses.

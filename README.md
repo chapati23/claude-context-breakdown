@@ -2,7 +2,7 @@
 
 See what fills your Claude Code context window.
 
-`context-breakdown` is a Claude Code mod. It draws one bar above the prompt. The full length of the bar is the model's context window, except early in a window of 500k tokens or more, where the bar shows its first quarter (see "Reading the bar"). Each coloured segment is one kind of content: the system prompt, your instruction files, tool results, your prompts, and so on. A pane lists every segment with its size.
+`context-breakdown` is a Claude Code mod. It draws one bar above the prompt. The full length of the bar is the model's context window, except early in a window of 500k tokens or more, where the bar draws free space smaller (see "Reading the bar"). Each coloured segment is one kind of content: the system prompt, your instruction files, tool results, your prompts, and so on. A pane lists every segment with its size.
 
 Claude Code's own `/context` command shows a similar report, but only when you ask for it, and it shows the whole conversation as one number. This mod stays on screen, updates while you work, and splits the conversation into its parts.
 
@@ -69,7 +69,7 @@ A category whose name starts with "Slash command" also goes to Skills list and c
 ![The bar with the pointer on its last segment. A chip beside the segment reads "Claude output 5.6k".](docs/img/bar.png)
 
 - A thin gap separates each segment from the next. The compaction summary has a texture (`▓`) in place of a plain colour, and no gap after it. Free space is dots (`·`), and the reserve at the right end is shaded (`▒`).
-- In a window of 500k tokens or more, while use and the reserve fill an eighth of it or less (up to about 92k used in a 1M window), the bar shows the first quarter of the window, four times larger. The mark ╱╱ stands where it leaves out the rest of the free space. Every other cell keeps one scale, and the total and its percent always count the whole window. Past that point, the cut goes away and the bar returns to its true scale. The window bar in the desktop pane is never cut.
+- In a window of 500k tokens or more, while use and the reserve fill an eighth of it or less (up to about 92k used in a 1M window), the bar draws free space 32 times smaller, so the segments and the reserve take most of the bar. The mark ╱╱ stands where it leaves out the rest of the free space. The segments, the reserve and the free dots keep one scale, and the total and its percent always count the whole window. Past that point, the cut goes away and the bar returns to its true scale. The window bar in the desktop pane is never cut.
 - Right of the bar is the total, then the largest conversation segment with its tokens: `364k/1M 36% · ▉ Tool results 114k`. The percent of the total is rounded to the nearest whole number, as Claude Code's status line rounds it. It shows 99% until the window is full, and `<1%` for a window that holds less than half a percent.
 - Until you first open the pane in a session, the place of the largest segment reads `· /ctx for details`. After that, it names the largest segment.
 - In the fullscreen layout, point at a segment to see its name and size in a chip beside it. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`; the chip follows. The bar shows one chip at a time.

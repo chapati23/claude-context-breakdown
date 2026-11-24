@@ -21,7 +21,7 @@ Authors of skills, hooks and MCP servers can use the mod to measure their own wo
 
 ## Product Purpose
 
-`context-breakdown` is a Claude Code mod. It draws one bar above the prompt: the full length of the bar is the window, and each coloured stretch is one segment. One exception: in a window of 500k tokens or more, while use and the reserve fill an eighth of it or less, the bar shows the first quarter of the window, and a scale break (`╱╱`) stands for the free space it leaves out. The total and its percent always count the whole window. A pane lists every segment, then the items of one segment, then the content of one item as loaded.
+`context-breakdown` is a Claude Code mod. It draws one bar above the prompt: the full length of the bar is the window, and each coloured stretch is one segment. One exception: in a window of 500k tokens or more, while use and the reserve fill an eighth of it or less, the bar draws free space 32 times smaller, so the used part and the reserve take most of the bar, and a scale break (`╱╱`) stands for the free space it leaves out. The total and its percent always count the whole window. A pane lists every segment, then the items of one segment, then the content of one item as loaded.
 
 It exists because Claude Code's own `/context` report shows the window only on request and shows the conversation as one number.
 

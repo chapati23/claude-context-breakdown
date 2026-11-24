@@ -215,8 +215,8 @@ export function bandModelFor(
 
 /**
  * The band's model with a bar `room` cells wide. In a large window while use
- * is low the bar is compressed (`isCompressed`): it shows the first quarter
- * of the window behind a scale break. Every snapshot is laid out afresh, so
+ * is low the bar is compressed (`isCompressed`): it draws free space 32 times
+ * smaller behind a scale break. Every snapshot is laid out afresh, so
  * the bar returns to its true scale on the draw after use crosses the line.
  */
 function withBar(

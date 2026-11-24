@@ -257,7 +257,10 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   // from the names: where the column would shorten a name, the grid drops it.
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
     for (const columns of [58, 60, 61, 62, 64]) {
-      const lines = await paneAt(columns, surface)
+      // flatten measures every grid surface as the desktop's.
+      const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: columns } } as never)
+      const lines = flatten(await ui.drawn(), { surface: 'desktop', columns })
+      await ui.unmount()
       expect([surface, columns, lines.some(line => line.includes('System prompt and built-in tools'))]).toEqual([surface, columns, true])
       expect([surface, columns, lines.some(line => line.includes('Skills list and custom agents'))]).toEqual([surface, columns, true])
     }

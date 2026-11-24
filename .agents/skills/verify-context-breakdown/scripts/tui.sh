@@ -7,6 +7,7 @@
 #   tui.sh send    <run> "<text>"          type literal text, then Enter
 #   tui.sh keys    <run> <tmux key>...     e.g. Tab Escape Enter Down j 2 b
 #   tui.sh wait    <run> "<ERE>" [secs]    wait until the screen matches (default 60 s)
+#   tui.sh click   <run> <col> [row]       a mouse click (press and release); row defaults to the bar's row
 #   tui.sh capture <run> <label> [--html]  save the screen as evidence
 #   tui.sh screen  <run>                   print the screen as plain text
 #   tui.sh stop    <run>                   end the session, delete the build; keep evidence
@@ -22,7 +23,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 BAR_RE='[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%'
 
 die() { echo "tui.sh: $*" >&2; exit 1; }
-[ $# -ge 2 ] || die "usage: tui.sh <start|send|keys|wait|capture|screen|stop> <run> ..."
+[ $# -ge 2 ] || die "usage: tui.sh <start|send|keys|wait|click|capture|screen|stop> <run> ..."
 cmd=$1 run=$2; shift 2
 [[ $run =~ ^[a-z0-9-]+$ ]] || die "run name must match [a-z0-9-]+"
 EVID=$REPO/.verify/$run
@@ -109,6 +110,13 @@ keys)
   for k in "$@"; do t send-keys "$k"; sleep 0.3; done ;;
 wait)
   wait_for "$1" "${2:-60}" ;;
+click)
+  # An SGR mouse click, as a terminal sends it under the fullscreen layout
+  # (Claude Code turns mouse tracking on there). Columns and rows count from 1.
+  [ $# -ge 1 ] || die "usage: tui.sh click <run> <col> [row]"
+  col=$1 row=${2:-$(screen | grep -nE "$BAR_RE" | head -1 | cut -d: -f1)}
+  [ -n "$row" ] || die "no bar row on screen; pass the row"
+  t send-keys -l -- "$(printf '\e[<0;%d;%dM\e[<0;%d;%dm' "$col" "$row" "$col" "$row")" ;;
 screen)
   screen ;;
 capture)

@@ -8,7 +8,7 @@ Claude Code's own `/context` command shows a similar report, but only when you a
 
 ![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
 
-The pictures in this file show Claude Code in Ghostty, in sessions with a 200k window: version 2.1.328, and version 2.1.327 for the picture of the bar.
+The pictures in this file show Claude Code in Ghostty, in sessions with a 200k window: version 2.1.328, and version 2.1.327 for the picture of the bar. They were taken before version 0.9.0 of the mod: there the legend right of the total gives a percent of what is used (`Tool results 23%`). The legend now gives the segment's tokens (`Tool results 114k`).
 
 > Status: early version. The mod uses Claude Code's mods API, which is early access and can change between releases.
 

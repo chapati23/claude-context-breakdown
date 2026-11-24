@@ -253,6 +253,15 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   // The desktop draws the figure beside the row's native button.
   const desktop = await paneAt(88, 'desktop')
   expect(Math.abs(addedIn(desktop.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  // The grid keeps its bar's cells, so it never takes the column's cells
+  // from the names: where the column would shorten a name, the grid drops it.
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    for (const columns of [58, 60, 61, 62, 64]) {
+      const lines = await paneAt(columns, surface)
+      expect([surface, columns, lines.some(line => line.includes('System prompt and built-in tools'))]).toEqual([surface, columns, true])
+      expect([surface, columns, lines.some(line => line.includes('Skills list and custom agents'))]).toEqual([surface, columns, true])
+    }
+  }
 
   // Prompts that are not the person's own words keep the base: a task
   // notification, a scheduled trigger, a peer, a plugin, one with no origin

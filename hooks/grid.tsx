@@ -394,7 +394,15 @@ function segmentsGrid(
     share: figureColumnCells([...groups.map(segments => formatShare(sumTokens(segments), used)), ...drawn.map(segment => formatShare(segment.tokens, used))]),
     added: figureColumnCells([ADDED_NAME, ...groups.map(segments => addedText(groupAdded(segments))), ...drawn.map(segment => addedText(stats.added[segment.id]))]),
   }
-  const rows: Grid = { ...g, share: table.share, added: table.added === true, cells, bar: barCells(table, grid) }
+  // The column `added` shows where the terminal's table has it and where it
+  // shortens no name: the grid's bar keeps its cells, so the column takes
+  // its cells from the names.
+  const without: Grid = { ...g, share: table.share, added: false, cells, bar: barCells(table, grid) }
+  const namesIn = (room: number) => drawn.map(segment => fittedName(segmentDef(segment.id).label, segmentDef(segment.id).short, room))
+  const withColumn: Grid = { ...without, added: true }
+  const keepsNames =
+    namesIn(grid - LEAD_CELLS - rightCells(withColumn)).join('\n') === namesIn(grid - LEAD_CELLS - rightCells(without)).join('\n')
+  const rows: Grid = table.added === true && keepsNames ? withColumn : without
   // The cells a heading's text has, and a row's name after the lead.
   const headingRoom = grid - rightCells({ ...rows, bar: 0 })
   const nameRoom = grid - LEAD_CELLS - rightCells(rows)
@@ -485,7 +493,7 @@ function segmentsGrid(
         </Box>
       )}
       {notes(g.el, [
-        ...(table.added === true ? [addedNote(snapshot, stats.added)] : []),
+        ...(rows.added ? [addedNote(snapshot, stats.added)] : []),
         snapshot.isEstimate
           ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
           : 'All numbers are estimates.',

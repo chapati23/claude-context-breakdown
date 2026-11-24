@@ -3,3 +3,6 @@
 *.log
 node_modules/
 .reviews/
+.verify/
+# Written by Claude Code when a verify run loads the probe mod.
+.agents/skills/verify-context-breakdown/fixtures/othermod/tsconfig.json

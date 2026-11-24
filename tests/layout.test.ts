@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { layoutBar } from '../hooks/layout'
+import { SCALE_BREAK_CELLS } from '../hooks/bar'
+import {
+  COMPRESS_MIN_CELLS,
+  COMPRESS_MIN_WINDOW,
+  COMPRESS_ZOOM,
+  isCompressed,
+  layoutBar,
+  layoutCompressed,
+} from '../hooks/layout'
 import type { LayoutInput, LayoutPart, SegmentPart } from '../hooks/layout'
+import { MIN_BAR_WITH_LEGEND } from '../hooks/view'
 
 const cellsOf = (parts: readonly LayoutPart[]) => parts.reduce((sum, part) => sum + part.cells, 0)
 const segmentsOf = (parts: readonly LayoutPart[]) =>
@@ -249,5 +258,131 @@ describe('layoutBar', () => {
     expect(cellsOf(parts)).toBe(10)
     expect(find(parts, 'free')).toBeUndefined()
     expect(find(parts, 'reserve')?.cells).toBe(4)
+  })
+})
+
+/**
+ * The early session of a 1M window: 69k used (System 24k, MCP 2.8k, Global
+ * instructions 8.2k, Skills 9.5k; Tool results 7k, System notifications
+ * 17k, Your prompts 77, Claude output 80), scaled to `used` tokens.
+ */
+function early(used: number): LayoutInput['groups'] {
+  const k = used / 68_657
+  const scaled = (pairs: [string, number][]) => pairs.map(([id, tokens]) => ({ id, tokens: tokens * k }))
+
+  return [
+    scaled([
+      ['system', 24_000],
+      ['mcp', 2800],
+      ['global-instructions', 8200],
+      ['skills-agents', 9500],
+    ]),
+    scaled([
+      ['tool-results', 7000],
+      ['injections', 17_000],
+      ['prompts', 77],
+      ['claude-output', 80],
+    ]),
+  ]
+}
+
+describe('the compressed bar', () => {
+  test('starts compressing at the same bar width as the legend', () => {
+    // A bar the band draws beside a legend can always hold the break.
+    expect(COMPRESS_MIN_CELLS).toBe(MIN_BAR_WITH_LEGEND)
+  })
+
+  test('holds its invariants over widths 20 to 200 and use up to 125k, with and without a reserve', () => {
+    let compressed = 0
+    for (const reserve of [0, 33_000]) {
+      for (let used = 0; used <= 125_000; used += 2500) {
+        for (let width = 20; width <= 200; width += 1) {
+          const groups = early(used)
+          if (!isCompressed(used, reserve, 1_000_000, width, groups)) {
+            continue
+          }
+          compressed += 1
+          const parts = layoutCompressed({ width, window: 1_000_000, groups, reserve })
+          const at = parts.findIndex(part => part.kind === 'break')
+          const mark = parts[at]
+          // (a) The cells sum to the width.
+          expect(cellsOf(parts)).toBe(width)
+          // (b) The segments and the reserve come from one scale: the same
+          // layout of the first quarter of the window, less the break's cells.
+          const zoomed = layoutBar({ width: width - SCALE_BREAK_CELLS, window: 1_000_000 / COMPRESS_ZOOM, groups, reserve })
+          expect(parts.filter(part => part.kind !== 'break')).toEqual(zoomed)
+          // (c) One break, after a free part of at least a cell, before the reserve.
+          expect(parts.filter(part => part.kind === 'break')).toHaveLength(1)
+          expect(parts[at - 1]?.kind).toBe('free')
+          expect(parts[at - 1]!.cells).toBeGreaterThanOrEqual(1)
+          expect(parts.slice(at + 1).every(part => part.kind === 'reserve')).toBe(true)
+          expect(find(parts, 'reserve') === undefined).toBe(reserve === 0)
+          // (d) It leaves out free tokens only.
+          expect(mark?.kind === 'break' && mark.omitted).toBe(750_000)
+          expect(used + reserve).toBeLessThanOrEqual(1_000_000 / COMPRESS_ZOOM)
+          // (e) Free space keeps half of the zoomed bar, within a cell of rounding.
+          expect(parts[at - 1]!.cells * 2).toBeGreaterThanOrEqual(width - SCALE_BREAK_CELLS - 2)
+        }
+      }
+    }
+    expect(compressed).toBeGreaterThan(1000)
+  })
+
+  test('compresses while use and the reserve fill an eighth of the window or less', () => {
+    const at = (used: number, reserve: number, window = 1_000_000, width = 100) => isCompressed(used, reserve, window, width)
+    // Exactly an eighth compresses; one token more does not.
+    expect(at(92_000, 33_000)).toBe(true)
+    expect(at(92_001, 33_000)).toBe(false)
+    expect(at(125_000, 0)).toBe(true)
+    expect(at(125_001, 0)).toBe(false)
+    // A reserve below zero counts as none.
+    expect(at(125_000, -5)).toBe(true)
+    // Only a window of 500k or more.
+    expect(at(10_000, 0, COMPRESS_MIN_WINDOW)).toBe(true)
+    expect(at(10_000, 0, 499_999)).toBe(false)
+    expect(at(0, 0, 200_000)).toBe(false)
+    // Only a bar of 20 cells or more.
+    expect(at(10_000, 33_000, 1_000_000, 20)).toBe(true)
+    expect(at(10_000, 33_000, 1_000_000, 19)).toBe(false)
+    expect(at(10_000, 33_000, 1_000_000, 19.9)).toBe(false)
+  })
+
+  test('does not compress when the zoomed bar would keep too little free space', () => {
+    // Sixteen segments, each just over half a cell of the zoomed bar's 17:
+    // each takes its one-cell floor, and one free cell is left, though their
+    // tokens leave half the zoomed window free.
+    const groups = [Array.from({ length: 16 }, (_, i) => ({ id: `s${i}`, tokens: 7800 }))]
+    const used = 16 * 7800
+    expect(used * 2 * COMPRESS_ZOOM).toBeLessThanOrEqual(1_000_000)
+    expect(layoutBar({ width: 17, window: 250_000, groups, reserve: 0 }).find(part => part.kind === 'free')?.cells).toBe(1)
+    expect(isCompressed(used, 0, 1_000_000, 20, groups)).toBe(false)
+    // One segment of the same tokens leaves room.
+    expect(isCompressed(used, 0, 1_000_000, 20)).toBe(true)
+  })
+
+  test('draws the early 1M session with the break between free space and the reserve', () => {
+    // The band at 150 columns: a bar of 105 cells, 102 of them at one scale.
+    const parts = layoutCompressed({ width: 105, window: 1_000_000, groups: early(68_657), reserve: 33_000 })
+    expect(parts.map(part => (part.kind === 'segment' ? `${part.id} ${part.cells}` : `${part.kind} ${part.cells}`))).toEqual([
+      'system 10',
+      'mcp 1',
+      'global-instructions 3',
+      'skills-agents 4',
+      'tool-results 3',
+      'injections 7',
+      'free 61',
+      'break 3',
+      'reserve 13',
+    ])
+    // The segments get 28 cells; at true scale they get 8.
+    const linear = layoutBar({ width: 105, window: 1_000_000, groups: early(68_657), reserve: 33_000 })
+    expect(segmentsOf(parts).reduce((sum, part) => sum + part.cells, 0)).toBe(28)
+    expect(segmentsOf(linear).reduce((sum, part) => sum + part.cells, 0)).toBe(8)
+  })
+
+  test('puts the break at the end when there is no reserve', () => {
+    const parts = layoutCompressed({ width: 40, window: 1_000_000, groups: early(50_000), reserve: 0 })
+    expect(parts.map(part => part.kind).slice(-2)).toEqual(['free', 'break'])
+    expect(cellsOf(parts)).toBe(40)
   })
 })

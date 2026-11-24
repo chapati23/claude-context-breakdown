@@ -1,5 +1,9 @@
 // Lays the bar out in cells: one linear scale over the window, a minimum of
-// one cell per drawn segment, tiny segments merged into a neighbour.
+// one cell per drawn segment, tiny segments merged into a neighbour. In a
+// large window while use is low, the bar shows only the first quarter of the
+// window and a scale break stands for the free space it leaves out.
+
+import { SCALE_BREAK_CELLS } from './bar'
 
 export type LayoutSegment = {
   id: string
@@ -26,9 +30,16 @@ export type SegmentPart = {
   cells: number
 }
 
+/**
+ * The scale break: it stands where the bar leaves out free space. `omitted`
+ * is the number of free tokens it leaves out.
+ */
+export type BreakPart = { kind: 'break'; cells: number; omitted: number }
+
 export type LayoutPart =
   | SegmentPart
   | { kind: 'free'; cells: number }
+  | BreakPart
   | { kind: 'reserve'; cells: number }
 
 type Drawn = { id: string; members: string[]; tokens: number }
@@ -164,4 +175,71 @@ export function layoutBar(input: LayoutInput): LayoutPart[] {
   }
 
   return parts
+}
+
+/**
+ * The smallest window the bar compresses. Below it the used part already gets
+ * enough cells: at 200k, 69k used is a third of the bar.
+ */
+export const COMPRESS_MIN_WINDOW = 500_000
+
+/**
+ * How much larger a compressed bar draws each token: it shows window / 4.
+ * Four keeps the segments readable at 1M (about 28 of 105 cells at 69k used,
+ * against 8 at true scale) while free space still holds half the bar.
+ */
+export const COMPRESS_ZOOM = 4
+
+/**
+ * The narrowest bar that compresses. Under it the three cells of the scale
+ * break cost too much of the bar. Kept equal to view.ts MIN_BAR_WITH_LEGEND,
+ * the narrowest bar the band draws beside a legend (a test holds them
+ * equal); layout.ts does not import view.ts.
+ */
+export const COMPRESS_MIN_CELLS = 20
+
+/**
+ * Whether the bar compresses: a window of COMPRESS_MIN_WINDOW or more, a bar
+ * of COMPRESS_MIN_CELLS or more, and use and the reserve within an eighth of
+ * the window (exactly an eighth compresses), so free space keeps at least
+ * half of the zoomed bar. The zoomed layout must also keep that half in
+ * cells, within one cell of rounding: the one-cell floor of many small
+ * segments can take more. `groups` are the segments the bar draws; without
+ * them, one segment of `used` tokens stands for them.
+ */
+export function isCompressed(
+  used: number,
+  reserve: number,
+  window: number,
+  width: number,
+  groups: LayoutInput['groups'] = [[{ id: 'used', tokens: used }]],
+): boolean {
+  const cells = Math.floor(width)
+  const held = used + Math.max(0, reserve)
+  if (!(window >= COMPRESS_MIN_WINDOW) || cells < COMPRESS_MIN_CELLS || held * 2 * COMPRESS_ZOOM > window) {
+    return false
+  }
+  const inner = cells - SCALE_BREAK_CELLS
+  const zoomed = layoutBar({ width: inner, window: window / COMPRESS_ZOOM, groups, reserve })
+  const free = zoomed.find(part => part.kind === 'free')?.cells ?? 0
+
+  return free >= 1 && free * 2 >= inner - 2
+}
+
+/**
+ * The compressed bar: `layoutBar` over the first quarter of the window, in
+ * the width less the scale break's cells, so the segments, free space and
+ * the reserve keep one scale. The break follows the free part, before the
+ * reserve (or at the end without one). Call it only where `isCompressed`
+ * holds: then the free part exists and the break leaves out free tokens only.
+ */
+export function layoutCompressed(input: LayoutInput): LayoutPart[] {
+  const shown = input.window / COMPRESS_ZOOM
+  const parts = layoutBar({ ...input, width: Math.floor(input.width) - SCALE_BREAK_CELLS, window: shown })
+  const mark: BreakPart = { kind: 'break', cells: SCALE_BREAK_CELLS, omitted: input.window - shown }
+  const free = parts.findIndex(part => part.kind === 'free')
+  const reserve = parts.findIndex(part => part.kind === 'reserve')
+  const at = free >= 0 ? free + 1 : reserve >= 0 ? reserve : parts.length
+
+  return [...parts.slice(0, at), mark, ...parts.slice(at)]
 }

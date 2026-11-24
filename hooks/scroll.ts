@@ -51,6 +51,22 @@ export const STEP_SCROLL = { in: PANE_ID, to: 'start' } as const
 /** The top of the pane, for a page, view or level change. */
 export const TOP_SCROLL = { in: PANE_ID, to: 'start' } as const
 
+/** What brings the row keyed `key` into view; `nearest` leaves a row that shows where it is. */
+export type RingScroll = typeof TOP_SCROLL | { in: typeof PANE_ID; to: { key: string }; block: 'nearest' }
+
+/**
+ * The scrolls that bring the ring's row `key` into view after a move. The
+ * first row of the page (`firstRow`) goes to the top of the window first: in
+ * a pane shorter than its body the keys line stands above the rows
+ * (`keysOnTop` in pane.tsx), and `nearest` alone would leave it scrolled out
+ * with the ring back on the first row.
+ */
+export function ringScrolls(key: string, firstRow: string | undefined): RingScroll[] {
+  const nearest: RingScroll = { in: PANE_ID, to: { key }, block: 'nearest' }
+
+  return key === firstRow ? [TOP_SCROLL, nearest] : [nearest]
+}
+
 /**
  * The bottom of the pane, for k into the previous page. `end` also follows
  * the tree while it grows, until the next move: that keeps the bottom while

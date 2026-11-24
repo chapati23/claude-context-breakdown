@@ -31,8 +31,8 @@ for (const surface of SURFACES) {
     // The Read result as the conversation carried it: with its own line numbers.
     const loaded = level3(await tap(ui, 'item-r:tu1', opts))
     // Off the terminal the swatch is a picture, which flatten prints as <svg>.
-    const swatched = (crumb: string) => (surface === 'terminal' ? crumb : crumb.replace(/^<svg> /, '██ '))
-    expect(swatched(loaded.crumb)).toBe('██ Tool results › Read  ~/project/notes.txt')
+    const swatched = (crumb: string) => (surface === 'terminal' ? crumb : crumb.replace(/^Context › <svg> /, 'Context › ██ '))
+    expect(swatched(loaded.crumb)).toBe('Context › ██ Tool results › Read  ~/project/notes.txt')
     expect(factsOf(loaded.facts)).toMatchObject({ place: 'item 2 of 2', form: 'raw', source: 'as loaded' })
     expect(loaded.notes).toEqual([])
     // The last item of its list, of one page: n has nowhere to go; p steps back.
@@ -85,7 +85,7 @@ for (const surface of SURFACES) {
 
     // p steps to the item before it in the list: the Bash result, from its top, as loaded.
     const bash = level3(await tap(ui, 'prev', opts))
-    expect(swatched(bash.crumb)).toMatch(/^██ Tool results › Bash {2}/)
+    expect(swatched(bash.crumb)).toMatch(/^Context › ██ Tool results › Bash {2}/)
     expect(factsOf(bash.facts)).toMatchObject({ place: 'item 1 of 2', source: 'as loaded' })
 
     // Back to the items with the ring on the Bash result, back to the segments, close.

@@ -13,6 +13,7 @@ import {
   crossingOf,
   heldOffset,
   learnLink,
+  ringScrolls,
   shareAcross,
   shareOf,
   stepAnswer,
@@ -263,4 +264,12 @@ test('a step starts where the event says the window stands, also after the windo
   expect(stepAnswer(oursAt(29), 'context-breakdown', steps)).toBe(30)
   expect(last.cross).toBeNull()
   expect(next.cross).toBeNull()
+})
+
+test('ringScrolls: the first row of the page goes to the top first, so a keys line on top shows again', () => {
+  const nearest = (key: string) => ({ in: 'context-breakdown', to: { key }, block: 'nearest' })
+  expect(ringScrolls('row-a', 'row-a')).toEqual([TOP_SCROLL, nearest('row-a')])
+  // Any other row only comes into view: the window does not jump.
+  expect(ringScrolls('row-b', 'row-a')).toEqual([nearest('row-b')])
+  expect(ringScrolls('row-b', undefined)).toEqual([nearest('row-b')])
 })

@@ -33,6 +33,7 @@ import {
   ADDED_NAME,
   SWATCH,
   columnHeader,
+  contentCrumb,
   countOf,
   crumbFor,
   factsRow,
@@ -384,6 +385,19 @@ export const NOT_LOADED_HEADING = 'Not loaded · outside the window'
 export const RESERVE_NAME = 'Reserve for compaction'
 /** The note below level 1's table while it shows the column `added`: it says what the column counts. */
 export const ADDED_NOTE = `${ADDED_NAME}: tokens since your last prompt.`
+/**
+ * The sentence the note adds while a baseline segment gained tokens: the
+ * Baseline heading says "before your first prompt", so a figure there
+ * needs a reason.
+ */
+export const BASELINE_ADDED_NOTE = 'A baseline segment grows when Claude Code loads more of its content later.'
+
+/** The note below level 1's table while it shows the column `added`; with BASELINE_ADDED_NOTE while a baseline segment grew. */
+export function addedNote(snapshot: ContextBreakdownSnapshot, added: Added): string {
+  const grew = snapshot.baseline.some(segment => (added[segment.id] ?? 0) > 0)
+
+  return grew ? `${ADDED_NOTE} ${BASELINE_ADDED_NOTE}` : ADDED_NOTE
+}
 
 /** The deferred category names say "(deferred)"; the heading says "Not loaded". */
 export function withoutDeferred(name: string): string {
@@ -529,6 +543,13 @@ export function levelOne(snapshot: ContextBreakdownSnapshot, columns: number, ba
   return { deferred, shown, baselineRows, table, stats: { used, largest: largestOf(shown), added: added ?? {} } }
 }
 
+/** The note at the foot of level 1: every number is an estimate, and after a compaction why some carry `~`. */
+export function estimatesNote(snapshot: ContextBreakdownSnapshot): string {
+  return snapshot.isEstimate
+    ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
+    : 'All numbers are estimates.'
+}
+
 function segmentsBody(
   el: Ui,
   snapshot: ContextBreakdownSnapshot,
@@ -594,7 +615,7 @@ function segmentsBody(
       )}
       {table.added === true && (
         <Box flexDirection="column" marginTop={1}>
-          {noteBelow(el, ADDED_NOTE, noteCells)}
+          {noteBelow(el, addedNote(snapshot, stats.added), noteCells)}
         </Box>
       )}
       {swaps && (
@@ -603,13 +624,7 @@ function segmentsBody(
         </Box>
       )}
       <Box flexDirection="column" marginTop={1}>
-        {noteBelow(
-          el,
-          snapshot.isEstimate
-            ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
-            : 'All numbers are estimates.',
-          noteCells,
-        )}
+        {noteBelow(el, estimatesNote(snapshot), noteCells)}
       </Box>
     </Box>
   )
@@ -902,21 +917,33 @@ export function contentFacts(item: ContextBreakdownContent, at: string | null): 
   return { facts, code }
 }
 
-/** The name level 3's title gives the item's list: the segment's short name, or the servers' name. */
-export function contentListName(segment: ContextBreakdownListId): string {
-  // No server row opens, so this is a segment's item; the servers' names stand in all the same.
-  return isSegmentList(segment) ? segmentDef(segment).short : NOT_LOADED_DEF.label
+/**
+ * The words before the item in level 3's title: the trail and the list's
+ * name, as level 2's breadcrumb has them (`contentCrumb`). The servers that
+ * are not loaded stand in for a list too, though none of their rows opens.
+ */
+export function contentListCrumb(segment: ContextBreakdownListId, title: string, columns: number): { trail: string; name: string } {
+  const label = isSegmentList(segment) ? segmentDef(segment).label : NOT_LOADED_DEF.label
+  const short = isSegmentList(segment) ? segmentDef(segment).short : NOT_LOADED_DEF.label
+
+  return contentCrumb(PANE_TITLE, label, short, title, columns)
 }
 
-/** The terminal's title of level 3: two blocks in the list's colour, the list's name, the item's title. */
-function contentTitle(el: Ui, segment: ContextBreakdownListId, item: ContextBreakdownContent, palette: Palette) {
+/**
+ * The terminal's title of level 3, in the form of level 2's breadcrumb: the
+ * dim trail, two blocks in the list's colour, then the list's name and the
+ * item's title in bold.
+ */
+function contentTitle(el: Ui, segment: ContextBreakdownListId, item: ContextBreakdownContent, palette: Palette, columns: number) {
   const { Text } = el
+  const crumb = contentListCrumb(segment, item.title, columns)
 
   // The title wraps: a cut would drop the file name at the end of a path.
   return (
-    <Text weight="bold" wrap="wrap">
-      <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>██</Text> {contentListName(segment)} ›{' '}
-      {item.title}
+    <Text wrap="wrap">
+      <Text dimColor>{crumb.trail}</Text>
+      <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>{SWATCH}</Text>
+      <Text weight="bold">{` ${crumb.name} › ${item.title}`}</Text>
     </Text>
   )
 }
@@ -1275,6 +1302,7 @@ function keysLine(
   surface: RenderSurface,
   actions: PaneActions,
   ring: string | null,
+  atTop = false,
 ) {
   const { Box, Button, Text } = el
   const line = keyGroups(view, actions, isFocused, surface, openRows, columns)
@@ -1308,8 +1336,9 @@ function keysLine(
   // Each group is a Box of its own in a row that wraps: the line breaks
   // between groups, so keys that belong together stay together. A group
   // wider than the pane shrinks to it and wraps inside itself.
+  // Above the body (`atTop`) the blank row goes below the line.
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" {...(atTop ? { marginBottom: 1 } : { marginTop: 1 })}>
       {!isFocused && (
         <Text dimColor wrap="wrap">
           {keysHint(surface)}
@@ -1345,7 +1374,9 @@ function keysLine(
  * and brings it into view; the `/ctx` hook then puts the window back.
  * `ringNow`: the key of the element the last focus event gave the ring.
  * `base`: the measurement at the person's last prompt, for level 1's column
- * `added`.
+ * `added`. `bodyRows`: the rows the host gives the pane's body
+ * (`scroll.bodyRows`); where the body of level 1 or 2 needs more, the keys
+ * line stands above it (`keysOnTop`).
  */
 export function paneTree(
   el: Ui,
@@ -1359,6 +1390,7 @@ export function paneTree(
   keepsPlace = false,
   ringNow: string | null = null,
   base: ContextBreakdownBase | null = null,
+  bodyRows: number | null = null,
 ): RenderElement {
   const { Box, Text } = el
   const ring = keepsPlace ? null : ringKey(view, snapshot, isFocused, surface)
@@ -1369,7 +1401,7 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, 0, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, contentTitle(el, view.list.segment, view.item, palette), view.item, placeFact(view), keys, actions, ring)
+    return contentBody(el, contentTitle(el, view.list.segment, view.item, palette, columns), view.item, placeFact(view), keys, actions, ring)
   }
   let body: RenderElement
   // The rows that open on the page: Enter and the digits name them.
@@ -1394,10 +1426,146 @@ export function paneTree(
     }
   }
 
+  const onTop = keysOnTop(bodyRows, view, snapshot, columns, isFocused, surface, keyGroups(view, actions, isFocused, surface, openRows, columns), base)
+
   return (
     <Box flexDirection="column">
+      {onTop && keysLine(el, view, openRows, columns, isFocused, surface, actions, ring, true)}
       {body}
-      {keysLine(el, view, openRows, columns, isFocused, surface, actions, ring)}
+      {!onTop && keysLine(el, view, openRows, columns, isFocused, surface, actions, ring)}
     </Box>
   )
+}
+
+/**
+ * The fewest rows the terminal's body of level 1 or 2 takes, the keys line
+ * left out. A floor, not the height: a long name or a note in the list can
+ * wrap to more rows. Level 3 has its keys above its text already: 0.
+ */
+export function bodyRowsAtLeast(
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  columns: number,
+  base: ContextBreakdownBase | null,
+): number {
+  if (view.level === 3) {
+    return 0
+  }
+  if (view.level === 2) {
+    const { list } = view
+    const two = levelTwo(list, snapshot, columns)
+    const def = two.def === null ? NOT_LOADED_DEF.definition : two.def.definition
+    const textCells = Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS))
+    const joined = two.column === null ? null : factsRow(two.table, two.facts, two.column)
+    // The terminal wraps each note to the table's width (`noteBelow`).
+    const noteCells = list.rows.length > 0 ? rowCells(two.table) : textCells
+    const notes = [two.hidden, two.sizes].reduce((sum, note) => sum + (note === null ? 0 : wrapCells(note, noteCells).length), 0)
+
+    return (
+      // The breadcrumb, the definition, the facts line, the list's note, the column's name.
+      1 +
+      wrapCells(sentence(def), textCells).length +
+      1 +
+      (list.note === null ? 0 : 1) +
+      (joined === null && two.column !== null ? 1 : 0) +
+      // The rows after a blank row, then the notes after another.
+      1 +
+      list.rows.length +
+      (notes === 0 ? 0 : 1 + notes)
+    )
+  }
+  if (snapshot === null) {
+    return 1
+  }
+  const one = levelOne(snapshot, columns, base)
+  const cells = rowCells(one.table)
+  const lines = (text: string) => 1 + wrapCells(text, cells).length
+
+  return (
+    (view.note === undefined ? 0 : 1) +
+    // The heading and the column header; each group after a blank row: its heading and rows.
+    2 +
+    2 +
+    one.baselineRows +
+    2 +
+    (one.shown.length - one.baselineRows) +
+    // Free space and the reserve, Not loaded, the notes and the line that describes the ringed row.
+    3 +
+    (one.deferred.length === 0 ? 0 : 2 + one.deferred.length) +
+    (one.table.added === true ? lines(addedNote(snapshot, one.stats.added)) : 0) +
+    1 +
+    DESCRIBE_ROWS +
+    lines(estimatesNote(snapshot))
+  )
+}
+
+/**
+ * The rows the terminal's keys line takes, its blank row included: the
+ * hint's lines while the pane does not hold the keys, then the groups of
+ * controls as `keysLine` wraps them. A group goes on the row after when it
+ * does not fit beside the one before; a group wider than the pane wraps
+ * inside itself. A Button with a hotkey takes 3 more cells for its key.
+ */
+export function keysLineRows(line: KeyLine, columns: number, isFocused: boolean, surface: RenderSurface): number {
+  const width = Math.max(1, Math.floor(columns))
+  const keyCells = showsKeys(isFocused, surface) ? 3 : 0
+  /** Greedy rows of `widths` with a gap of two cells, and the widest row's cells. */
+  const pack = (widths: readonly number[]) => {
+    let rows = 0
+    let row = 0
+    let widest = 0
+    for (const cells of widths) {
+      if (row > 0 && row + 2 + cells <= width) {
+        row += 2 + cells
+      } else {
+        rows += row > 0 ? 1 : 0
+        widest = Math.max(widest, row)
+        row = cells
+      }
+    }
+    widest = Math.max(widest, row)
+
+    return { rows: rows + (row > 0 ? 1 : 0), widest }
+  }
+  let rows = 0
+  let row = 0
+  for (const group of line.groups) {
+    const inner = pack([...group.words.map(cellWidth), ...group.controls.map(control => cellWidth(control.label) + keyCells)])
+    if (inner.rows > 1) {
+      rows += (row > 0 ? 1 : 0) + inner.rows
+      row = 0
+    } else if (row > 0 && row + 2 + inner.widest <= width) {
+      row += 2 + inner.widest
+    } else {
+      rows += row > 0 ? 1 : 0
+      row = inner.widest
+    }
+  }
+  rows += row > 0 ? 1 : 0
+
+  return 1 + (isFocused ? 0 : wrapCells(keysHint(surface), width).length) + rows
+}
+
+/**
+ * Whether the terminal's keys line stands above the body of level 1 or 2:
+ * when the host gives the pane fewer rows (`bodyRows`) than the body and
+ * the keys line take (`keysLineRows`). A short pane, such as the overlay
+ * above the prompt in a narrow terminal, then shows the keys without a
+ * scroll, as level 3 does.
+ */
+export function keysOnTop(
+  bodyRows: number | null,
+  view: ContextBreakdownView,
+  snapshot: ContextBreakdownSnapshot | null,
+  columns: number,
+  isFocused: boolean,
+  surface: RenderSurface,
+  line: KeyLine,
+  base: ContextBreakdownBase | null,
+): boolean {
+  if (bodyRows === null || view.level === 3) {
+    return false
+  }
+
+  return bodyRowsAtLeast(view, snapshot, columns, base) + keysLineRows(line, columns, isFocused, surface) > bodyRows
 }

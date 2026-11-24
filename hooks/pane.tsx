@@ -1426,7 +1426,7 @@ export function paneTree(
     }
   }
 
-  const onTop = keysOnTop(bodyRows, view, snapshot, columns, isFocused, base)
+  const onTop = keysOnTop(bodyRows, view, snapshot, columns, isFocused, surface, keyGroups(view, actions, isFocused, surface, openRows, columns), base)
 
   return (
     <Box flexDirection="column">
@@ -1457,7 +1457,9 @@ export function bodyRowsAtLeast(
     const def = two.def === null ? NOT_LOADED_DEF.definition : two.def.definition
     const textCells = Math.max(1, Math.min(Math.floor(columns) - 1, TABLE_MAX_COLUMNS))
     const joined = two.column === null ? null : factsRow(two.table, two.facts, two.column)
-    const notes = (two.hidden === null ? 0 : 1) + (two.sizes === null ? 0 : 1)
+    // The terminal wraps each note to the table's width (`noteBelow`).
+    const noteCells = list.rows.length > 0 ? rowCells(two.table) : textCells
+    const notes = [two.hidden, two.sizes].reduce((sum, note) => sum + (note === null ? 0 : wrapCells(note, noteCells).length), 0)
 
     return (
       // The breadcrumb, the definition, the facts line, the list's note, the column's name.
@@ -1498,12 +1500,58 @@ export function bodyRowsAtLeast(
 }
 
 /**
+ * The rows the terminal's keys line takes, its blank row included: the
+ * hint's lines while the pane does not hold the keys, then the groups of
+ * controls as `keysLine` wraps them. A group goes on the row after when it
+ * does not fit beside the one before; a group wider than the pane wraps
+ * inside itself. A Button with a hotkey takes 3 more cells for its key.
+ */
+export function keysLineRows(line: KeyLine, columns: number, isFocused: boolean, surface: RenderSurface): number {
+  const width = Math.max(1, Math.floor(columns))
+  const keyCells = showsKeys(isFocused, surface) ? 3 : 0
+  /** Greedy rows of `widths` with a gap of two cells, and the widest row's cells. */
+  const pack = (widths: readonly number[]) => {
+    let rows = 0
+    let row = 0
+    let widest = 0
+    for (const cells of widths) {
+      if (row > 0 && row + 2 + cells <= width) {
+        row += 2 + cells
+      } else {
+        rows += row > 0 ? 1 : 0
+        widest = Math.max(widest, row)
+        row = cells
+      }
+    }
+    widest = Math.max(widest, row)
+
+    return { rows: rows + (row > 0 ? 1 : 0), widest }
+  }
+  let rows = 0
+  let row = 0
+  for (const group of line.groups) {
+    const inner = pack([...group.words.map(cellWidth), ...group.controls.map(control => cellWidth(control.label) + keyCells)])
+    if (inner.rows > 1) {
+      rows += (row > 0 ? 1 : 0) + inner.rows
+      row = 0
+    } else if (row > 0 && row + 2 + inner.widest <= width) {
+      row += 2 + inner.widest
+    } else {
+      rows += row > 0 ? 1 : 0
+      row = inner.widest
+    }
+  }
+  rows += row > 0 ? 1 : 0
+
+  return 1 + (isFocused ? 0 : wrapCells(keysHint(surface), width).length) + rows
+}
+
+/**
  * Whether the terminal's keys line stands above the body of level 1 or 2:
  * when the host gives the pane fewer rows (`bodyRows`) than the body and
- * the keys line take. A short pane, such as the overlay above the prompt in
- * a narrow terminal, then shows the keys without a scroll, as level 3 does.
- * The keys line takes its blank row, its controls' row, and the hint's row
- * while the pane does not hold the keys.
+ * the keys line take (`keysLineRows`). A short pane, such as the overlay
+ * above the prompt in a narrow terminal, then shows the keys without a
+ * scroll, as level 3 does.
  */
 export function keysOnTop(
   bodyRows: number | null,
@@ -1511,11 +1559,13 @@ export function keysOnTop(
   snapshot: ContextBreakdownSnapshot | null,
   columns: number,
   isFocused: boolean,
+  surface: RenderSurface,
+  line: KeyLine,
   base: ContextBreakdownBase | null,
 ): boolean {
   if (bodyRows === null || view.level === 3) {
     return false
   }
 
-  return bodyRowsAtLeast(view, snapshot, columns, base) + 2 + (isFocused ? 0 : 1) > bodyRows
+  return bodyRowsAtLeast(view, snapshot, columns, base) + keysLineRows(line, columns, isFocused, surface) > bodyRows
 }

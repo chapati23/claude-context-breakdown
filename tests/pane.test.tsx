@@ -1284,22 +1284,50 @@ test('on the terminal a pane shorter than its body puts the keys line on top, so
 test('a pane as tall as the whole drawing keeps the keys line last: the count of rows is never too high', async ($, on) => {
   await realWorld($, on)
   for (const columns of [24, 45, 64, 88, 140]) {
+    const props = (bodyRows: number) => ({ ...PANE.props, isFocused: true, bodyColumns: columns, scroll: { offset: 0, bodyRows } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: props(200) })
+    const lines = async () => flatten(await ui.drawn(), { columns })
+    const closeAt = async () => (await lines()).findIndex(line => /Close$/.test(line))
+    for (const open of [null, 'row-tool-results'] as const) {
+      if (open !== null) {
+        await ui.redraw(props(200))
+        await ui.press({ key: open })
+      }
+      const whole = (await lines()).length
+      expect(await closeAt(), `${columns}, ${open}`).toBe(whole - 1)
+      await ui.redraw(props(whole))
+      expect(await closeAt(), `${columns}, ${open}`).toBe(whole - 1)
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('a pane shorter than the whole drawing shows Close in its window: the count of rows is never too low', async ($, on) => {
+  await realWorld($, on)
+  // The wrapped keys line, the wrapped notes and the hint count too: a count
+  // short by a row would leave Close just below the window. A window shorter
+  // than the keys line itself cannot show it whole.
+  for (const columns of [24, 32, 45, 64, 88, 140]) {
     for (const isFocused of [true, false]) {
       const props = (bodyRows: number) => ({ ...PANE.props, isFocused, bodyColumns: columns, scroll: { offset: 0, bodyRows } })
       const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: props(200) })
       const lines = async () => flatten(await ui.drawn(), { columns })
-      const closeAt = async () => (await lines()).findIndex(line => /Close$/.test(line))
-      for (const open of [null, 'row-tool-results'] as const) {
+      for (const open of [null, 'row-tool-results', 'row-global-instructions'] as const) {
         if (open !== null) {
           await ui.redraw(props(200))
           await ui.press({ key: open })
         }
         const whole = (await lines()).length
-        expect(await closeAt(), `${columns}, ${isFocused}, ${open}`).toBe(whole - 1)
-        await ui.redraw(props(whole))
-        expect(await closeAt(), `${columns}, ${isFocused}, ${open}`).toBe(whole - 1)
+        for (let bodyRows = 4; bodyRows <= whole; bodyRows++) {
+          await ui.redraw(props(bodyRows))
+          const at = (await lines()).findIndex(line => /Close$/.test(line))
+          expect([columns, isFocused, open, bodyRows, at < bodyRows]).toEqual([columns, isFocused, open, bodyRows, true])
+        }
+        if (open !== null) {
+          await ui.press({ key: 'back' })
+        }
       }
-      await ui.press({ key: 'back' })
       await ui.unmount()
     }
   }

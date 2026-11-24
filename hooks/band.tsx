@@ -91,8 +91,11 @@ function barCells(ui: Ui, model: BandModel, palette: Palette, openPane: OpenPane
     const key = segmentKey(part.id)
 
     // No hotkey: a bare digit typed into an empty prompt would press it.
+    // The press returns the open's promise: Claude Code draws a pane at any
+    // width only when it opens within the person's press, and holds a later
+    // open undrawn below 144 columns.
     return (
-      <Button key={key} label={partLabel(part)} plain hover={{ scope: key }} onPress={() => void openPane(part)}>
+      <Button key={key} label={partLabel(part)} plain hover={{ scope: key }} onPress={() => openPane(part)}>
         {cells}
       </Button>
     )
@@ -198,7 +201,7 @@ function pictureRow(
       {openPane === null ? (
         total
       ) : (
-        <Button key="context-total" plain onPress={() => void openPane(null)}>
+        <Button key="context-total" plain onPress={() => openPane(null)}>
           {total}
         </Button>
       )}

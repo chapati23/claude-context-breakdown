@@ -64,6 +64,7 @@ scripts/tui.sh keys <run> b b x                           # back, back, close
 scripts/tui.sh screen <run>                               # plain text of the screen
 ```
 
+- `click <run> <col> [row]` sends a mouse click (press and release) at that cell; the row defaults to the bar's row (the last total on screen). Claude Code tracks the mouse only in its fullscreen layout; `click` refuses a session that does not report mouse clicks.
 - `send` types literal text, then Enter. `keys` takes tmux key names: `Tab`, `BTab` (Shift+Tab), `Enter`, `Escape`, `Up`, `Down`, `j`, `k`, digits, letters.
 - Wait for a string, never for a time. The stable handles are text: the bar regex above, `✕` (the pane's close mark), `free before compaction` (level 1 heading), `% of segment` (level 2), `item 1 of` (level 3 facts line), the controls line (`⏎ 1-9: Open`, `b: Back`, `x: Close`).
 - The prompt `Print the numbers 1 to 40 …` is the one to use for the band: it fills the transcript, so the turn line stands right above the band, and Haiku answers it in about 2 s.

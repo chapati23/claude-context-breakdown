@@ -4,7 +4,9 @@ import type { Engine } from 'claude-code/testing'
 import { CHIP_GAP } from '../hooks/bar'
 import { inkOn } from '../hooks/color'
 import { CHIP_HOLD_MS } from '../hooks/focus'
+import { bandTree } from '../hooks/band'
 import { DARK, LIGHT, edgeColor } from '../hooks/palette'
+import type { BandModel } from '../hooks/view'
 import { BAND, PANE, barRowOf, earlySession, SUMMARY, SURFACES, TRANSCRIPT, seePane, usage, world } from './fixtures'
 
 const START = { cwd: '/home/user/project', surface: 'terminal', isInteractive: true } as const
@@ -421,6 +423,49 @@ test('a press on a segment opens the pane and leaves no chip behind', async ($, 
 
   expect(w.opened).toEqual(['context-breakdown'])
   expect((await chipCounts($)).shown).toBe(0)
+})
+
+// Claude Code draws a pane at any width only when it opens within the person's
+// press; an open that lands after the press settled counts as the mod's own and
+// waits undrawn below 144 columns (seen live: a click on the bar in an 80-column
+// terminal opened nothing). So each bar Button's press hands back the open's
+// promise, for Claude Code to wait on. The kit keeps handlers on its side, so
+// this asks `bandTree` directly, with a table whose elements return their tag
+// and props.
+test('a press on a bar segment or the total hands back the open, so the open lands within the press', () => {
+  type Drawn = { type: string; props: Record<string, unknown> & { children?: unknown } }
+  const ui = new Proxy({}, { get: (_, type) => (props: Drawn['props']) => ({ type: String(type), props }) }) as never
+  const model: BandModel = {
+    label: '9k/20k 45%',
+    legend: null,
+    hint: null,
+    parts: [{ kind: 'segment', id: 'system', members: ['system'], tokens: 9000, cells: 4 }, { kind: 'free', cells: 4 }],
+    chips: [],
+  }
+  const opening = Promise.resolve('opened')
+  const all = (node: unknown): Drawn[] => {
+    if (Array.isArray(node)) {
+      return node.flatMap(all)
+    }
+    if (typeof node !== 'object' || node === null || !('type' in node)) {
+      return []
+    }
+    const drawn = node as Drawn
+
+    return [drawn, ...all(drawn.props.children)]
+  }
+
+  // The terminal's segment Buttons, and the total Button of the picture row
+  // (mobile, VS Code, and the desktop after its bar Client failed).
+  for (const surface of ['terminal', 'mobile']) {
+    const tree = bandTree(ui, model, DARK, () => opening, null, { tokensOf: () => 9000, used: 9000 }, surface, false)
+    const buttons = all(tree).filter(node => node.type === 'Button')
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const button of buttons) {
+      const press = button.props.onPress as (e: unknown) => unknown
+      expect({ surface, key: button.props.key, handsBackTheOpen: press({}) === opening }).toEqual({ surface, key: button.props.key, handsBackTheOpen: true })
+    }
+  }
 })
 
 test('the legend names the largest conversation segment after a swatch of its colour, and goes first when narrow', async ($, on) => {

@@ -444,6 +444,22 @@ export function crumbFor(
 }
 
 /**
+ * Level 3's title, in the form of level 2's breadcrumb: "Context › ██
+ * Global instructions › ~/.claude/CLAUDE.md". The longest form whose
+ * whole title fits one line of a pane `columns` wide, as `crumbFor`
+ * shortens: the segment's full name, then its short one, then without the
+ * trail. A title that fits no form wraps.
+ */
+export function contentCrumb(root: string, label: string, short: string, title: string, columns: number): { trail: string; name: string } {
+  const room = Math.floor(columns) - 1
+  const trail = `${root} › `
+  const start = (name: string) => cellWidth(trail) + SWATCH_CELLS + cellWidth(name) + 3
+  const found = [label, short].find(name => start(name) + cellWidth(title) <= room)
+
+  return found === undefined ? { trail: '', name: short } : { trail, name: found }
+}
+
+/**
  * The first line of the list of servers that are not loaded, longest form
  * that fits, as `crumbFor` shortens: "Context › Not loaded › MCP tools  414k
  * once loaded", then without the root, then without the block, then the

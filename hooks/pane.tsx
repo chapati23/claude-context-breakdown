@@ -33,6 +33,7 @@ import {
   ADDED_NAME,
   SWATCH,
   columnHeader,
+  contentCrumb,
   countOf,
   crumbFor,
   factsRow,
@@ -903,21 +904,33 @@ export function contentFacts(item: ContextBreakdownContent, at: string | null): 
   return { facts, code }
 }
 
-/** The name level 3's title gives the item's list: the segment's short name, or the servers' name. */
-export function contentListName(segment: ContextBreakdownListId): string {
-  // No server row opens, so this is a segment's item; the servers' names stand in all the same.
-  return isSegmentList(segment) ? segmentDef(segment).short : NOT_LOADED_DEF.label
+/**
+ * The words before the item in level 3's title: the trail and the list's
+ * name, as level 2's breadcrumb has them (`contentCrumb`). The servers that
+ * are not loaded stand in for a list too, though none of their rows opens.
+ */
+export function contentListCrumb(segment: ContextBreakdownListId, title: string, columns: number): { trail: string; name: string } {
+  const label = isSegmentList(segment) ? segmentDef(segment).label : NOT_LOADED_DEF.label
+  const short = isSegmentList(segment) ? segmentDef(segment).short : NOT_LOADED_DEF.label
+
+  return contentCrumb(PANE_TITLE, label, short, title, columns)
 }
 
-/** The terminal's title of level 3: two blocks in the list's colour, the list's name, the item's title. */
-function contentTitle(el: Ui, segment: ContextBreakdownListId, item: ContextBreakdownContent, palette: Palette) {
+/**
+ * The terminal's title of level 3, in the form of level 2's breadcrumb: the
+ * dim trail, two blocks in the list's colour, then the list's name and the
+ * item's title in bold.
+ */
+function contentTitle(el: Ui, segment: ContextBreakdownListId, item: ContextBreakdownContent, palette: Palette, columns: number) {
   const { Text } = el
+  const crumb = contentListCrumb(segment, item.title, columns)
 
   // The title wraps: a cut would drop the file name at the end of a path.
   return (
-    <Text weight="bold" wrap="wrap">
-      <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>██</Text> {contentListName(segment)} ›{' '}
-      {item.title}
+    <Text wrap="wrap">
+      <Text dimColor>{crumb.trail}</Text>
+      <Text color={isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded}>{SWATCH}</Text>
+      <Text weight="bold">{` ${crumb.name} › ${item.title}`}</Text>
     </Text>
   )
 }
@@ -1375,7 +1388,7 @@ export function paneTree(
   if (view.level === 3) {
     const keys = keysLine(el, view, 0, columns, isFocused, surface, actions, ring)
 
-    return contentBody(el, contentTitle(el, view.list.segment, view.item, palette), view.item, placeFact(view), keys, actions, ring)
+    return contentBody(el, contentTitle(el, view.list.segment, view.item, palette, columns), view.item, placeFact(view), keys, actions, ring)
   }
   let body: RenderElement
   // The rows that open on the page: Enter and the digits name them.

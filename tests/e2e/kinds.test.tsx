@@ -50,21 +50,21 @@ type Kind = {
 }
 
 const KINDS: Kind[] = [
-  { name: 'Bash result', row: 'row-tool-results', pick: 'ls -la /srv/data', crumb: /^██ Tool results › Bash {2}ls -la \/srv\/data && echo done$/, form: 'raw', source: 'as loaded', start: ['total 0'] },
-  { name: 'Read result', row: 'row-tool-results', pick: 'notes.txt', crumb: /^██ Tool results › Read {2}~\/project\/notes\.txt$/, form: 'raw', source: 'as loaded', start: ['     1\talpha', '     2\tbeta'] },
-  { name: 'Bash result with wide text', row: 'row-tool-results', pick: 'echo wide', crumb: /^██ Tool results › Bash {2}echo wide$/, form: 'raw', source: 'as loaded', start: ['first line'] },
-  { name: 'project instruction file', row: 'row-project-instructions', pick: 'CLAUDE.md', crumb: /^██ Project › ~\/project\/CLAUDE\.md$/, form: 'formatted', source: 'as loaded', start: ['# Project', '', 'Use tabs for indents.'] },
-  { name: 'global instruction file', row: 'row-global-instructions', pick: 'CLAUDE.md', crumb: /^██ Global › ~\/\.claude\/CLAUDE\.md$/, form: 'formatted', source: 'on disk', start: ['Be brief.'], note: 'Not found in the conversation’s opening reminder: shown from disk.' },
-  { name: 'skill body', row: 'row-skill-bodies', pick: 'demo-skill', crumb: /^██ Skill bodies › demo-skill$/, form: 'formatted', source: 'as loaded', start: ['Base directory for this skill: /home/user/.claude/skills/demo-skill', '', '# Demo', 'Do the steps.'] },
-  { name: 'prompt', row: 'row-prompts', pick: 'Please read', crumb: /^██ Prompts › Please read the notes/, form: 'formatted', source: 'as loaded', start: ['Please read the notes file and list the folder.'] },
-  { name: 'prompt that ran a local command', row: 'row-prompts', pick: '/review src', crumb: /^██ Prompts › \/review src$/, form: 'formatted', source: 'as loaded', start: ['\\<command-message>review is running…\\</command-message>', '\\<command-name>/review\\</command-name>', '\\<command-args>src\\</command-args>'] },
-  { name: 'Claude output', row: 'row-claude-output', pick: 'The folder holds one data file.', crumb: /^██ Claude › The folder holds one data file\.$/, form: 'formatted', source: 'as loaded', start: ['The folder holds one data file.'] },
-  { name: 'task report', row: 'row-task-reports', pick: 'Build finished', crumb: /^██ Tasks › Build finished$/, form: 'raw', source: 'as loaded', start: ['<task-notification>', '<task-id>b1</task-id>', '<status>completed</status>', '<summary>Build finished</summary>'] },
-  { name: 'system reminder', row: 'row-injections', pick: 'The task list is empty.', crumb: /^██ Notifications › The task list is empty\.$/, form: 'raw', source: 'as loaded', start: ['<system-reminder>'] },
-  { name: 'local command caveat', row: 'row-injections', pick: 'Local command caveat', crumb: /^██ Notifications › Local command caveat$/, form: 'raw', source: 'as loaded', start: ['<local-command-caveat>The command below was run directly by the user, not sent to you. Do not answer it.</local-command-caveat>'] },
-  { name: 'local command report', row: 'row-injections', pick: 'Output of /context', crumb: /^██ Notifications › Output of \/context$/, form: 'raw', source: 'as loaded', start: ['## Context Usage', '', '**Tokens:** 12k / 200k (6%)'] },
-  { name: 'local command output', row: 'row-injections', pick: 'Output: Compacted', crumb: /^██ Notifications › Output: Compacted$/, form: 'raw', source: 'as loaded', start: ['<local-command-stdout>Compacted</local-command-stdout>'] },
-  { name: 'compaction summary', row: 'row-compaction-summary', pick: 'Compaction summary', crumb: /^██ Summary › Compaction summary$/, form: 'formatted', source: 'as loaded', start: [], first: /^This session is being continued from a previous conversation\. s+$/ },
+  { name: 'Bash result', row: 'row-tool-results', pick: 'ls -la /srv/data', crumb: /^Context › ██ Tool results › Bash {2}ls -la \/srv\/data && echo done$/, form: 'raw', source: 'as loaded', start: ['total 0'] },
+  { name: 'Read result', row: 'row-tool-results', pick: 'notes.txt', crumb: /^Context › ██ Tool results › Read {2}~\/project\/notes\.txt$/, form: 'raw', source: 'as loaded', start: ['     1\talpha', '     2\tbeta'] },
+  { name: 'Bash result with wide text', row: 'row-tool-results', pick: 'echo wide', crumb: /^Context › ██ Tool results › Bash {2}echo wide$/, form: 'raw', source: 'as loaded', start: ['first line'] },
+  { name: 'project instruction file', row: 'row-project-instructions', pick: 'CLAUDE.md', crumb: /^Context › ██ Project instructions › ~\/project\/CLAUDE\.md$/, form: 'formatted', source: 'as loaded', start: ['# Project', '', 'Use tabs for indents.'] },
+  { name: 'global instruction file', row: 'row-global-instructions', pick: 'CLAUDE.md', crumb: /^Context › ██ Global instructions › ~\/\.claude\/CLAUDE\.md$/, form: 'formatted', source: 'on disk', start: ['Be brief.'], note: 'Not found in the conversation’s opening reminder: shown from disk.' },
+  { name: 'skill body', row: 'row-skill-bodies', pick: 'demo-skill', crumb: /^Context › ██ Skill bodies › demo-skill$/, form: 'formatted', source: 'as loaded', start: ['Base directory for this skill: /home/user/.claude/skills/demo-skill', '', '# Demo', 'Do the steps.'] },
+  { name: 'prompt', row: 'row-prompts', pick: 'Please read', crumb: /^Context › ██ Your prompts › Please read the notes/, form: 'formatted', source: 'as loaded', start: ['Please read the notes file and list the folder.'] },
+  { name: 'prompt that ran a local command', row: 'row-prompts', pick: '/review src', crumb: /^Context › ██ Your prompts › \/review src$/, form: 'formatted', source: 'as loaded', start: ['\\<command-message>review is running…\\</command-message>', '\\<command-name>/review\\</command-name>', '\\<command-args>src\\</command-args>'] },
+  { name: 'Claude output', row: 'row-claude-output', pick: 'The folder holds one data file.', crumb: /^Context › ██ Claude output › The folder holds one data file\.$/, form: 'formatted', source: 'as loaded', start: ['The folder holds one data file.'] },
+  { name: 'task report', row: 'row-task-reports', pick: 'Build finished', crumb: /^Context › ██ Task reports › Build finished$/, form: 'raw', source: 'as loaded', start: ['<task-notification>', '<task-id>b1</task-id>', '<status>completed</status>', '<summary>Build finished</summary>'] },
+  { name: 'system reminder', row: 'row-injections', pick: 'The task list is empty.', crumb: /^Context › ██ System notifications › The task list is empty\.$/, form: 'raw', source: 'as loaded', start: ['<system-reminder>'] },
+  { name: 'local command caveat', row: 'row-injections', pick: 'Local command caveat', crumb: /^Context › ██ System notifications › Local command caveat$/, form: 'raw', source: 'as loaded', start: ['<local-command-caveat>The command below was run directly by the user, not sent to you. Do not answer it.</local-command-caveat>'] },
+  { name: 'local command report', row: 'row-injections', pick: 'Output of /context', crumb: /^Context › ██ System notifications › Output of \/context$/, form: 'raw', source: 'as loaded', start: ['## Context Usage', '', '**Tokens:** 12k / 200k (6%)'] },
+  { name: 'local command output', row: 'row-injections', pick: 'Output: Compacted', crumb: /^Context › ██ System notifications › Output: Compacted$/, form: 'raw', source: 'as loaded', start: ['<local-command-stdout>Compacted</local-command-stdout>'] },
+  { name: 'compaction summary', row: 'row-compaction-summary', pick: 'Compaction summary', crumb: /^Context › ██ Compaction summary › Compaction summary$/, form: 'formatted', source: 'as loaded', start: [], first: /^This session is being continued from a previous conversation\. s+$/ },
 ]
 
 /** Segments whose items are rows of text, not controls. */
@@ -89,7 +89,7 @@ for (const surface of SURFACES) {
       const three = level3(lines)
       const facts = factsOf(three.facts)
       // Off the terminal the swatch is a picture, which flatten prints as <svg>.
-      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^<svg> /, '██ '), kind.name).toMatch(kind.crumb)
+      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^Context › <svg> /, 'Context › ██ '), kind.name).toMatch(kind.crumb)
       expect(facts, `${kind.name}: ${three.facts}`).toMatchObject({ tokens: size, form: kind.form, source: kind.source })
       expect(three.notes, kind.name).toEqual(kind.note === undefined ? [] : [kind.note])
       expect(three.controls.join(' '), kind.name).toContain('Back')

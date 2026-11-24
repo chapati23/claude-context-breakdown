@@ -45,7 +45,7 @@ import {
   RESERVE_NAME,
   SERVERS_ROW,
   contentBody,
-  contentListName,
+  contentListCrumb,
   keyGroups,
   keysHint,
   levelOne,
@@ -834,11 +834,19 @@ export function gridTree(
   if (view.level === 3) {
     const keys = controlsRow(el, view, 0, columns, isFocused, surface, actions, ring, 2)
     const segment = view.list.segment
+    // The form of level 2's title row: the dim trail, the swatch, the name.
+    const crumb = contentListCrumb(segment, view.item.title, columns)
+    const trail = crumb.trail.trimEnd()
     const title = (
       <Box flexDirection="row" alignItems="center" columnGap={1}>
+        {trail !== '' && (
+          <Box flexShrink={0}>
+            <Text dimColor>{trail}</Text>
+          </Box>
+        )}
         {swatch(g, isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded, isSegmentList(segment) ? segmentTexture(segment) : null)}
         <Box flexShrink={1} minWidth={0}>
-          <Text weight="bold" wrap="wrap">{`${contentListName(segment)} › ${view.item.title}`}</Text>
+          <Text weight="bold" wrap="wrap">{`${crumb.name} › ${view.item.title}`}</Text>
         </Box>
       </Box>
     )

@@ -315,12 +315,16 @@ test('level 3 has a swatch picture before its bold title; the rest is as on the 
   const tree = (await ui.drawn()) as Node
   const [title, facts, note] = (tree.children ?? []).filter(isNode)
   expect(title?.props).toMatchObject({ flexDirection: 'row', alignItems: 'center' })
-  expect((title?.children ?? []).filter(isNode).map(node => node.type)).toEqual(['Svg', 'Box'])
+  // Level 2's form: the dim trail, the swatch, then the words.
+  const parts = (title?.children ?? []).filter(isNode)
+  expect(parts.map(node => node.type)).toEqual(['Box', 'Svg', 'Box'])
+  const trail = (parts[0]!.children ?? []).filter(isNode)[0]!
+  expect([textOf(trail), trail.props?.dimColor]).toEqual(['Context ›', true])
   // The title's Box may shrink below its text, so a long path wraps inside the pane.
-  const wordsBox = (title?.children ?? []).filter(isNode)[1]!
+  const wordsBox = parts[2]!
   expect(wordsBox.props).toMatchObject({ flexShrink: 1, minWidth: 0 })
   const words = (wordsBox.children ?? []).filter(isNode)[0]!
-  expect([textOf(words), words.props?.weight, words.props?.wrap]).toEqual(['Global › ~/.claude/CLAUDE.md', 'bold', 'wrap'])
+  expect([textOf(words), words.props?.weight, words.props?.wrap]).toEqual(['Global instructions › ~/.claude/CLAUDE.md', 'bold', 'wrap'])
   expect(textOf(facts)).toMatch(/ tokens · formatted · on disk$/)
   // A file the opening reminder lacks is shown from disk, and a note says so, under the facts.
   expect([textOf(note), note?.props?.dimColor]).toEqual(['Not found in the conversation’s opening reminder: shown from disk.', true])

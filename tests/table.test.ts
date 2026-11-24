@@ -5,6 +5,7 @@ import {
   ADDED_CELLS,
   TABLE_MAX_COLUMNS,
   columnHeader,
+  contentCrumb,
   crumbFor,
   factsRow,
   figuresText,
@@ -508,5 +509,19 @@ describe('the longer forms of the names', () => {
       { title: 't…', detail: '  130' },
       { title: 'n…', detail: '    2' },
     ])
+  })
+})
+
+describe('contentCrumb', () => {
+  test('level 3 takes level 2’s form: the trail and the full name where the whole title fits, then the short name, then no trail', () => {
+    const title = '~/.claude/CLAUDE.md'
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 88)).toEqual({ trail: 'Context › ', name: 'Global instructions' })
+    // "Context › ██ Global instructions › ~/.claude/CLAUDE.md" is 54 cells; the short name makes it 41.
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 55)).toEqual({ trail: 'Context › ', name: 'Global instructions' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 54)).toEqual({ trail: 'Context › ', name: 'Global' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 42)).toEqual({ trail: 'Context › ', name: 'Global' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 41)).toEqual({ trail: '', name: 'Global' })
+    // A title longer than the line wraps: no trail, the short name.
+    expect(contentCrumb('Context', 'Tool results', 'Tool results', 'x'.repeat(200), 140)).toEqual({ trail: '', name: 'Tool results' })
   })
 })

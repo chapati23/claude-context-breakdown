@@ -389,7 +389,7 @@ export const GOLDEN: Record<string, readonly string[]> = {
     "     2\tbeta",
   ],
   "level3-read/88/focused": [
-    "██ Tool results › Read  ~/project/notes.txt",
+    "⟨Context › ⟩██ Tool results › Read  ~/project/notes.txt",
     "⟨item 13 of 13 · 25 tokens · raw · as loaded⟩",
     "",
     "⟦⟨j: ↓⟩⟧  ⟨k: ↑⟩  ⟨b: Back⟩  ⟨p: Prev item⟩  ⟨n: ⟩⟪⟨Next item⟩⟫",
@@ -399,7 +399,7 @@ export const GOLDEN: Record<string, readonly string[]> = {
     "     2\tbeta",
   ],
   "level3-read/88/unfocused": [
-    "██ Tool results › Read  ~/project/notes.txt",
+    "⟨Context › ⟩██ Tool results › Read  ~/project/notes.txt",
     "⟨item 13 of 13 · 25 tokens · raw · as loaded⟩",
     "",
     "⟨For keys: click the pane, or run /ctx⟩",

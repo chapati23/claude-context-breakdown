@@ -48,6 +48,7 @@ import {
   crossScroll,
   heldOffset,
   learnLink,
+  ringScrolls,
   shareAcross,
   stepAnswer,
   stepOf,
@@ -267,14 +268,18 @@ function navOf($: Engine): NavIo {
 }
 
 /**
- * Puts the ring on `key`, then brings its row into view. `nearest` leaves a
- * row that already shows where it is; the `ui.scroll` hook below passes this
- * scroll on as the engine resolved it, as it carries no step.
+ * Puts the ring on `key`, then brings its row into view (`ringScrolls`).
+ * The `ui.scroll` hook below passes the scroll to the row on as the engine
+ * resolved it, as it carries no step.
  */
 async function applyRing($: Engine, key: string): Promise<{ deny?: string }> {
   const answer = await $.ui.focus({ requestId: PANE_ID, key })
   if (answer.deny === undefined) {
-    await $.ui.scroll({ in: PANE_ID, to: { key }, block: 'nearest' })
+    const scrolls = ringScrolls(key, rowKeys(await read($, viewAtom), await read($, snapshotAtom))[0])
+    for (const [index, scroll] of scrolls.entries()) {
+      // The scroll to the top only helps: its failure leaves the row's own.
+      await (index < scrolls.length - 1 ? quietly($.ui.scroll(scroll)) : $.ui.scroll(scroll))
+    }
   }
 
   return answer
@@ -1273,6 +1278,19 @@ export const register: Register = on => {
       return gridTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, holds, base)
     }
 
-    return paneTree($.ui.resolve(e), snapshot, view, e.props.bodyColumns, actions, palette, isFocused, e.surface, keepsPlace, ringNow, base)
+    return paneTree(
+      $.ui.resolve(e),
+      snapshot,
+      view,
+      e.props.bodyColumns,
+      actions,
+      palette,
+      isFocused,
+      e.surface,
+      keepsPlace,
+      ringNow,
+      base,
+      e.props.scroll?.bodyRows ?? null,
+    )
   })
 }

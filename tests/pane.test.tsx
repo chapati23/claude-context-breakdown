@@ -1230,3 +1230,105 @@ test('pastHidden at level 3: from Close on to the Next page button below the tex
   expect(pastHidden('taken-v', 'close', { ...level3, item: { ...item, page: 1, pages: 2 } }, null)).toBe('scroll-down')
   expect(pastHidden('taken-m', 'next-below', { ...level3, item: { ...item, pages: 2 } }, null)).toBe('close')
 })
+
+test('on the terminal a pane shorter than its body puts the keys line on top, so the keys show without a scroll', async ($, on) => {
+  await realWorld($, on)
+  const at = (bodyRows: number, isFocused = true) => ({ ...PANE.props, isFocused, bodyColumns: 88, scroll: { offset: 0, bodyRows } })
+  /** Where the line of controls stands among the drawn lines, and how many lines there are. */
+  const keysAt = async (ui: { drawn: () => Promise<unknown> }) => {
+    const lines = flatten((await ui.drawn()) as Parameters<typeof flatten>[0], { columns: 88 })
+
+    return {
+      at: lines.findIndex(line => /Close$/.test(line)),
+      lines: lines.length,
+      // The first line of the level: its heading, or its breadcrumb.
+      head: lines.findIndex(line => / free before compaction$|^Context › /.test(line)),
+    }
+  }
+  // The overlay above the prompt in a terminal of 90 by 34: 9 rows. The keys
+  // line comes first, then a blank row, then the heading.
+  const ui = await $.ui.mount({ ...FOCUSED_PANE, surface: 'terminal', props: at(9) })
+  const short = await keysAt(ui)
+  expect(short.at).toBe(0)
+  const lines = flatten(await ui.drawn(), { columns: 88 })
+  expect(lines[1]).toBe('')
+  expect(lines[2]).toMatch(/ used · .* free before compaction$/)
+  // A side pane with room for the whole body keeps the keys line last.
+  await ui.redraw(at(60))
+  const tall = await keysAt(ui)
+  expect(tall.at).toBe(tall.lines - 1)
+  // Without the keys the hint stands above the controls, on top as well.
+  await ui.redraw(at(9, false))
+  const idle = flatten(await ui.drawn(), { columns: 88 })
+  expect(idle[0]).toBe(KEYS_HINT)
+  expect(idle[1]).toMatch(/Refresh {2}Close$/)
+  // Level 2 fits 30 rows: its keys stay below; in 6 rows they go on top.
+  await ui.redraw(at(30))
+  await ui.press({ key: 'row-global-instructions' })
+  const fits = await keysAt(ui)
+  expect(fits.at).toBe(fits.lines - 1)
+  await ui.redraw(at(6))
+  const level2 = await keysAt(ui)
+  expect(level2.at).toBeGreaterThanOrEqual(0)
+  expect(level2.at).toBeLessThan(level2.head)
+  await ui.press({ key: 'back' })
+  await ui.unmount()
+
+  // Other surfaces keep their own order: the desktop's level 1 ends with the controls.
+  const desktop = await $.ui.mount({ ...FOCUSED_PANE, surface: 'desktop', props: at(9) })
+  const drawn = flatten(await desktop.drawn(), { columns: 88, surface: 'desktop' })
+  expect(drawn.findIndex(line => /Close$/.test(line))).toBe(drawn.length - 1)
+  await desktop.unmount()
+})
+
+test('a pane as tall as the whole drawing keeps the keys line last: the count of rows is never too high', async ($, on) => {
+  await realWorld($, on)
+  for (const columns of [24, 45, 64, 88, 140]) {
+    const props = (bodyRows: number) => ({ ...PANE.props, isFocused: true, bodyColumns: columns, scroll: { offset: 0, bodyRows } })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: props(200) })
+    const lines = async () => flatten(await ui.drawn(), { columns })
+    const closeAt = async () => (await lines()).findIndex(line => /Close$/.test(line))
+    for (const open of [null, 'row-tool-results'] as const) {
+      if (open !== null) {
+        await ui.redraw(props(200))
+        await ui.press({ key: open })
+      }
+      const whole = (await lines()).length
+      expect(await closeAt(), `${columns}, ${open}`).toBe(whole - 1)
+      await ui.redraw(props(whole))
+      expect(await closeAt(), `${columns}, ${open}`).toBe(whole - 1)
+    }
+    await ui.press({ key: 'back' })
+    await ui.unmount()
+  }
+})
+
+test('a pane shorter than the whole drawing shows Close in its window: the count of rows is never too low', async ($, on) => {
+  await realWorld($, on)
+  // The wrapped keys line, the wrapped notes and the hint count too: a count
+  // short by a row would leave Close just below the window. A window shorter
+  // than the keys line itself cannot show it whole.
+  for (const columns of [24, 32, 45, 64, 88, 140]) {
+    for (const isFocused of [true, false]) {
+      const props = (bodyRows: number) => ({ ...PANE.props, isFocused, bodyColumns: columns, scroll: { offset: 0, bodyRows } })
+      const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: props(200) })
+      const lines = async () => flatten(await ui.drawn(), { columns })
+      for (const open of [null, 'row-tool-results', 'row-global-instructions'] as const) {
+        if (open !== null) {
+          await ui.redraw(props(200))
+          await ui.press({ key: open })
+        }
+        const whole = (await lines()).length
+        for (let bodyRows = 4; bodyRows <= whole; bodyRows++) {
+          await ui.redraw(props(bodyRows))
+          const at = (await lines()).findIndex(line => /Close$/.test(line))
+          expect([columns, isFocused, open, bodyRows, at < bodyRows]).toEqual([columns, isFocused, open, bodyRows, true])
+        }
+        if (open !== null) {
+          await ui.press({ key: 'back' })
+        }
+      }
+      await ui.unmount()
+    }
+  }
+})

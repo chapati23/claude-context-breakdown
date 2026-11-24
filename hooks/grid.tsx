@@ -38,14 +38,14 @@ import { formatShare, formatTokens } from './format'
 import { colorOf } from './palette'
 import type { Palette } from './palette'
 import {
-  ADDED_NOTE,
   BASELINE_HEADING,
   CONVERSATION_HEADING,
   NOT_LOADED_HEADING,
   RESERVE_NAME,
   SERVERS_ROW,
+  addedNote,
   contentBody,
-  contentListName,
+  contentListCrumb,
   keyGroups,
   keysHint,
   levelOne,
@@ -394,7 +394,15 @@ function segmentsGrid(
     share: figureColumnCells([...groups.map(segments => formatShare(sumTokens(segments), used)), ...drawn.map(segment => formatShare(segment.tokens, used))]),
     added: figureColumnCells([ADDED_NAME, ...groups.map(segments => addedText(groupAdded(segments))), ...drawn.map(segment => addedText(stats.added[segment.id]))]),
   }
-  const rows: Grid = { ...g, share: table.share, added: table.added === true, cells, bar: barCells(table, grid) }
+  // The column `added` shows where the terminal's table has it and where it
+  // shortens no name: the grid's bar keeps its cells, so the column takes
+  // its cells from the names.
+  const without: Grid = { ...g, share: table.share, added: false, cells, bar: barCells(table, grid) }
+  const namesIn = (room: number) => drawn.map(segment => fittedName(segmentDef(segment.id).label, segmentDef(segment.id).short, room))
+  const withColumn: Grid = { ...without, added: true }
+  const keepsNames =
+    namesIn(grid - LEAD_CELLS - rightCells(withColumn)).join('\n') === namesIn(grid - LEAD_CELLS - rightCells(without)).join('\n')
+  const rows: Grid = table.added === true && keepsNames ? withColumn : without
   // The cells a heading's text has, and a row's name after the lead.
   const headingRoom = grid - rightCells({ ...rows, bar: 0 })
   const nameRoom = grid - LEAD_CELLS - rightCells(rows)
@@ -485,7 +493,7 @@ function segmentsGrid(
         </Box>
       )}
       {notes(g.el, [
-        ...(table.added === true ? [ADDED_NOTE] : []),
+        ...(rows.added ? [addedNote(snapshot, stats.added)] : []),
         snapshot.isEstimate
           ? 'All numbers are estimates. ~: the conversation is counted from its characters until the first response after the compaction.'
           : 'All numbers are estimates.',
@@ -834,11 +842,19 @@ export function gridTree(
   if (view.level === 3) {
     const keys = controlsRow(el, view, 0, columns, isFocused, surface, actions, ring, 2)
     const segment = view.list.segment
+    // The form of level 2's title row: the dim trail, the swatch, the name.
+    const crumb = contentListCrumb(segment, view.item.title, columns)
+    const trail = crumb.trail.trimEnd()
     const title = (
       <Box flexDirection="row" alignItems="center" columnGap={1}>
+        {trail !== '' && (
+          <Box flexShrink={0}>
+            <Text dimColor>{trail}</Text>
+          </Box>
+        )}
         {swatch(g, isSegmentList(segment) ? colorOf(palette, segment) : palette.notLoaded, isSegmentList(segment) ? segmentTexture(segment) : null)}
         <Box flexShrink={1} minWidth={0}>
-          <Text weight="bold" wrap="wrap">{`${contentListName(segment)} › ${view.item.title}`}</Text>
+          <Text weight="bold" wrap="wrap">{`${crumb.name} › ${view.item.title}`}</Text>
         </Box>
       </Box>
     )

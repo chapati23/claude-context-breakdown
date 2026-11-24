@@ -4,6 +4,8 @@
 
 import { expect, test } from 'claude-code/testing'
 
+import type { ContextBreakdownSegmentId } from '../../types'
+import { segmentDef } from '../../hooks/segments'
 import { CODE_LINE_CHARS } from '../../hooks/text'
 import { GLOBAL_MD, flatten, mountPane, real, ringOf, session, tap } from './helpers'
 import { factsOf, figuresOf, keysWith, labelOf, level2, level3, levelOne, longest, tokensOf, widest } from './journeys'
@@ -101,7 +103,11 @@ for (const surface of SURFACES) {
       expect(facts!.tokens).toBe(figuresOf(two.rows[0]!)!.tokens)
       // Its place counts all items of the list, as level 2's facts do.
       expect(facts!.place).toBe(`item 1 of ${two.count}`)
-      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^<svg> /, '██ ')).toMatch(/^█+ \S.* › \S/)
+      // Level 3's title has level 2's form: the trail, the swatch, the segment's name, then the item. A
+      // title too long for one line drops the trail and keeps the short name, as level 2 shortens.
+      expect(surface === 'terminal' ? three.crumb : three.crumb.replace(/^(Context › )?<svg> /, '$1██ ')).toMatch(/^(Context › )?█+ \S.* › \S/)
+      const def = segmentDef(rowKey.slice('row-'.length) as ContextBreakdownSegmentId)
+      expect([def.label, def.short].some(name => three.crumb.includes(` ${name} › `)), three.crumb).toBe(true)
       expect(three.controls.join(' ')).toContain('Back')
       expect(three.body.find(line => line.trim() !== '') ?? '').not.toBe('')
       // The engine wraps text when it paints, so the pane promises only that the head

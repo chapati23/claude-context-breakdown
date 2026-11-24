@@ -1,6 +1,6 @@
 {
   "name": "context-breakdown",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "description": "Shows what fills the context window: a segmented bar above the prompt and a pane that lists each item",
   "author": { "name": "chapati23", "url": "https://github.com/chapati23" },
   "homepage": "https://github.com/chapati23/claude-context-breakdown",

@@ -5,6 +5,7 @@ import {
   ADDED_CELLS,
   TABLE_MAX_COLUMNS,
   columnHeader,
+  contentCrumb,
   crumbFor,
   factsRow,
   figuresText,
@@ -169,10 +170,26 @@ describe('tableLayout', () => {
 describe('the column added', () => {
   const WIDEST = 32
 
-  test('joins the table only with 7 cells to spare inside the cap and the pane', () => {
-    for (const columns of [64, 67]) {
-      expect(withAdded(tableLayout(columns, WIDEST), columns).added).toBeUndefined()
+  test('narrows the length bar, never the names, to make room in a side pane', () => {
+    // A terminal of 150 columns gives the side pane about 64: the bar gives
+    // up 4 cells there, the names keep theirs.
+    for (const [columns, bar] of [
+      [64, 8],
+      [67, 11],
+    ] as const) {
+      const plain = tableLayout(columns, WIDEST)
+      const table = withAdded(plain, columns)
+      expect(table.added).toBe(true)
+      expect(table.bar).toBe(bar)
+      expect(table.name).toBe(plain.name)
+      expect(rowCells(table)).toBe(Math.min(columns - 1, TABLE_MAX_COLUMNS))
     }
+    // Where the bar would fall below its narrowest, the column does not show.
+    expect(withAdded(tableLayout(45, WIDEST), 45).added).toBeUndefined()
+    expect(withAdded(tableLayout(45, WIDEST), 45)).toEqual(tableLayout(45, WIDEST))
+  })
+
+  test('joins the table without a cut where it has 7 cells to spare inside the cap and the pane', () => {
     for (const columns of [68, 76, 88, 140]) {
       const table = withAdded(tableLayout(columns, WIDEST), columns)
       expect(table.added).toBe(true)
@@ -492,5 +509,19 @@ describe('the longer forms of the names', () => {
       { title: 't…', detail: '  130' },
       { title: 'n…', detail: '    2' },
     ])
+  })
+})
+
+describe('contentCrumb', () => {
+  test('level 3 takes level 2’s form: the trail and the full name where the whole title fits, then the short name, then no trail', () => {
+    const title = '~/.claude/CLAUDE.md'
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 88)).toEqual({ trail: 'Context › ', name: 'Global instructions' })
+    // "Context › ██ Global instructions › ~/.claude/CLAUDE.md" is 54 cells; the short name makes it 41.
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 55)).toEqual({ trail: 'Context › ', name: 'Global instructions' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 54)).toEqual({ trail: 'Context › ', name: 'Global' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 42)).toEqual({ trail: 'Context › ', name: 'Global' })
+    expect(contentCrumb('Context', 'Global instructions', 'Global', title, 41)).toEqual({ trail: '', name: 'Global' })
+    // A title longer than the line wraps: no trail, the short name.
+    expect(contentCrumb('Context', 'Tool results', 'Tool results', 'x'.repeat(200), 140)).toEqual({ trail: '', name: 'Tool results' })
   })
 })

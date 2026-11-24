@@ -8,6 +8,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { BarClientProps } from '../../hooks/barclient'
+import { BASELINE_ADDED_NOTE } from '../../hooks/pane'
 import { DARK, LIGHT } from '../../hooks/palette'
 import { BAND, MESSAGES, barRowOf, PANE, SUMMARY, TRANSCRIPT, usage, world } from '../fixtures'
 import type { World } from '../fixtures'
@@ -238,14 +239,32 @@ test('J7 terminal: the column added counts from the last prompt, and a compactio
   expect(addedIn(grown.find(line => line.includes('Free space')))).toBeUndefined()
   expect(grown).toContain(NOTE)
   expect(grown.indexOf(NOTE)).toBeLessThan(grown.indexOf('All numbers are estimates.'))
-  // A pane too narrow for 7 more cells keeps its table and draws no column and no note.
-  const narrow = await paneAt(64)
+  // A side pane of 64 columns (a terminal of 150) narrows the length bars
+  // and keeps the column: the names keep their cells.
+  const side = await paneAt(64)
+  expect(hasColumn(side)).toBe(true)
+  expect(Math.abs(addedIn(side.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  expect(side).toContain(NOTE)
+  // A pane too narrow for 7 more cells, even with the shortest bar, keeps its table and draws no column and no note.
+  const narrow = await paneAt(45)
   expect(hasColumn(narrow)).toBe(false)
   expect(narrow).not.toContain(NOTE)
   expect(narrow.some(line => /\+\S+$/.test(line))).toBe(false)
   // The desktop draws the figure beside the row's native button.
   const desktop = await paneAt(88, 'desktop')
   expect(Math.abs(addedIn(desktop.find(line => line.includes('Tool results')))! - 14_000)).toBeLessThanOrEqual(1_000)
+  // The grid keeps its bar's cells, so it never takes the column's cells
+  // from the names: where the column would shorten a name, the grid drops it.
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    for (const columns of [58, 60, 61, 62, 64]) {
+      // flatten measures every grid surface as the desktop's.
+      const ui = await $.ui.mount({ ...PANE, surface, props: { ...PANE.props, bodyColumns: columns } } as never)
+      const lines = flatten(await ui.drawn(), { surface: 'desktop', columns })
+      await ui.unmount()
+      expect([surface, columns, lines.some(line => line.includes('System prompt and built-in tools'))]).toEqual([surface, columns, true])
+      expect([surface, columns, lines.some(line => line.includes('Skills list and custom agents'))]).toEqual([surface, columns, true])
+    }
+  }
 
   // Prompts that are not the person's own words keep the base: a task
   // notification, a scheduled trigger, a peer, a plugin, one with no origin
@@ -359,6 +378,33 @@ test('J7 terminal: a prompt that a hook drops keeps the base of the column added
   await prompt($)
   await w.clock.advance(0)
   expect(await columnShown($)).toBe(false)
+})
+
+test('J7 terminal: a baseline segment that grew after the prompt gets its figure, and the note says why', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await prompt($)
+  await w.clock.advance(0)
+  // Claude Code loads 2,000 more tokens of the skills list, as when a plugin
+  // loads late: a baseline segment grows after the first prompt.
+  const grown = usage(68_000)
+  grown.context.breakdown = {
+    ...grown.context.breakdown!,
+    categories: grown.context.breakdown!.categories.map(one => (one.name === 'Skills' ? { ...one, tokens: 4000 } : one)),
+  }
+  w.usage = grown
+  await measured($, w)
+  const lines = await levelOneAt88($)
+  expect(lines.some(line => line.endsWith('% of used  added'))).toBe(true)
+  expect(lines.find(line => line.includes('Baseline · before your first prompt'))).toMatch(/\+2k$/)
+  // The note under the table says why a row under "before your first prompt" grew.
+  const note = lines.slice(lines.findIndex(line => line.startsWith('added: '))).join(' ')
+  expect(note.startsWith(`added: tokens since your last prompt. ${BASELINE_ADDED_NOTE}`)).toBe(true)
+  // The desktop's note says the same.
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, bodyColumns: 88 } } as never)
+  expect(flatten(await ui.drawn(), { surface: 'desktop', columns: 88 }).join(' ')).toContain(BASELINE_ADDED_NOTE)
+  await ui.unmount()
 })
 
 test('J7 terminal: a measurement from before the last compaction is no base', async ($, on) => {

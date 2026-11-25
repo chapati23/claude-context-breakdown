@@ -80,6 +80,7 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 ## Evidence on Hand
 
 - Four pictures of one real session (mod 0.11.1, Claude Code 2.1.332, a terminal, 1M window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png).
+- The social preview card, [docs/img/social-preview.png](docs/img/social-preview.png) (1280 by 640 px): the logo on its own navy, the README's tagline, and real crops of the pane and the bar from the same session as the four pictures. It adds no figure or claim that the README lacks.
 - [README.md](README.md): what the mod is, what it shows, how to install and update it, and what is safe about it.
 - [docs/reference.md](docs/reference.md): the behaviour of the bar and the pane, the keys per surface, how the numbers are made, and the limits.
 - [docs/adr/0001-build-as-a-mod-on-the-early-access-api.md](docs/adr/0001-build-as-a-mod-on-the-early-access-api.md): the options that were rejected, with reasons.

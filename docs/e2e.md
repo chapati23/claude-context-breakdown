@@ -106,8 +106,8 @@ it), by a test, or only by the manual checklist.
 ## Manual checklist for the desktop app
 
 `claude --plugin-dir .` starts a terminal session, not a desktop session. To
-load this folder in the desktop app, follow "Development" in
-[README.md](../README.md). Then start a new local session in the desktop
+load this folder in the desktop app, follow
+[Development](development.md). Then start a new local session in the desktop
 app, so that it loads the mod as the folder has it now. Do each check. One
 line per check:
 

@@ -2,7 +2,7 @@
 
 This repository is a Claude Code mod. The repository root is the mod folder. The marketplace installs the mod from `main`.
 
-- Checks, and how to get the API declarations: see "Development" in [README.md](README.md).
+- Checks, and how to get the API declarations: see [docs/development.md](docs/development.md).
 - Product record: [PRODUCT.md](PRODUCT.md). It states the users, the purpose and the constraints that bind a design.
 - Project terms: [CONTEXT.md](CONTEXT.md). Use them in code, comments and prose.
 - Decision records: [docs/adr](docs/adr).
@@ -44,7 +44,7 @@ CI runs the same script on every pull request and on every push to `main` (`.git
 
 - In a clone of a fork, `origin` is the fork. Fetch the repository that the pull request targets, and use its `main` in these commands and in the steps below.
 - For a pull request whose base is another branch (a stacked pull request), use that branch in place of `origin/main`.
-- If a pull request adds a folder or a root file that the mod loads, add the path to this section, to `SHIPPED` in the script and to "Development" in the README, in the same pull request. If you cannot tell whether a file ships, raise the version.
+- If a pull request adds a folder or a root file that the mod loads, add the path to this section, to `SHIPPED` in the script and to [docs/development.md](docs/development.md), in the same pull request. If you cannot tell whether a file ships, raise the version.
 - Change shipped files on `main` only through a pull request.
 
 ### Which number

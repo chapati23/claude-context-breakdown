@@ -67,7 +67,7 @@ start)
   trap 'rm -rf "$root"' ERR
   build=$root/build work=$root/work
   mkdir -p "$build" "$work"
-  [ -z "$cwd" ] || work=$(cd "$cwd" && pwd)
+  [ -z "$cwd" ] || work=$(CDPATH= cd -- "$cwd" && pwd)
   if [ "$src" = ref ]; then
     git -C "$REPO" archive "$ref" | tar -x -C "$build"
     label="$ref ($(git -C "$REPO" rev-parse --short "$ref"))"

@@ -2,7 +2,7 @@
 
 This repository is a Claude Code mod. The repository root is the mod folder. The marketplace installs the mod from `main`.
 
-- Checks, and how to get the API declarations: see "Development" in [README.md](README.md).
+- Checks, and how to get the API declarations: see [docs/development.md](docs/development.md).
 - Product record: [PRODUCT.md](PRODUCT.md). It states the users, the purpose and the constraints that bind a design.
 - Project terms: [CONTEXT.md](CONTEXT.md). Use them in code, comments and prose.
 - Decision records: [docs/adr](docs/adr).
@@ -44,7 +44,7 @@ CI runs the same script on every pull request and on every push to `main` (`.git
 
 - In a clone of a fork, `origin` is the fork. Fetch the repository that the pull request targets, and use its `main` in these commands and in the steps below.
 - For a pull request whose base is another branch (a stacked pull request), use that branch in place of `origin/main`.
-- If a pull request adds a folder or a root file that the mod loads, add the path to this section, to `SHIPPED` in the script and to "Development" in the README, in the same pull request. If you cannot tell whether a file ships, raise the version.
+- If a pull request adds a folder or a root file that the mod loads, add the path to this section, to `SHIPPED` in the script and to [docs/development.md](docs/development.md), in the same pull request. If you cannot tell whether a file ships, raise the version.
 - Change shipped files on `main` only through a pull request.
 
 ### Which number
@@ -52,7 +52,7 @@ CI runs the same script on every pull request and on every push to `main` (`.git
 The version has three numbers: `major.minor.patch`. Before 1.0.0:
 
 - Raise `minor` and set `patch` to 0 when the person sees new or changed behaviour: a new key, a new segment, a changed look, a changed figure. Example: 0.2.0 becomes 0.3.0.
-- Raise `patch` when the change only repairs behaviour that the README already describes, or when the person can see no difference. Example: 0.2.0 becomes 0.2.1.
+- Raise `patch` when the change only repairs behaviour that the README or docs/reference.md already describes, or when the person can see no difference. Example: 0.2.0 becomes 0.2.1.
 - If you cannot tell which one applies, raise `minor`.
 
 The step to 1.0.0 is the maintainer's decision. Do not take it without their instruction.

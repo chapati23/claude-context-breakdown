@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Point the Claude desktop app's local sessions at a build of this mod, and back.
 # The desktop app has no --plugin-dir flag: it reads two env entries from
-# ~/.claude/settings.json (see "Development" in README.md).
+# ~/.claude/settings.json (see docs/development.md).
 #
 #   desktop-load.sh on <run> [--ref <git-ref>]   freeze a build, edit settings, keep a backup
 #   desktop-load.sh off <run>                    undo exactly that edit, delete the build

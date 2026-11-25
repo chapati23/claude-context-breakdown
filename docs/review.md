@@ -16,4 +16,4 @@ Each bullet ends with a `(class: <slug>)` tag. Each slug resolves to a line in `
 
 **Trigger:** a change under `hooks/` that changes what a person sees or presses on any surface.
 
-- README (above all "Use"), `CONTEXT.md`, `docs/e2e.md` (its proof notes and the manual checklist) and the comments in the changed files and in their tests state the new behaviour. Search them for the old claim, and check each surface by name: a sentence true for the desktop app can be false for the mobile app or the terminal. (class: doc-contradicts-code)
+- README, `docs/reference.md` (above all "Use"), `CONTEXT.md`, `docs/e2e.md` (its proof notes and the manual checklist) and the comments in the changed files and in their tests state the new behaviour. Search them for the old claim, and check each surface by name: a sentence true for the desktop app can be false for the mobile app or the terminal. (class: doc-contradicts-code)

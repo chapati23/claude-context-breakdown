@@ -5,7 +5,7 @@ description: Prove that the context-breakdown Claude Code mod (the context bar a
 
 # Verify the context-breakdown mod
 
-The mod draws two things: the **bar** (one row in the band above the prompt) and the **pane** (opened by `/ctx`, three levels: segments, items, content). Terms are in `CONTEXT.md`; the user-facing behaviour is in "Use" in `README.md`.
+The mod draws two things: the **bar** (one row in the band above the prompt) and the **pane** (opened by `/ctx`, three levels: segments, items, content). Terms are in `CONTEXT.md`; the user-facing behaviour is in "Use" in `docs/reference.md`.
 
 The scripts are for macOS (`stat -f`, `sips`, the Chrome path, cmux-cua).
 
@@ -28,7 +28,7 @@ Run the unit checks first, **from the repository root** (the mod folder); a live
 claude plugin validate . && claude plugin test . && npx --yes -p typescript@5.9.3 tsc -p .
 ```
 
-`tsc` needs the API declarations in `.claude-plugin/types/`, which git ignores: a new worktree lacks them until Claude Code loads the folder as a mod. See "Development" in `README.md`.
+`tsc` needs the API declarations in `.claude-plugin/types/`, which git ignores: a new worktree lacks them until Claude Code loads the folder as a mod. See `docs/development.md`.
 
 ## Terminal
 

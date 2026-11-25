@@ -1,6 +1,6 @@
 # Keyboard
 
-While the pane has the keyboard, keys move in it and press its controls. The terminal adds keys of its own (`j`, `k`, the arrows, digits); the desktop app uses its own keys only (Tab, Shift+Tab, Enter) plus the controls' letters. `Esc` gives the keyboard back to the prompt; `/ctx` gives it to the pane again. The full key table is in "Use" in `README.md`.
+While the pane has the keyboard, keys move in it and press its controls. The terminal adds keys of its own (`j`, `k`, the arrows, digits); the desktop app uses its own keys only (Tab, Shift+Tab, Enter) plus the controls' letters. `Esc` gives the keyboard back to the prompt; `/ctx` gives it to the pane again. The full key table is in "Use" in `docs/reference.md`.
 
 ## Sub-features
 

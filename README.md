@@ -6,16 +6,16 @@
 
 <p align="center">
   <strong>See what fills your Claude Code context window.</strong><br>
-  A bar above your prompt shows the whole window. Open any segment to read the text the model received.
+  A bar above your prompt shows the whole window. Open a segment, then one of its items, to read the text the model received.
 </p>
 
-To try it, type this in a Claude Code session. You need Claude Code 2.1.287 or newer. It runs in a terminal and in the Claude desktop app.
+To try it, type this at the prompt of a Claude Code session in a terminal. You need Claude Code 2.1.287 or newer.
 
 ```
 /plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-The bar appears after the next model response. [All install steps](#install) cover the shell and the desktop app.
+The bar appears after the next model response. The mod also runs in the Claude desktop app. There `/plugin` does not run, and [the install steps](#install) show the menu path.
 
 ![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
 
@@ -43,7 +43,7 @@ Neighbouring segments differ in lightness as well as hue. [A test](tests/palette
 
 Tool results, skill bodies, task reports, system notifications, your prompts, Claude's output and the compaction summary each get a segment. The baseline has its own segments too: the system prompt and built-in tools, MCP tools, your global instructions, your project instructions, auto-memory, and the lists of skills and custom agents.
 
-### Every segment opens down to the text
+### From a segment down to the text
 
 Type `/ctx` to open the pane. It lists every segment with its tokens and its share of what is used. When free space falls below 10% of the window, the heading of the pane warns.
 
@@ -51,13 +51,13 @@ Open a segment to list its items: each tool call, each instruction file, each pr
 
 ![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](docs/img/pane-items.png)
 
-Open an item to read its text as loaded, which is the text the model received. That can differ from the file on disk now, because you can edit a file after Claude Code has read it. This is a project instruction file:
+Open an item to read its text as loaded, which is the text the model received. That can differ from the file on disk now, because you can edit a file after Claude Code has read it. For an item that has a file, `v` switches to the file on disk. The system prompt has no finer split, because Claude Code does not report one, so its rows show token counts only. This is a project instruction file:
 
 ![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](docs/img/pane-content.png)
 
 ### What your last prompt added
 
-After a prompt, the pane gets an `added` column: the tokens each segment gained since you sent that prompt, for example `+252` next to Claude output in the first picture. A segment that did not grow leaves its cell blank. In a terminal, the column needs a pane about 60 columns wide.
+After a prompt, the pane gets an `added` column: the tokens each segment gained since you sent that prompt, for example `+252` next to Claude output in the first picture. A segment that did not grow leaves its cell blank. The column shows only while a segment has grown and no figure is an estimate, and in a terminal it needs a pane about 60 columns wide. [The reference](docs/reference.md#use) lists the conditions.
 
 ### Where your setup spends tokens
 
@@ -95,7 +95,7 @@ In the mobile app and in the editor, the bar is drawn as an image, and only the 
 1. Send any prompt. The bar appears after the response.
 2. Type `/ctx`. The pane opens and takes the keyboard.
 3. In a terminal, press the digit before a row to open it. On every surface, a click on a row opens it. Press `b` to go back and `x` to close. `Esc` gives the keyboard back to the prompt.
-4. Type `/ctx tool` to open the items of Tool results. The start of any segment's name works.
+4. Type `/ctx tool` to open the items of Tool results. The start of a segment's name is enough. Where two names start the same way, the one that comes first in the bar wins.
 
 The keys for every surface are in [Use](docs/reference.md#use).
 

@@ -7,7 +7,7 @@ While the pane has the keyboard, keys move in it and press its controls. The ter
 - `key-move` terminal: `j`, `k` and the arrows move the ring row by row; desktop: Tab and Shift+Tab move the focus.
 - `key-open` Enter opens the row with the ring; terminal: a digit opens that row.
 - `key-letters` `b` back, `s` sort, `r` refresh, `x` close (and `n`, `p`, `f`, `v`, `c`, `m` at their levels).
-- `key-escape` `Esc` gives the keyboard back: the controls lose their keys and a hint line shows.
+- `key-escape` `Esc` gives the keyboard back. Terminal: the controls lose their keys and a hint line shows. Desktop: the key caps stay, and the hint line shows only after the window loses and regains the focus.
 - `key-regain` `/ctx` on an open pane gives it the keyboard again.
 
 ## How to get to it (user POV)
@@ -36,7 +36,7 @@ Desktop (partly proven on 2026-11-24):
 - **Give the pane the keyboard.** After `/ctx` (two Returns) the keyboard stays in the composer: an Enter there did not open a row. Pixel-click the pane's text, for example the line `All numbers are estimates.`.
 - **Letter.** `press_key` `x` with `delivery_mode: "foreground"`: the pane closed (proven). Use letters whose effect is visible: `b` at level 2, `s` in Your prompts (`Newest first` ↔ `Largest first`), `x`.
 - **Tab and Enter.** `press_key` `tab` and `return` (foreground) showed no visible focus ring and opened no row in pictures. Not proven; report as not checked, or hand the user the lines of the desktop checklist in `docs/e2e.md`.
-- **Escape.** Not tried yet. Expected: the line `Click the pane for keys` shows, and the key caps stay on the controls.
+- **Escape.** `press_key` `escape` (foreground) gives the keyboard back to the composer: a following `x` types there (proven 2026-11-24). The line `Click the pane for keys` does not show then: the desktop app keeps reporting the pane as having the keyboard, also after a redraw from a new prompt. It shows after the window loses and regains the focus. Check the keyboard's place with a letter, never with the hint line.
 
 ## Gotchas
 

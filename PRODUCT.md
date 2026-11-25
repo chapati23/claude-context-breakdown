@@ -79,7 +79,7 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 
 ## Evidence on Hand
 
-- Four pictures of real sessions (Claude Code 2.1.328, and 2.1.327 for the bar; Ghostty, 200k window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png). They predate 0.11.0: the bar's legend in them gives a percent of what is used, not tokens.
+- Four pictures of one real session (mod 0.11.1, Claude Code 2.1.332, a terminal, 1M window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png).
 - [README.md](README.md): the behaviour of the bar and the pane, the keys per surface, how the numbers are made, and the limits.
 - [docs/adr/0001-build-as-a-mod-on-the-early-access-api.md](docs/adr/0001-build-as-a-mod-on-the-early-access-api.md): the options that were rejected, with reasons.
 - Tests under `tests/`, with golden end-to-end journeys under `tests/e2e/` and their description in [docs/e2e.md](docs/e2e.md).

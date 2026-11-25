@@ -42,7 +42,7 @@ Success is adoption (confirmed 2026-11-19): other Claude Code users install the 
   - **Mobile app and editor.** The bar is a picture. Only the total is a button. The pane is the desktop app's grid.
 - The user opens the pane with `/ctx`, with `/ctx <segment>`, or with a click on the bar.
 - Users install and update the mod through a marketplace. A release is a merge to `main` that raises the version. The rule is in "Releases" in [AGENTS.md](AGENTS.md).
-- Not decided: which surface wins when a design cannot serve all four. The evidence points to the terminal first and the desktop app second: the terminal has the most keys, and the README pictures show the terminal.
+- Not decided: which surface wins when a design cannot serve all four. The evidence points to the terminal first and the desktop app second: the terminal has the most keys. The README serves terminal and desktop-app users with equal standing (the maintainer's choice on 2026-11-25): both install paths at the top, a picture of each, and one table of the differences.
 
 ## Capabilities and Constraints
 
@@ -80,12 +80,13 @@ Not decided: when the version becomes 1.0.0. That step is the maintainer's decis
 ## Evidence on Hand
 
 - Four pictures of one real session (mod 0.11.1, Claude Code 2.1.332, a terminal, 1M window): [docs/img/overview.png](docs/img/overview.png), [docs/img/bar.png](docs/img/bar.png), [docs/img/pane-items.png](docs/img/pane-items.png), [docs/img/pane-content.png](docs/img/pane-content.png).
+- Two pictures of the desktop app (mod 0.11.1, 2026-11-25, a 1M window; the conversation text blanked out): [docs/img/desktop-overview.png](docs/img/desktop-overview.png), [docs/img/desktop-items.png](docs/img/desktop-items.png).
 - The social preview card, [docs/img/social-preview.png](docs/img/social-preview.png) (1280 by 640 px): the logo on its own navy, the README's tagline, and real crops of the pane and the bar from the same session as the four pictures. It adds no figure or claim that the README lacks.
 - [README.md](README.md): what the mod is, what it shows, how to install and update it, and what is safe about it.
 - [docs/reference.md](docs/reference.md): the behaviour of the bar and the pane, the keys per surface, how the numbers are made, and the limits.
 - [docs/adr/0001-build-as-a-mod-on-the-early-access-api.md](docs/adr/0001-build-as-a-mod-on-the-early-access-api.md): the options that were rejected, with reasons.
 - Tests under `tests/`, with golden end-to-end journeys under `tests/e2e/` and their description in [docs/e2e.md](docs/e2e.md).
-- Absent, and not to be invented: user counts, install figures, testimonials, benchmarks against other mods, pictures of the desktop app, the mobile app or the editor, and pictures of a light theme.
+- Absent, and not to be invented: user counts, install figures, testimonials, benchmarks against other mods, pictures of the mobile app or the editor, and pictures of a light theme.
 
 ## Product Principles
 

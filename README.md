@@ -6,26 +6,33 @@
 
 <p align="center">
   <strong>See what fills your Claude Code context window.</strong><br>
-  A bar above your prompt shows the whole window. Open a segment, then one of its items, to read the text the model received.
+  A bar above your prompt shows the whole window. Open a segment, then one of its items, to read the text the model received.<br>
+  For Claude Code in a terminal and in the Claude desktop app.
 </p>
 
-To try it, type this at the prompt of a Claude Code session in a terminal. You need Claude Code 2.1.287 or newer.
+**In a terminal**, type this at the prompt of a Claude Code session:
 
 ```
 /plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-The bar appears after the next model response. The mod also runs in the Claude desktop app. There `/plugin` does not run, and [the install steps](#install) show the menu path.
+**In the Claude desktop app**, click **Plugins** in the sidebar, then **Add**, then **Add marketplace**, and enter `chapati23/claude-context-breakdown`. Then install **Context breakdown** from it, and start a new local session (**This computer**).
+
+You need Claude Code 2.1.287 or newer. The bar appears after the next model response.
 
 ![A Claude Code session in a terminal. The bar is above the prompt. The pane beside the conversation lists every segment with its size.](docs/img/overview.png)
 
-*The bar is the row above the prompt, at the bottom left. The pane on the right opens with `/ctx`.*
+*In a terminal: the bar is the row above the prompt, at the bottom left. The pane on the right opens with `/ctx`.*
+
+![A Claude Code session in the Claude desktop app. The bar is above the prompt box. The pane on the right lists every segment with its size, its share and the tokens it added. The conversation text is blanked out.](docs/img/desktop-overview.png)
+
+*In the Claude desktop app: the bar stands above the prompt box. The pane on the right opens with `/ctx` or with a click on the bar.*
 
 ## From "how full?" to "full of what?"
 
 Claude Code's `/context` lists what is in the window, but only when you ask. It has one row, Messages, for the whole conversation. When a session grows, that row does not say which tool, which file read or which skill grew it.
 
-`context-breakdown` is a Claude Code mod that keeps the answer on screen. In the session above, 222k of the 1M tokens are in use. The bar shows at a glance that tool results fill most of it. `/ctx tool` opens them: eight file reads, 168k tokens in all, and the largest read alone takes 31k.
+`context-breakdown` is a Claude Code mod that keeps the answer on screen. In the terminal session above, 222k of the 1M tokens are in use. The bar shows at a glance that tool results fill most of it. `/ctx tool` opens them: eight file reads, 168k tokens in all, and the largest read alone takes 31k.
 
 ## What you get
 
@@ -35,7 +42,7 @@ The bar is one row above the prompt. Its full length is the window. Each coloure
 
 ![The bar with the pointer on its last cell, which three small segments share. A chip beside the cell reads "System notifications 11k + Your prompts 135 + Claude output 1.3k".](docs/img/bar.png)
 
-In Claude Code's [fullscreen rendering](https://code.claude.com/docs/en/fullscreen) (`/tui fullscreen` switches it on), point at a segment to see its name and size in a chip, as above, and click it to open its items. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`.
+Point at a segment to see its name and size, and click it to open its items. In a terminal, this needs Claude Code's [fullscreen rendering](https://code.claude.com/docs/en/fullscreen) (`/tui fullscreen` switches it on), and the name and size show in a chip, as above. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`. In the desktop app, pointing and clicking need no setting: the other segments dim, and the segment's name and size take the place of the legend. A cell that several small segments share opens the list of segments instead. If the app cannot run the bar's module, the bar becomes a picture; then click the total or type `/ctx`.
 
 Neighbouring segments differ in lightness as well as hue. [A test](tests/palette.test.ts) checks that they stay apart for normal vision and for simulated deuteranopia and protanopia, the two common forms of colour blindness.
 
@@ -61,43 +68,68 @@ After a prompt, the pane gets an `added` column: the tokens each segment gained 
 
 ### Where your setup spends tokens
 
-Baseline content costs tokens before you type anything. Open Global instructions or Project instructions to see each file and its size. The pane also has a block for content outside the window: tool schemas that Claude Code loads on demand. In the session above, that is `MCP tools · 10 servers, 227 tools`, 88k tokens once loaded. Open that row to list the servers, largest first. When Claude Code loads a tool, its schema moves into the window, into MCP tools and instructions.
+Baseline content costs tokens before you type anything. Open Global instructions or Project instructions to see each file and its size. The pane also has a block for content outside the window: tool schemas that Claude Code loads on demand. In the terminal session above, that is `MCP tools · 10 servers, 227 tools`, 88k tokens once loaded. Open that row to list the servers, largest first. When Claude Code loads a tool, its schema moves into the window, into MCP tools and instructions.
+
+## Terminal or desktop app
+
+The mod shows the same segments, items and text in both. The pane in the desktop app is a grid of native buttons, and the app's own keys move the focus:
+
+![The items of Tool results in the desktop app: six tool calls, largest first, with key caps on the Open, Back, Newest first, Refresh and Close controls.](docs/img/desktop-items.png)
+
+| To | In a terminal | In the desktop app |
+| --- | --- | --- |
+| Open the pane | `/ctx`, or in fullscreen rendering a click on a bar segment | `/ctx`, or a click on the bar |
+| See a segment's name and size | Point at it in fullscreen rendering, or press `ctrl+x`, then `tab` | Point at it |
+| Move in the pane | `j`, `k`, `↓`, `↑`, `tab` | `tab`, `shift+tab` |
+| Open a row | Its digit, `enter`, or a click | `enter`, or a click |
+| Use a control, such as `b` for Back | Press its key, or click it | Press its key, or click it |
+| Give the keyboard back to the prompt | `Esc` | `Esc` |
+| Install, remove | `/plugin` at the prompt, or `claude plugin` in a shell | **Plugins** in the sidebar |
+| Update | `/plugin`, or `claude plugin` in a shell | `claude plugin` in a shell; see [Update](#update) |
+
+The keys work while the pane has the keyboard. `/ctx` gives it the keyboard. After a click on the bar, click the pane's text first. [Use](docs/reference.md#use) lists every key on every surface.
 
 ## Safe to try
 
 - **Local, and it writes no file.** The mod makes no API request, sends no content anywhere and never submits a prompt. It reads a file from disk only for the item you have open. Two keys act, and only when you press them: `c` copies the path of the open file, and `m` puts its `@path` into your prompt. The code that runs is in [`hooks/`](hooks).
 - **Labelled estimates.** Every figure is an estimate, and the pane says so: `All numbers are estimates.`
 - **One row, your theme.** The bar is one row above the prompt, and the pane takes space only while it is open. The mod has one palette for dark themes and one for light themes, and your Claude Code theme picks one.
-- **Easy to remove.** `claude plugin uninstall context-breakdown@claude-context-breakdown` removes a user-scope install. Add `--scope project` or `--scope local` for the other scopes.
+- **Easy to remove.** In a shell, `claude plugin uninstall context-breakdown@claude-context-breakdown` removes a user-scope install. Add `--scope project` or `--scope local` for the other scopes. In the desktop app, open **Plugins** in the sidebar, then **Show all** next to Your plugins, then **⋯** next to Context breakdown, and choose **Remove**.
 
 ## Install
 
-You need Claude Code 2.1.287 or newer. At the prompt of a terminal session:
+You need Claude Code 2.1.287 or newer. An install at the user scope loads the mod in all your projects, in the terminal and in the local sessions of the desktop app.
+
+### In a terminal
+
+At the prompt of a Claude Code session:
 
 ```
 /plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-Answer `y` to add the marketplace, then choose a scope. The user scope loads the mod in all your projects. The bar appears after the next model response.
+Answer `y` to add the marketplace, then choose a scope. The bar appears after the next model response.
 
-From a shell:
+From a shell, with Claude Code 2.1.292 or newer:
 
 ```
 claude plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-In the Claude desktop app, `/plugin` does not run. Click **+** next to the prompt box, then **Plugins**, then **Add marketplace** with `chapati23/claude-context-breakdown`, then **Add plugin**. An install at the user scope from a terminal also loads in the local sessions of the desktop app. Start a new session to see the bar.
+### In the Claude desktop app
 
-In the mobile app and in the editor, the bar is a picture, and only the total is a button: a click on it opens the segments. [Surfaces](docs/reference.md#surfaces) describes what each one draws.
+Click **Plugins** in the sidebar, then **Add**, then **Add marketplace**. Enter `chapati23/claude-context-breakdown`, then install **Context breakdown** from the marketplace. Start a new session to see the bar.
+
+### In the mobile app and in the editor
+
+The bar is a picture, and only the total is a button: a click on it opens the segments. [Surfaces](docs/reference.md#surfaces) describes what each one draws.
 
 ## Try it
 
 1. Send any prompt. The bar appears after the response.
 2. Type `/ctx`. The pane opens and takes the keyboard.
-3. In a terminal, press the digit before a row to open it. On every surface, a click on a row opens it. Press `b` to go back and `x` to close. `Esc` gives the keyboard back to the prompt.
+3. Click a row to open it, or use the keys in [Terminal or desktop app](#terminal-or-desktop-app). Press `b` to go back and `x` to close. `Esc` gives the keyboard back to the prompt.
 4. Type `/ctx tool` to open the items of Tool results. The start of a segment's name is enough. Where two names start the same way, the one that comes first in the bar wins.
-
-The keys for every surface are in [Use](docs/reference.md#use).
 
 ## How it works
 
@@ -110,13 +142,16 @@ The keys for every surface are in [Use](docs/reference.md#use).
 - **Early version.** This is a 0.x release. Claude Code's mods API is early access and can change between releases, and a Claude Code update can break the mod.
 - **Main session only.** The mod does not show the windows of subagents.
 - **No history.** It shows how the window grew since your last prompt, and keeps nothing older.
-- **The pictures show a terminal.** They are one session: mod 0.11.1, Claude Code 2.1.332, a 1M window. The desktop app, the editor and the mobile app draw the same pane, which differs from the terminal's pane in its look and its keys.
+- **Colours in the desktop app.** The bar and the pane take their palette from Claude Code's theme setting, not from the app's light or dark appearance.
+- **The pictures.** The terminal pictures show one session: mod 0.11.1, Claude Code 2.1.332, a 1M window. The desktop app pictures show another session with mod 0.11.1, taken on 25 November 2026; its conversation text is blanked out. The editor and the mobile app draw the desktop app's pane.
 
 [Limits](docs/reference.md#limits) lists the rest.
 
 ## Update
 
-By default, Claude Code does not update this mod by itself. From a shell:
+By default, Claude Code does not update this mod by itself.
+
+From a shell:
 
 ```
 claude plugin marketplace update claude-context-breakdown
@@ -125,7 +160,9 @@ claude plugin update context-breakdown@claude-context-breakdown
 
 Then restart Claude Code. The first command reads the newest version from GitHub, and the second one installs it.
 
-To get new versions without these commands, turn on auto-update for the marketplace: run `/plugin`, open **Marketplaces**, choose `claude-context-breakdown`, and choose **Enable auto-update**. Claude Code then updates the mod in the background and tells you when to reload.
+To get new versions without these commands, turn on auto-update for the marketplace: run `/plugin` in a terminal session, open **Marketplaces**, choose `claude-context-breakdown`, and choose **Enable auto-update**. Claude Code then updates the mod in the background and tells you when to reload.
+
+The desktop app has no control that installs a new version of this mod. Its **Check for updates** (**Plugins** in the sidebar, **Add**, **Manage marketplaces**, **⋯**) refreshes the marketplace's list only. Run the two shell commands above, or turn on auto-update in a terminal session, then start a new desktop session.
 
 ## More
 

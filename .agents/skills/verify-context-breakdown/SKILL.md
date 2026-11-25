@@ -35,11 +35,13 @@ claude plugin validate . && claude plugin test . && npx --yes -p typescript@5.9.
 ### Launch
 
 ```sh
-scripts/tui.sh start <run> [--worktree | --ref <git-ref>] [--other] [--size 110x24] [--model haiku]
+scripts/tui.sh start <run> [--worktree | --ref <git-ref>] [--other] [--size 110x24] [--model haiku] [--cwd <dir>] [--truecolor]
 ```
 
 - `<run>`: a short name, `[a-z0-9-]`, new for each launch: `start` refuses a name whose evidence folder exists, so old captures never pair with a new build. Each run is isolated: its own tmux server (`-L vctx-<hash of the checkout path>-<run>`), its own frozen copy of the mod in a temp folder, its own empty working folder. Several runs can go side by side (for example `before` with `--ref origin/main` and `after` with `--worktree`).
 - `--worktree` (default) copies the checkout as it is, uncommitted edits included. `--ref` copies a commit with `git archive`.
+- `--cwd` starts the session in that folder in place of the empty one, for example a fresh clone of the repository for the README pictures. `start` accepts the folder-trust question for that folder too, so name only a folder you made for the run. `stop` does not delete it.
+- `--truecolor` hides tmux from Claude Code, so it sends the theme's 24-bit colours in place of 256 colours. Use it for pictures; the checks do not need it.
 - `--other` also loads `fixtures/othermod`, a probe mod that draws one band row (`OTHER MOD ROW · this row comes first`). Use it for the band order.
 - Ready means: the `❯` prompt and exactly one bar line show. The bar line matches `[0-9.]+[kM]?/[0-9.]+[kM] +<?[0-9]+%` (for example `69k/1M 7%`, or `4k/1M <1%`). `start` waits about 60 s, accepts the folder-trust question for its own scratch folder, and prints `ready: run <run>, <build>`. On a timeout it prints the screen; read it, then `stop`.
 - `--plugin-dir` takes the place of the installed copy for this session, so the installed copy does not draw a second bar. `doctor` checks this.

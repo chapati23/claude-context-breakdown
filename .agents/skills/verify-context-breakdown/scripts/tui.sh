@@ -3,7 +3,7 @@
 # private tmux server. Run every subcommand OUTSIDE the agent sandbox: the
 # sandbox blocks the tmux socket.
 #
-#   tui.sh start   <run> [--ref <git-ref> | --worktree] [--other] [--size 110x24] [--model haiku]
+#   tui.sh start   <run> [--ref <git-ref> | --worktree] [--other] [--size 110x24] [--model haiku] [--cwd <dir>] [--truecolor]
 #   tui.sh send    <run> "<text>"          type literal text, then Enter
 #   tui.sh keys    <run> <tmux key>...     e.g. Tab Escape Enter Down j 2 b
 #   tui.sh wait    <run> "<ERE>" [secs]    wait until the screen matches (default 60 s)
@@ -14,7 +14,7 @@
 #
 # <run> is a short name of your choice ([a-z0-9-]), new for each start. Each run has its own tmux
 # server (-L vctx-<checkout hash>-<run>), its own frozen build of the mod and its own empty
-# working folder, so several runs can go side by side. Evidence goes to
+# working folder (or the folder that --cwd names), so several runs can go side by side. Evidence goes to
 # <repo>/.verify/<run>/ (git ignores .verify/) and survives `stop`.
 set -euo pipefail
 
@@ -46,7 +46,7 @@ wait_for() { # <ERE> <secs>
 
 case $cmd in
 start)
-  src=worktree other=0 size=110x24 model=haiku ref=""
+  src=worktree other=0 size=110x24 model=haiku ref="" cwd="" truecolor=0
   while [ $# -gt 0 ]; do
     case $1 in
       --ref) src=ref ref=$2; shift 2 ;;
@@ -54,16 +54,20 @@ start)
       --other) other=1; shift ;;
       --size) size=$2; shift 2 ;;
       --model) model=$2; shift 2 ;;
+      --cwd) cwd=$2; shift 2 ;;
+      --truecolor) truecolor=1; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
   t has-session 2>/dev/null && die "run $run is already up; stop it first"
+  [ -z "$cwd" ] || [ -d "$cwd" ] || die "--cwd $cwd is not a folder"
   # One evidence folder per launch: a reused name could pair old captures with a new build.
   [ -e "$EVID" ] && die "evidence for run $run exists in $EVID; pick a new run name"
   root=$(mktemp -d "${TMPDIR:-/tmp}/vctx-$run.XXXXXX")
   trap 'rm -rf "$root"' ERR
   build=$root/build work=$root/work
   mkdir -p "$build" "$work"
+  [ -z "$cwd" ] || work=$(CDPATH= cd -- "$cwd" && pwd)
   if [ "$src" = ref ]; then
     git -C "$REPO" archive "$ref" | tar -x -C "$build"
     label="$ref ($(git -C "$REPO" rev-parse --short "$ref"))"
@@ -91,12 +95,20 @@ started: $(date '+%Y-%m-%d %H:%M:%S %z')
 root: $root
 EOF
   # Separate arguments: tmux runs them without a shell, so paths with spaces stay whole.
+  # Inside tmux, Claude Code sends 256 colours. --truecolor hides tmux from it, so it sends
+  # the theme's 24-bit colours, as in a terminal such as Ghostty (for the README pictures).
+  envx=(env FORCE_COLOR=3 COLORTERM=truecolor)
+  [ $truecolor = 1 ] && envx=(env -u TMUX FORCE_COLOR=3 COLORTERM=truecolor TERM=xterm-256color)
   t new-session -d -x "${size%x*}" -y "${size#*x}" -c "$work" \
-    env FORCE_COLOR=3 COLORTERM=truecolor claude "${args[@]}"
-  # A new folder can ask for trust first. The folder is our own empty scratch folder.
+    "${envx[@]}" claude "${args[@]}"
+  # A new folder can ask for trust first. The folder is our own empty scratch folder, or the one --cwd names.
   for _ in $(seq 1 60); do
     s=$(screen 2>/dev/null || true)
-    if grep -q 'trust' <<<"$s" && grep -q 'Yes' <<<"$s"; then t send-keys Enter; sleep 1; fi
+    if grep -q 'trust' <<<"$s" && grep -q 'Yes' <<<"$s"; then
+      # Claude Code 2.1.332 puts "No, exit" first for a folder with files in it.
+      if grep -q '❯ No' <<<"$s"; then t send-keys Down; sleep 0.5; fi
+      t send-keys Enter; sleep 1
+    fi
     grep -Eq "$BAR_RE" <<<"$s" && grep -q '❯' <<<"$s" && break
     sleep 1
   done

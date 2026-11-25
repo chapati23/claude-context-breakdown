@@ -16,7 +16,7 @@
 /plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-**In the Claude desktop app**, click **Plugins** in the sidebar, then **Add**, then **Add marketplace**, and enter `chapati23/claude-context-breakdown`. Then install **Context breakdown** from it.
+**In the Claude desktop app**, click **Plugins** in the sidebar, then **Add**, then **Add marketplace**, and enter `chapati23/claude-context-breakdown`. Then install **Context breakdown** from it, and start a new local session (**This computer**).
 
 You need Claude Code 2.1.287 or newer. The bar appears after the next model response.
 
@@ -42,7 +42,7 @@ The bar is one row above the prompt. Its full length is the window. Each coloure
 
 ![The bar with the pointer on its last cell, which three small segments share. A chip beside the cell reads "System notifications 11k + Your prompts 135 + Claude output 1.3k".](docs/img/bar.png)
 
-Point at a segment to see its name and size, and click it to open its items. In a terminal, this needs Claude Code's [fullscreen rendering](https://code.claude.com/docs/en/fullscreen) (`/tui fullscreen` switches it on), and the name and size show in a chip, as above. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`. In the desktop app, pointing and clicking always work: the other segments dim, and the segment's name and size take the place of the legend.
+Point at a segment to see its name and size, and click it to open its items. In a terminal, this needs Claude Code's [fullscreen rendering](https://code.claude.com/docs/en/fullscreen) (`/tui fullscreen` switches it on), and the name and size show in a chip, as above. With the keyboard, press `ctrl+x`, then `tab`, and move along the bar with `tab`. In the desktop app, pointing and clicking need no setting: the other segments dim, and the segment's name and size take the place of the legend. A cell that several small segments share opens the list of segments instead. If the app cannot run the bar's module, the bar becomes a picture; then click the total or type `/ctx`.
 
 Neighbouring segments differ in lightness as well as hue. [A test](tests/palette.test.ts) checks that they stay apart for normal vision and for simulated deuteranopia and protanopia, the two common forms of colour blindness.
 
@@ -84,7 +84,8 @@ The mod shows the same segments, items and text in both. The pane in the desktop
 | Open a row | Its digit, `enter`, or a click | `enter`, or a click |
 | Use a control, such as `b` for Back | Press its key, or click it | Press its key, or click it |
 | Give the keyboard back to the prompt | `Esc` | `Esc` |
-| Install, update, remove | `/plugin` at the prompt, or `claude plugin` in a shell | **Plugins** in the sidebar |
+| Install, remove | `/plugin` at the prompt, or `claude plugin` in a shell | **Plugins** in the sidebar |
+| Update | `/plugin`, or `claude plugin` in a shell | `claude plugin` in a shell; see [Update](#update) |
 
 The keys work while the pane has the keyboard. `/ctx` gives it the keyboard. After a click on the bar, click the pane's text first. [Use](docs/reference.md#use) lists every key on every surface.
 
@@ -161,7 +162,7 @@ Then restart Claude Code. The first command reads the newest version from GitHub
 
 To get new versions without these commands, turn on auto-update for the marketplace: run `/plugin` in a terminal session, open **Marketplaces**, choose `claude-context-breakdown`, and choose **Enable auto-update**. Claude Code then updates the mod in the background and tells you when to reload.
 
-In the desktop app, open **Plugins** in the sidebar, then **Add**, then **Manage marketplaces**. Choose **⋯** next to `claude-context-breakdown`, then **Check for updates**, and start a new session.
+The desktop app has no control that installs a new version of this mod. Its **Check for updates** (**Plugins** in the sidebar, **Add**, **Manage marketplaces**, **⋯**) refreshes the marketplace's list only. Run the two shell commands above, or turn on auto-update in a terminal session, then start a new desktop session.
 
 ## More
 

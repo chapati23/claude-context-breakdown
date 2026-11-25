@@ -52,7 +52,7 @@ CI runs the same script on every pull request and on every push to `main` (`.git
 The version has three numbers: `major.minor.patch`. Before 1.0.0:
 
 - Raise `minor` and set `patch` to 0 when the person sees new or changed behaviour: a new key, a new segment, a changed look, a changed figure. Example: 0.2.0 becomes 0.3.0.
-- Raise `patch` when the change only repairs behaviour that the README already describes, or when the person can see no difference. Example: 0.2.0 becomes 0.2.1.
+- Raise `patch` when the change only repairs behaviour that the README or docs/reference.md already describes, or when the person can see no difference. Example: 0.2.0 becomes 0.2.1.
 - If you cannot tell which one applies, raise `minor`.
 
 The step to 1.0.0 is the maintainer's decision. Do not take it without their instruction.

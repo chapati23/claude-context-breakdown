@@ -51,13 +51,13 @@ Open a segment to list its items: each tool call, each instruction file, each pr
 
 ![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](docs/img/pane-items.png)
 
-Open an item to read its text as loaded, which is the text the model received. That can differ from the file on disk now, because you can edit a file after Claude Code has read it. For an item that has a file, `v` switches to the file on disk. The system prompt has no finer split, because Claude Code does not report one, so its rows show token counts only. This is a project instruction file:
+Open an item to read its text as loaded, which is the text the model received. That can differ from the file on disk now, because you can edit a file after Claude Code has read it. For an item that has a file, `v` switches to the file on disk. Some rows show token counts only, for example the system prompt, which Claude Code does not report in finer parts, and each loaded MCP tool. This is a project instruction file:
 
 ![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](docs/img/pane-content.png)
 
 ### What your last prompt added
 
-After a prompt, the pane gets an `added` column: the tokens each segment gained since you sent that prompt, for example `+252` next to Claude output in the first picture. A segment that did not grow leaves its cell blank. The column shows only while a segment has grown and no figure is an estimate, and in a terminal it needs a pane about 60 columns wide. [The reference](docs/reference.md#use) lists the conditions.
+After a prompt, the pane gets an `added` column: the tokens each segment gained since you sent that prompt, for example `+252` next to Claude output in the first picture. A segment that did not grow leaves its cell blank. The column shows only while a segment has grown and no figure carries the `~` mark, and in a terminal it needs a pane about 60 columns wide. [The reference](docs/reference.md#use) lists the conditions.
 
 ### Where your setup spends tokens
 
@@ -67,7 +67,7 @@ Baseline content costs tokens before you type anything. Open Global instructions
 
 - **Local, and it writes no file.** The mod makes no API request, sends no content anywhere and never submits a prompt. It reads a file from disk only for the item you have open. Two keys act, and only when you press them: `c` copies the path of the open file, and `m` puts its `@path` into your prompt. The code that runs is in [`hooks/`](hooks).
 - **Labelled estimates.** Every figure is an estimate, and the pane says so: `All numbers are estimates.`
-- **One row, your theme.** The bar is one row above the prompt, and the pane takes space only while it is open. The colours come from your Claude Code theme.
+- **One row, your theme.** The bar is one row above the prompt, and the pane takes space only while it is open. The mod has one palette for dark themes and one for light themes, and your Claude Code theme picks one.
 - **Easy to remove.** `claude plugin uninstall context-breakdown@claude-context-breakdown` removes a user-scope install. Add `--scope project` or `--scope local` for the other scopes.
 
 ## Install
@@ -78,7 +78,7 @@ You need Claude Code 2.1.287 or newer. At the prompt of a terminal session:
 /plugin install context-breakdown --marketplace chapati23/claude-context-breakdown
 ```
 
-Answer `y` to add the marketplace, then choose a scope. The user scope makes the mod available in all your projects. The bar appears after the next model response.
+Answer `y` to add the marketplace, then choose a scope. The user scope loads the mod in all your projects. The bar appears after the next model response.
 
 From a shell:
 
@@ -88,7 +88,7 @@ claude plugin install context-breakdown --marketplace chapati23/claude-context-b
 
 In the Claude desktop app, `/plugin` does not run. Click **+** next to the prompt box, then **Plugins**, then **Add marketplace** with `chapati23/claude-context-breakdown`, then **Add plugin**. An install at the user scope from a terminal also loads in the local sessions of the desktop app. Start a new session to see the bar.
 
-In the mobile app and in the editor, the bar is drawn as an image, and only the total is a button: a click on it opens the segments. [Surfaces](docs/reference.md#surfaces) describes what each one draws.
+In the mobile app and in the editor, the bar is a picture, and only the total is a button: a click on it opens the segments. [Surfaces](docs/reference.md#surfaces) describes what each one draws.
 
 ## Try it
 
@@ -102,15 +102,15 @@ The keys for every surface are in [Use](docs/reference.md#use).
 ## How it works
 
 - A mod is a Claude Code plugin that draws inside the interface. This one uses Claude Code's mods API, which is in early access. [The decision record](docs/adr/0001-build-as-a-mod-on-the-early-access-api.md) says why a mod, and not a status line, a transcript parser or a proxy.
-- The mod reads the breakdown that Claude Code builds for `/context`, and the messages of your session. It sorts them into segments and draws the bar and the pane.
-- The conversation split is the mod's own estimate: it counts the characters of each kind of content and applies those shares to Claude Code's total for the conversation. The total and the baseline segments are Claude Code's own figures. [How the numbers are made](docs/reference.md#how-the-numbers-are-made) has the details.
+- The mod reads Claude Code's summary breakdown and your conversation. It sorts them into segments and draws the bar and the pane.
+- The conversation split is the mod's own estimate: it counts the characters of each kind of content and applies those shares to Claude Code's total for the conversation. The total and the baseline segments are Claude Code's own figures, except directly after a compaction: until the next model response, the mod estimates the total and marks it with `~`. A baseline segment can differ from `/context` by a few hundred tokens, because `/context` can count with the API and the summary estimates locally. [How the numbers are made](docs/reference.md#how-the-numbers-are-made) has the details.
 
 ## Good to know
 
 - **Early version.** This is a 0.x release. Claude Code's mods API is early access and can change between releases, and a Claude Code update can break the mod.
 - **Main session only.** The mod does not show the windows of subagents.
 - **No history.** It shows how the window grew since your last prompt, and keeps nothing older.
-- **The pictures show a terminal.** They are one session: mod 0.11.1, Claude Code 2.1.332, a 1M window. The desktop app, the editor and the mobile app draw the same pane with their own look and keys.
+- **The pictures show a terminal.** They are one session: mod 0.11.1, Claude Code 2.1.332, a 1M window. The desktop app, the editor and the mobile app draw the same pane, which differs from the terminal's pane in its look and its keys.
 
 [Limits](docs/reference.md#limits) lists the rest.
 

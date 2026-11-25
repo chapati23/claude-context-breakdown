@@ -91,9 +91,13 @@ The bar is always visible above the prompt. When other mods also draw rows there
 2. **Items.** The concrete things inside one segment: each instruction file, each tool result, each skill body, each prompt. The `MCP tools` row of Not loaded opens a list of the same kind: the MCP servers whose tools are not loaded.
 3. **Content.** The text of one item as loaded, which is the text the model received.
 
-| Items of one segment | Content of one item |
-| --- | --- |
-| ![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](img/pane-items.png) | ![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](img/pane-content.png) |
+The items of one segment:
+
+![The items of Tool results, largest first. Each row is one tool call with its tokens and its share of the segment.](img/pane-items.png)
+
+The content of one item:
+
+![The content of a project instruction file in the formatted view, with the keys of the content level above the text.](img/pane-content.png)
 
 Open the pane:
 
